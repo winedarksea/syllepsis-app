@@ -6,7 +6,7 @@ LLMs are widely integrated but **fully optional**. All core functionality works 
 
 - **Fact checking**: throw out a hypothesis, then have an LLM (prompted for groundedness) assess what is scientifically known. Fact check results are stored as [Commentary](object-types.md#commentary) nodes with a status enum (`strong_evidence`, `some_questionable_points`, `many_questionable_points`, `full_failure`).
 - **Devil's advocate**: a prompt type that specifically seeks potential flaws in an argument.
-- **Summarization / description generation**: generate a summary from full text or expand a summary into full paragraphs (guided by a style card and metadata).
+- **Summarization / description generation**: generate a summary from full text or expand a summary into full paragraphs (guided by a style card and metadata). A generic "create summary" button is the default; summary **format options** let the user instead prompt for a mnemonic form — an **acronym** (a memorable word/initialism from key points) or an **acrostic** (lines whose first letters spell a word). These are mnemonic aids for the [generative-learning goal](#generative-learning-goal) and pair naturally with cloze-deletion study (see [spoilers & cloze](object-types.md#storage-format)).
 - **Writing quality / grammar check**: stored as commentary with a status like `needs_rewrite` or `minor_issues`.
 - **Category suggestion**: combine clustering results with an LLM call to suggest new or refactored categories.
 - **Notes as LLM context**: surface selected notes to LLMs so users can ask questions grounded in their own knowledge base.

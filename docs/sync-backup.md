@@ -29,6 +29,14 @@ Near-real-time saves and cloud syncs use a CRDT library. Candidates:
 - Actively manage cloud conflict files: merge and delete (identified by UUID).
 - Implement mitigations to prevent infinite write loops.
 
+### Drawings and SVG
+[Drawings/SVG](object-types.md#drawings) are text (XML), so unlike raster images they *can* be diffed and merged — but CRDT-tracking arbitrary SVG geometry is messy (verbose path data, structural reordering produces conflict noise) and the CRDT layer is tuned for the note-text model. The decision:
+
+- **Geometry** (the SVG/drawing itself) is synced as a **file with a UUID sidecar**, like images — not in the live CRDT document. Because it is text, it still diffs cleanly at Git commit boundaries.
+- **Overlay anchors** (which note/category links to which point or region, and the coordinates) live in note metadata and the worlds registry, which **are** CRDT-tracked. This keeps the merge-sensitive, small, structured data in the CRDT layer and the heavy geometry in file sync.
+
+Open door: because app-authored drawings have a structure the app controls, simple in-app drawings *could* later be CRDT-tracked; imported third-party SVGs stay file-synced. See [open-questions.md](open-questions.md).
+
 ## Git Integration
 
 Git is a dependency but used differently from standard version control:

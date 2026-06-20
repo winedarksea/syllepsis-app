@@ -12,6 +12,8 @@ The markdown dialect is versioned with a field like `markdown_version: syllepsis
 
 `%%Your comment here%%` syntax adds comments that don't appear in rendered output.
 
+`||Your spoiler here||` syntax hides text behind a click-to-reveal in rendered output. The same syntax doubles as a **cloze deletion** for study/learning: in a study mode the hidden spans become blanks the user recalls before revealing. An optional hint and group id are supported — `||hidden|hint||` shows the hint in place of the blank, and `||c1::hidden||` groups deletions that reveal together (multiple `c1` spans reveal as one). This ties into the [generative-learning goal](llm-ai-features.md#generative-learning-goal).
+
 ## Storage Layout
 
 Each book is a **folder** on disk. Notes are markdown files within it, and book-level metadata lives in the same folder (see [Book-Level Metadata](#book-level-metadata)).
@@ -35,11 +37,17 @@ Pictures do not have an archive option — only delete (implemented as "mark for
 
 Crdt doesn't track images.
 
+A raster image can serve as the backdrop for an [image-backed world](spatial-worlds.md#worlds) and carry an overlay of note/category pins and regions. Because raster images don't scale like vector, the overlay must apply an explicit zoom/pan transform so pins stay anchored to the correct spot as the user zooms — SVG [drawings](#drawings) are preferred where clean zoom or named regions matter.
+
 ### Code Blocks
 A special text type. **Mermaid** diagrams (including Venn diagrams) are a special subtype that can render inline.
 
-### Drawings (future)
-A future object type for freehand/vector drawings, with built-in render-to-image so they can be embedded wherever a static image is expected. Related to the future drawing interface for book covers.
+### Drawings (SVG)
+An object type for vector drawings, stored as **SVG**. Includes built-in render-to-image so a drawing can be embedded wherever a static image is expected (and used for book covers).
+
+**Imported SVGs are treated as drawings** — there is no separate "imported vector image" type. The future in-app drawing tool will also emit SVG, so a hand-drawn graphic and an imported one are handled identically.
+
+Drawings are the **preferred backdrop for image-backed worlds** (floorplans, mind palaces): being vector, they zoom cleanly, and a named element (`id="kitchen"`) doubles as a clickable overlay region. See [spatial-worlds.md](spatial-worlds.md) for overlays and [sync-backup.md](sync-backup.md#drawings-and-svg) for how drawing geometry is synced (SVG is text, but not CRDT-tracked by default).
 
 ## Text Object Types
 
@@ -128,7 +136,14 @@ LLM response types are an extensible family: fact checks, devil's advocate (seek
 - **Future**: import/export of dates to/from an external calendar; see the [Timeline view](ui-views.md#timeline-view-future)
 
 ### Location Metadata
-Any object can link a location as a plain text string. A separate CSV lookup table maps text → lat/long for map views. The lookup table references a "world" field (default: Earth; designed to support fantasy maps or other planets in the future).
+Any object can link a location. The simplest form is a plain text string resolved through a CSV lookup table that maps text → coordinates. The lookup table carries a `world` field (default: Earth; designed to support fantasy maps, other planets, or image-backed planes like floorplans).
+
+Beyond the plain-text form, location is a first-class spatial concept:
+- **Inline `loc:` syntax** places a coordinate mid-note or in a table cell (e.g. `loc:47.6062,-122.3321` for Earth, `loc:firstfloor/0.42,0.31` for an image-backed world). Typing `loc:` opens a location picker, mirroring how `due:` opens a calendar.
+- **Note-level `location`** in frontmatter pins an entire note to a coordinate.
+- A coordinate's **world** can be real Earth lat/long or a generic world — and a world can just be an image (e.g. a floorplan), letting notes be tagged onto a drawing or photo.
+
+See [spatial-worlds.md](spatial-worlds.md) for the full model (worlds, overlays, the `loc:` grammar, and the future map view).
 
 ### Authorship
 Lightweight multi-author tracking:

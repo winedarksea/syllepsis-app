@@ -63,13 +63,14 @@ This means that pictures, tables, and so on are not put strictly into text notes
 Tables have special subtypes, decision matrices and pro/con tables.
 Code blocks as a special text type, with Mermaid a special type of code block that can render the diagram, including Venn diagrams, a type of mermaid diagram.
 Quotes (ie famous people's sayings) as a special type, includes links
-In the future, a "drawing" type allowing drawings with built in render to image where needed
+A "drawing" type (stored as SVG) allowing drawings with built in render to image where needed. Imported SVGs are treated as drawings (no separate type); the future in-app drawing tool emits SVG too, so both share the same overlay/anchor tooling and are the preferred backdrop for image-backed worlds. SVG is text so it diffs in git, but drawing geometry is file-synced (UUID sidecar), NOT CRDT-tracked by default — only the small overlay anchors (note↔coordinate links) are CRDT-tracked. Whether simple app-authored drawings could later be CRDT-tracked is an open question.
 Note IDs (auto generated) should be human readable to some extent, for example quote:author-textsource for quotes (if author and sourcespecified), reference:author-source or some such.
 
 Examples apps worth referencing for comparison: LogSeq, Obsidian, Tana, Trillium, Plottr, Mem
 
 Smaller Implementation Notes:
 Allow use of double percents %% Your comment here %% to add comments that don't show in rendered view of text markdown.
+Allow ||spoiler|| syntax sugar for click-to-reveal spoiler text. The same spans double as cloze deletions for study/learning (hidden in a study mode, recalled then revealed). Optional hint and group: ||hidden|hint|| and ||c1::hidden|| to group deletions that reveal together.
 Book level metadata: preferred language, name, location (for example, for the house, the city of construction for LLMs to be able to lookup relevant construction code). Book Level metadata also stored as a markdown file.
 Likely each book is a folder in storage. We could maybe have subfolders here, if their notes are sorted in book view and then store notes if sorted into their main category as a subfolder.
 Add icons to each book so it is prettier. This is called the "cover" and in the long term might allow a drawing interface to create (for now just an image load, supporting SVG, JPG, PNG). Also allow icons for categories.
@@ -119,6 +120,7 @@ exemplars:
 Text Objects and General Metadata:
 One key idea is that text objects have two "views" of the same concept: a summary and a full text description (ie a paragraph view, although not necessarily full paragraphs). This would enable users to view stories or categories only seeing the summary, then click on cards to see the full description, rather like a flashcard.
 LLMs could be used to create one from the other, either summarize the full description or write a description from a summary (using style card and metadata as guides).
+The generic "create summary" button should also offer format options to prompt for a mnemonic summary: an acronym (memorable word/initialism from the key points) or an acrostic (lines whose first letters spell a word). These pair naturally with cloze-deletion study.
 When an LLM rewrites a section, there should be a clear proposal with accept/reject for the updates if it is overwriting a non-empty section (users have option to auto-accept up front).
 Summaries wouldn't strictly have a character limit, but there would be a warning display if, for example, the summary is longer than 250 characters or longer than 10% (configurable) of the full text description (whichever is larger). And generally a metric showing summary to full description size ratio, along with a vector similarity score, to help users never get them too far out of alignment.
 There are several specialized text types: quotes, references, QA
@@ -135,10 +137,16 @@ Date Metadata:
 	Tag a date as a reminder
 	Have dates be "+N days" from another card, so they are all relative dates. In the future, potentially have a timeline view. Timeline is a special UI view, not a data type.
 	Dates should have import/export option live with a calendar, in a future version
-Location metadata:
+Location metadata: (see docs/spatial-worlds.md for the full model)
 	Text, pictures, and all objects can link a location
-	Location can just be a string of text. Separately there is a csv lookup table mapping text to lat/long for use in a map view. Users can click through the string to see/enter the lat/long
-	Lookup table also references what "world" this uses. Most expect to use Earth, but the idea is this should be designed to in the future support fantasy world maps or other planets
+	Location can just be a string of text. Separately there is a csv lookup table mapping text to coordinates for use in a map/overlay view. Users can click through the string to see/enter the coordinate
+	Lookup table also references what "world" this uses. Most expect to use Earth, but the idea is this should be designed to in the future support fantasy world maps, other planets, OR image-backed worlds (a world that is just an image, e.g. the floorplan of the first floor of a house)
+	lat/long should be a special inline type fit into markdown: syntax sugar like loc:47.6062,-122.3321 (Earth) or loc:firstfloor/0.42,0.31 (image world) to drop a coordinate mid-note or in a table cell; typing loc: opens a picker like due: opens a calendar
+	Whole notes can also be tagged to a location via an optional frontmatter location field
+	Map view that loads map tiles and shows geo-tagged notes is a FUTURE extension (needs tile infra). Image-backed worlds + overlays (floorplans, mind palaces) come first and need no tiles
+	Mind palaces = tagging notes into locations on an image (method of loci) to aid memory. Not a new data type, just a book/pack whose primary lens is an image-backed world + overlay. SVG preferred backdrop
+	Overlays: pins (points) and regions link notes/categories onto an image world. SVG named ids double as clickable regions; raster needs an explicit zoom/pan transform so pins stay anchored as the user zooms
+	#category can carry an optional location/region (e.g. #kitchen as a clickable area on the floorplan that runs the category filter)
 Authorship:
 	Authorship tracking should be included in a very lightweight version for when multiple users present. Lightweight means not necessarily line by line, perhaps note by note (metadata tracks creator, then array of editors).
 	Should enable AI versus human input tracking with this.
@@ -239,3 +247,7 @@ https://github.com/manyougz/velotype/tree/main
 https://github.com/pop-os/cosmic-text
 
 Try to keep third-party libraries with clean seams so that if that library would need to be replaced it could be replaced in a straightforward manner (not easy probably, but at least straightforward)
+
+SVG is likely our preferred input image style for "mind palaces". Worth noting that the future "drawing" option will probably create an SVG as well. So the drawing will share this "overlay" note integration tooling with SVG images that are imported (perhaps any imported SVG is just considered a "drawing" data type). Perhaps SVGs can be CRDT tracked, or would that be too messy?
+For handling Lat/Long, this should probably be a special type we fit into markdown. So users can use syntax sugar to add lat/long in the middle of a note or table. We should also support adding location (likely lat long based) into the notes metadata as optional, so an entire note could be tagged to a location. It would be neat if the lat/long can be both real Earth lat long or a generic "world" lat/long (and these other "worlds" could just be an image, ie floor plan image for the first floor of a house).
+In total, we would be able to have a "map view" that loads map tiles and can show any geo-tagged notes (this map view is a future extension, not built in first pass). We also have drawings (SVG) and images (JPG/PNG/WebP) which can have overlays. For regular images, we will need to assure that the overlays scale appropriately.

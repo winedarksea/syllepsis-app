@@ -28,6 +28,12 @@ A note is displayed with similar notes surrounding it — similarity ranked by v
 ### Constellation / Star Chart View
 A visual "star chart" style display. Zooming into a cluster reveals a "solar system" style sub-view of a category and its notes.
 
+### Spatial / Overlay View
+Renders an [image-backed world](spatial-worlds.md#worlds) — a floorplan, a drawing, or any imported image — with an overlay of pins and clickable regions for notes and categories placed in it. Clicking a region (e.g. the `#kitchen` area of a floorplan) opens the linked notes or runs the category's [filtered sorted view](core-concepts.md#filtered-sorted-view). This is the primary lens for **mind palaces** and floorplan-tagged house books. Like the timeline, it is a view over location metadata, not a data type. Available in the first pass for image-backed worlds.
+
+### Map View (future)
+A future view that loads map tiles for **geo worlds** (Earth and user-defined planets) and shows every geo-tagged note as a pin; clicking a pin opens the note. Deferred to a later pass — it needs tile infrastructure, whereas the Spatial/Overlay view above does not. See [spatial-worlds.md](spatial-worlds.md#map-view-future).
+
 ### Timeline View (future)
 A future view that lays notes out along their date metadata. It is a UI view, not a data type — it renders the dates already stored on notes (see [object-types.md](object-types.md#date-metadata)).
 
