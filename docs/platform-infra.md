@@ -21,10 +21,15 @@ iOS is deferred (no Apple developer account currently).
 | Desktop / mobile shell | [Tauri](https://tauri.app/) + [Tauri-Specta](https://github.com/oscartbeaumont/tauri-specta) |
 | Embeddings / vector store | [LanceDB](https://github.com/lancedb/lancedb) or fastembed-rs + sqlite-vec |
 | ML (local) | [Candle](https://github.com/huggingface/candle) |
-| CRDT sync | [autosurgeon](https://github.com/automerge/autosurgeon) or y-rs |
+| CRDT sync | [autosurgeon](https://github.com/automerge/autosurgeon) or y-rs or [Loro](https://github.com/loro-dev/loro) |
 | Markdown parsing | pulldown-cmark |
 | Serialization | serde_yaml |
 | Git integration | git2 |
+
+Decision: Loro as the primary CRDT, with Automerge as the backup if we run into issues. Markdown is source of truth with CRDT sidecar, per note (perhaps with a book level registry as well).
+For markdown edited externally of the CRDT, last edit timestamp should be checked to make sure this isn't an old change, then the set of diffs pulled in as single new CRDT update.
+Decision: SQLite as the embedding backbone + sqlite-vec + FTS5, with Candle as the vector generation tool (with fastembed-rs as fallback plan). Put in a EmbeddingProvider trait so native and PWA can differ without the rest of the app caring. Embeddings are device-local.
+Auth occurs via git or cloud drive access, no credentials are managed by this app. Git is not the main CRDT target, if present in addition to a cloud drive it is meant as a "public, partial rolling release" following behind the main edits.
 
 ### Potentially useful references
 - https://github.com/manyougz/velotype — keyboard/text input patterns

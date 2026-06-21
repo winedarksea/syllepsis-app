@@ -8,7 +8,7 @@
 
 ## Cloud Storage Providers
 
-Initial support: **Google Drive** and **GitHub**. Both can be active simultaneously.
+Initial support: **Google Drive** and **GitHub**. Both can be active simultaneously. Users may in the future have other cloud storage and other git (say GitLab) options, but only ever one cloud drive, one git cloud. If both are present, git is treated as the lower priority target (not tracking every edit).
 
 Example configuration:
 - **Google Drive**: full backup; anyone with Drive permissions can access (aimed at 1–2 people, some read-only).

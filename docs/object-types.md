@@ -4,9 +4,25 @@
 
 Each note is an object. Most data is stored as a markdown text file. Metadata is stored in YAML frontmatter (hidden from the standard UI; surfaced through a dedicated metadata input area). Fenced blocks are an acceptable alternative to YAML frontmatter.
 
-Note IDs are auto-generated but aim to add human-readable elements, e.g.:
-- `quote:author-textsource`
-- `reference:author-source`
+### Note IDs
+
+Note IDs are auto-generated, decentralized (no hosted backend hands them out), and combine a human-readable element with a collision-proof element. The format avoids colons entirely so the same string is safe as both an ID and a filename on every platform (`:` is illegal in Windows filenames and special on macOS):
+
+```
+{type}-{slug}-{ulid}
+```
+
+- **`type`** — the object-type enum (`note`, `quote`, `reference`, `todo`, …). Cheap human context.
+- **`slug`** — derived from the title/content: ASCII-folded, lowercased, kebab-cased, stopwords trimmed, truncated to ~32 chars. **Cosmetic and mutable** — it may regenerate when the title changes.
+- **`ulid`** — a [ULID](https://github.com/ulid/spec) (128 bits, Crockford base32, lowercased), the **canonical, immutable identity**. Time-ordered so files sort chronologically; high-entropy so independent devices generate IDs offline without colliding on merge, and so IDs stay unique even across imported knowledge packs.
+
+Example: `quote-montaigne-on-friendship-01jh5k3q2x9y8w7v6t5s4r3q2p`
+
+**Identity rules:**
+- The canonical `id` lives in **frontmatter**, never in the file path. The filename is a derived, disposable convenience. This is what lets a note move between [sorting subfolders](#storage-layout) or be renamed externally without losing identity.
+- Links and lookups resolve on the **ulid tail**, so a stale slug still resolves correctly. Renaming a note's title is safe.
+- **Forking** mints a new ulid (new identity) and records `forked_from` (see [Forking](#forking)). **Knowledge-pack re-import** matches on the existing id, so a stable, globally-unique id is what lets pack updates overwrite the right note.
+- The [book-level registry](#book-level-metadata) indexes all ids and acts as a collision backstop: on creation, fork, and merge/pack-import, a new id is checked against the registry and its ulid regenerated on the astronomically rare hit.
 
 The markdown dialect is versioned with a field like `markdown_version: syllepsis_001` so users viewing files outside the app can identify the format's origin.
 

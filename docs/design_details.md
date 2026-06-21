@@ -64,7 +64,7 @@ Tables have special subtypes, decision matrices and pro/con tables.
 Code blocks as a special text type, with Mermaid a special type of code block that can render the diagram, including Venn diagrams, a type of mermaid diagram.
 Quotes (ie famous people's sayings) as a special type, includes links
 A "drawing" type (stored as SVG) allowing drawings with built in render to image where needed. Imported SVGs are treated as drawings (no separate type); the future in-app drawing tool emits SVG too, so both share the same overlay/anchor tooling and are the preferred backdrop for image-backed worlds. SVG is text so it diffs in git, but drawing geometry is file-synced (UUID sidecar), NOT CRDT-tracked by default — only the small overlay anchors (note↔coordinate links) are CRDT-tracked. Whether simple app-authored drawings could later be CRDT-tracked is an open question.
-Note IDs (auto generated) should be human readable to some extent, for example quote:author-textsource for quotes (if author and sourcespecified), reference:author-source or some such.
+Note IDs (auto generated) should be human readable to some extent. Format is `{type}-{slug}-{ulid}` with no colons (so the same string is filename-safe everywhere), e.g. `quote-montaigne-on-friendship-01jh5k3q2x9y8w7v6t5s4r3q2p`. The ulid is the canonical immutable identity (decentralized, collision-proof); the type+slug is cosmetic. Canonical id lives in frontmatter, not the path. See [object-types.md](object-types.md#note-ids) for the full scheme.
 
 Examples apps worth referencing for comparison: LogSeq, Obsidian, Tana, Trillium, Plottr, Mem
 

@@ -18,7 +18,7 @@ When an LLM rewrites a non-empty section, a clear accept/reject proposal is show
 
 ## Local Embeddings
 
-Embeddings are computed locally using a model like [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) (~8000 token context). Vectors are stored in [LanceDB](https://github.com/lancedb/lancedb) (or fastembed-rs + sqlite-vec for WASM compatibility).
+Embeddings are computed locally using a model like [BAAI/bge-m3] (with a lighter model used at first for testing).(https://huggingface.co/BAAI/bge-m3) (~8000 token context). Vectors are stored in SQLite (or fastembed-rs + sqlite-vec for WASM compatibility).
 
 ### Multiple Vectors Per Note
 - One vector for the **summary**
@@ -33,7 +33,7 @@ A category's vector is computed as an average of its member notes' vectors. This
 | Feature | Description |
 |---|---|
 | **Vector search** | Semantic search across all notes |
-| **Clustering** | Suggest new or reorganized categories |
+| **Clustering** | Suggest new or reorganized categories (also using nearest neighbors to help suggest organization) |
 | **Coherence analysis** | Detect consistency or narrative flow issues |
 | **Duplication detection** | Surface most-similar notes and most-similar categories |
 | **Blind spot detection** | Sort by *reverse* similarity to neighbors — lowest scores suggest disconnected narrative or missing content |

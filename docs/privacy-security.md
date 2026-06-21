@@ -6,6 +6,7 @@ A dedicated UI panel provides a single place to manage:
 - Tagging categories as **private** (excluded from GitHub publish; see [sync-backup.md](sync-backup.md))
 - Setting files or categories as **locked**
 - Viewing and adjusting access control across the book
+- Generally we want to expose as many settings as possible to the user, to give them full control (but many of these somewhat hidden to prevent overwhelming the user).
 
 ## Private Notes
 
