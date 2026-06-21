@@ -14,6 +14,7 @@ The app stores everything as plain markdown files on the user's device, synced t
 | [core-concepts.md](core-concepts.md) | Unsorted vs. sorted notes, graph→tree→book progression, sorting model, categories, knowledge packs |
 | [object-types.md](object-types.md) | All note/object types, metadata schemas, file format, cleanup rules |
 | [ui-views.md](ui-views.md) | All UI views (book, graph, search, constellation, stats dashboard, etc.), device UX |
+| [theme-style.md](theme-style.md) | Practical Material Design 3 style guide for the Nordic/Icelandic visual theme |
 | [spatial-worlds.md](spatial-worlds.md) | Worlds (geo + image-backed), `loc:` coordinates, overlays, mind palaces, map view |
 | [llm-ai-features.md](llm-ai-features.md) | LLM integration, fact checking, local embeddings, style cards, generative learning |
 | [search.md](search.md) | BM25, vector search, RRF, category filtering, text-fade focus mode |

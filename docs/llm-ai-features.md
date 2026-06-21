@@ -18,12 +18,32 @@ When an LLM rewrites a non-empty section, a clear accept/reject proposal is show
 
 ## Local Embeddings
 
-Embeddings are computed locally using a model like [BAAI/bge-m3] (with a lighter model used at first for testing).(https://huggingface.co/BAAI/bge-m3) (~8000 token context). Vectors are stored in SQLite (or fastembed-rs + sqlite-vec for WASM compatibility).
+Embeddings run locally on the **same ONNX Runtime stack as the bundled LLM** (see [Local LLM](#local-llm-bundled)):
+[`fastembed-rs`](https://github.com/Anush008/fastembed-rs) — which is built on `ort` and bundles
+tokenization + pooling — on desktop, and `onnxruntime-web` / Transformers.js with WebGPU in the PWA.
+This means **one ML runtime end-to-end, not two**: Candle is dropped. It had been kept only to generate
+embeddings, but once the LLM forced ONNX Runtime in, a second ML stack bought nothing — and the embedding
+model now reuses the LLM's **config-driven model manifest, sha256 first-run download, execution-provider
+selection, and diagnostics** (embedding models are small relative to the 3.5 GB LLM, so this is nearly free).
+
+The default model is **[BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3)** via its
+[ONNX export](https://huggingface.co/Xenova/bge-m3): 1024-dim, ~8192-token context, multilingual, and
+*symmetric* (queries and documents embed the same way, no instruction prefix). A lighter bge variant is the
+first-pass test model. **[Qwen3-Embedding-0.6B](https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX)**
+is a manifest-swappable alternative — higher retrieval quality, 32k context, and Matryoshka dimensions that
+can be truncated for cheaper storage/prefilter — at the cost of instruction-prefixed, *asymmetric* query vs.
+document embedding. Swapping or adding an embedding model is a manifest entry, exactly like the LLM.
+
+The model is used purely as a **dense** embedder. The sparse / BM25 arm of search comes from SQLite **FTS5**
+([search.md](search.md)), not the embedding model, so a model with no native sparse output (Qwen3) loses
+nothing, and bge-m3's learned-sparse head is an optional bonus the pipeline does not depend on. Vectors are
+stored in SQLite via `sqlite-vec`, with the column width pinned to the active model's dimension.
 
 ### Multiple Vectors Per Note
 - One vector for the **summary**
 - One or more vectors for the **main body**
-- Notes longer than ~512 tokens are chunked; each chunk gets its own vector
+- Long notes are chunked for retrieval granularity — chunk size is a configurable tuning knob, not a model
+  limit (bge-m3 handles ~8192 tokens) — and each chunk gets its own vector, tokenized with the model's own tokenizer
 
 ### Category Vectors
 A category's vector is computed as an average of its member notes' vectors. This enables category-to-category similarity (duplicate/near-duplicate category detection) and the category upweighting used in the [related carousel](ui-views.md#related-carousel).
@@ -39,14 +59,49 @@ A category's vector is computed as an average of its member notes' vectors. This
 | **Blind spot detection** | Sort by *reverse* similarity to neighbors — lowest scores suggest disconnected narrative or missing content |
 | **Style comparison** | Compare a note's style vector against style card vectors |
 
-## Local LLMs
+## Local LLM (bundled)
 
-Long-term goal: integrate native platform LLMs (Windows AI API, Apple Intelligence, LiteRT-LM) for simpler tasks where they are sufficient:
-- Proofreading
-- Summarization
-- OCR (WASM / WebNN are an alternative path)
+Goal: package a small-but-capable model so LLM features **just work** on the user's device with no
+configuration. The bundled model is **Gemma 4 E2B, 4-bit quantized** (the choice as of mid 2026; a
+future Gemma replaces it as a manifest edit, not a code change). Users with capable machines can opt
+into a larger model (e.g. the 12B 4-bit), gated behind a RAM check.
 
-Users can configure **per-task routing**: choose which provider handles summarization, which handles fact-checking, etc. Options per task: native local LLM, various cloud LLM providers (cheaper models for high-volume tasks).
+**Runtime: ONNX Runtime.** The bundled model runs through ONNX Runtime — the [`ort`](https://github.com/pykeio/ort)
+crate on desktop (with CoreML / DirectML / CUDA execution providers and a CPU fallback), and
+`onnxruntime-web` / [Transformers.js](https://github.com/huggingface/transformers.js) with WebGPU in
+the PWA. Both run the *same* model files and sit behind the `LlmProvider` seam, so the rest of the app
+is runtime-agnostic. (Burn and Candle were evaluated and rejected *for the LLM*: the `onnx-community`
+Gemma 4 E2B export depends on ORT *contrib* ops — `MatMulNBits` int4, `GroupQueryAttention` which
+carries the KV-cache, and `RotaryEmbedding` — that standard-ONNX importers like `burn-import` cannot
+ingest. Candle still does local embeddings.)
+
+**Packaging.** The model is **not** shipped in the installer (~3.5 GB for the q4 text path = token
+embeddings + decoder). It is a sha256-verified **first-run download** to an OS app-data models
+directory shared across books, driven by a config-driven model manifest (id, repo, files,
+quantization, hash, size, min-RAM, required execution providers). Replacing Gemma with its successor,
+or adding the optional 12B, is a manifest entry. ORT picks the best available execution provider with
+a CPU fallback and records which it used (for Diagnostics).
+
+## Providers & Routing
+
+LLM work is gated behind the `LlmProvider` seam, with three kinds of provider:
+- **Local** — the bundled Gemma via ONNX Runtime (above).
+- **Cloud** — hybrid execution: Rust owns the router, prompt-building, and the proposal/accept flow,
+  while the frontend runs the actual call via the [Vercel AI SDK](https://sdk.vercel.ai/) (streaming +
+  structured output, which replaces hand-parsing of category/status replies) and posts the result back
+  for Rust to wrap as a proposal.
+- **Bring-your-own** — any OpenAI-compatible endpoint (llama.cpp server, Ollama, LM Studio, most
+  clouds) via a base URL; Anthropic for Claude.
+
+**Keys** live in the OS keychain and are never written to synced config or markdown — consistent with
+"no credentials are managed by this app" ([platform-infra.md](platform-infra.md)).
+
+Users configure **per-task routing**: each task names a `{provider, model}` pair, so (for example)
+summaries run on the local model while fact-checks run on a cloud Opus model. A per-action override
+lets the user pick a stronger model for a single call.
+
+**Long-term:** native platform LLMs (Windows AI API, Apple Intelligence, LiteRT-LM) for simpler tasks
+where they suffice (proofreading, summarization; OCR via WASM / WebNN).
 
 ## Google / Gemini Integration
 Notes synced to Google Drive (as backup) may automatically surface as Gemini context — no additional integration required.

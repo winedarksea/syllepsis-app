@@ -83,5 +83,7 @@ Two entry points:
 
 ## Theming
 
-Multiple themes supported, including custom user themes. Starting themes: light mode and dark mode. Icons/covers on each book for visual distinction.
+Multiple themes supported, including custom user themes. Starting themes: light mode and dark mode. The first named visual direction is the [Nordic/Icelandic Material Design 3 theme](nordic-icelandic-style.md), which defines color, typography, shape, graph, book, and spatial-view treatment.
+
+Icons/covers on each book for visual distinction.
 Sync status (if linked to cloud) should be clearly displayed, likely a simple icon (green for all synced to cloud).
