@@ -19,20 +19,18 @@ When an LLM rewrites a non-empty section, a clear accept/reject proposal is show
 ## Local Embeddings
 
 Embeddings run locally on the **same ONNX Runtime stack as the bundled LLM** (see [Local LLM](#local-llm-bundled)):
-[`fastembed-rs`](https://github.com/Anush008/fastembed-rs) — which is built on `ort` and bundles
-tokenization + pooling — on desktop, and `onnxruntime-web` / Transformers.js with WebGPU in the PWA.
-This means **one ML runtime end-to-end, not two**: Candle is dropped. It had been kept only to generate
-embeddings, but once the LLM forced ONNX Runtime in, a second ML stack bought nothing — and the embedding
-model now reuses the LLM's **config-driven model manifest, sha256 first-run download, execution-provider
-selection, and diagnostics** (embedding models are small relative to the 3.5 GB LLM, so this is nearly free).
+[`ort`](https://github.com/pykeio/ort) (ONNX Runtime) native on desktop, and `onnxruntime-web` / Transformers.js
+with WebGPU in the PWA. **One ML runtime end-to-end, not two**: Candle was evaluated and dropped — once the LLM
+forced ONNX Runtime in, a second ML stack bought nothing. The embedding model reuses the LLM's shared
+**config-driven model manifest, sha256 first-run download, execution-provider selection, and diagnostics**
+(embedding models are small relative to the LLM, so this is nearly free). Adding or swapping an embedding model
+is a manifest entry, not a code change.
 
-The default model is **[BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3)** via its
-[ONNX export](https://huggingface.co/Xenova/bge-m3): 1024-dim, ~8192-token context, multilingual, and
-*symmetric* (queries and documents embed the same way, no instruction prefix). A lighter bge variant is the
-first-pass test model. **[Qwen3-Embedding-0.6B](https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX)**
-is a manifest-swappable alternative — higher retrieval quality, 32k context, and Matryoshka dimensions that
-can be truncated for cheaper storage/prefilter — at the cost of instruction-prefixed, *asymmetric* query vs.
-document embedding. Swapping or adding an embedding model is a manifest entry, exactly like the LLM.
+The bundled model is **[Qwen3-Embedding-0.6B](https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX)**
+(Int8 quantized): 1024-dim, 32k context, Matryoshka dimensions that can be truncated for cheaper storage/prefilter,
+and *asymmetric* — queries use an instruction prefix while documents embed raw. It is from the same Qwen3 family as
+the bundled LLM, sharing tokenizer format and ONNX runtime infrastructure. Pooling is last-token (causal decoder
+architecture).
 
 The model is used purely as a **dense** embedder. The sparse / BM25 arm of search comes from SQLite **FTS5**
 ([search.md](search.md)), not the embedding model, so a model with no native sparse output (Qwen3) loses
@@ -62,30 +60,28 @@ A category's vector is computed as an average of its member notes' vectors. This
 ## Local LLM (bundled)
 
 Goal: package a small-but-capable model so LLM features **just work** on the user's device with no
-configuration. The bundled model is **Gemma 4 E2B, 4-bit quantized** (the choice as of mid 2026; a
-future Gemma replaces it as a manifest edit, not a code change). Users with capable machines can opt
-into a larger model (e.g. the 12B 4-bit), gated behind a RAM check.
+configuration. The bundled model is **Gemma 4 E2B, 4-bit quantized** (`model_q4.onnx` — fp32 I/O,
+int4 weights). Replacing it with a later Gemma release is a manifest entry, not a code change. Users
+with capable machines can opt into a larger model (e.g. the 12B 4-bit), gated behind a RAM check.
 
-**Runtime: ONNX Runtime.** The bundled model runs through ONNX Runtime — the [`ort`](https://github.com/pykeio/ort)
-crate on desktop (with CoreML / DirectML / CUDA execution providers and a CPU fallback), and
+**Runtime: ONNX Runtime.** The bundled model runs through [`ort`](https://github.com/pykeio/ort)
+on desktop (with CoreML / DirectML / CUDA execution providers and a CPU fallback), and
 `onnxruntime-web` / [Transformers.js](https://github.com/huggingface/transformers.js) with WebGPU in
 the PWA. Both run the *same* model files and sit behind the `LlmProvider` seam, so the rest of the app
-is runtime-agnostic. (Burn and Candle were evaluated and rejected *for the LLM*: the `onnx-community`
-Gemma 4 E2B export depends on ORT *contrib* ops — `MatMulNBits` int4, `GroupQueryAttention` which
-carries the KV-cache, and `RotaryEmbedding` — that standard-ONNX importers like `burn-import` cannot
-ingest. Candle still does local embeddings.)
+is runtime-agnostic. (Burn and Candle were evaluated and rejected: the `onnx-community` Gemma 4 E2B
+export depends on ORT *contrib* ops — `MatMulNBits` int4, `GroupQueryAttention` which carries the
+KV-cache, and `RotaryEmbedding` — that standard-ONNX importers cannot ingest.)
 
-**Packaging.** The model is **not** shipped in the installer (~3.5 GB for the q4 text path = token
-embeddings + decoder). It is a sha256-verified **first-run download** to an OS app-data models
-directory shared across books, driven by a config-driven model manifest (id, repo, files,
-quantization, hash, size, min-RAM, required execution providers). Replacing Gemma with its successor,
-or adding the optional 12B, is a manifest entry. ORT picks the best available execution provider with
-a CPU fallback and records which it used (for Diagnostics).
+**Packaging.** Neither model is shipped in the installer — they are sha256-verified **first-run downloads**
+to an OS app-data models directory shared across books, driven by config-driven model manifests (id, repo,
+files, quantization, hash, size, required execution providers). The LLM and embedder share the same
+download/cache/verify/EP-selection infrastructure behind the `onnx` Cargo feature. ORT picks the best
+available execution provider with a CPU fallback and records which it used (for Diagnostics).
 
 ## Providers & Routing
 
 LLM work is gated behind the `LlmProvider` seam, with three kinds of provider:
-- **Local** — the bundled Gemma via ONNX Runtime (above).
+- **Local** — the bundled Gemma 4 E2B via ONNX Runtime (above).
 - **Cloud** — hybrid execution: Rust owns the router, prompt-building, and the proposal/accept flow,
   while the frontend runs the actual call via the [Vercel AI SDK](https://sdk.vercel.ai/) (streaming +
   structured output, which replaces hand-parsing of category/status replies) and posts the result back
