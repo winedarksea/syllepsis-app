@@ -3,7 +3,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type {
-  BookInfo, Category, NoteDto, ObjectType, PriorEdge, RenderItem,
+  BookInfo, TrackedBookInfo, Category, NoteDto, ObjectType, PriorEdge, RenderItem,
   SearchResults, RelatedNote, EmbeddingDiagnostics,
   LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, CloudLlmPrompt, CloudLlmCompletion,
   CloudLlmProviderDescriptor, CloudLlmProviderSettings, CloudLlmProviderStatus,
@@ -18,6 +18,8 @@ export const api = {
   getVersion: () => invoke<string>('get_version'),
 
   openBook: (path: string) => invoke<BookInfo>('open_book', { path }),
+  listTrackedBooks: () => invoke<TrackedBookInfo[]>('list_tracked_books'),
+  forgetTrackedBook: (path: string) => invoke<void>('forget_tracked_book', { path }),
   createBook: (path: string, name: string, language?: string, location?: string) =>
     invoke<BookInfo>('create_book', {
       path,
@@ -125,6 +127,7 @@ export const api = {
   // Knowledge packs (Phase 6)
   exportPack: (spec: ExportSpec, path: string) =>
     invoke<PackManifest>('export_pack', { spec, path }),
+  readPackManifest: (path: string) => invoke<PackManifest>('read_pack_manifest', { path }),
   previewPack: (path: string) => invoke<ImportPreview>('preview_pack', { path }),
   importPack: (path: string, options: ImportOptions) =>
     invoke<ImportReport>('import_pack', { path, options }),

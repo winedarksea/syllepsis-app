@@ -17,9 +17,22 @@ pub struct BookInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct TrackedBookInfo {
+    pub name: String,
+    pub path: String,
+    pub available: bool,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BookOpenWarningInfo {
     pub missing_reserved_files: Vec<String>,
     pub should_offer_create_here: bool,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct TrackedBookPaths {
+    paths: Vec<String>,
 }
 
 /// Open an existing Syllepsis book at `path`.
@@ -41,6 +54,7 @@ pub fn open_book(app: AppHandle, state: State<AppState>, path: String) -> Result
                 should_offer_create_here: warning.should_offer_create_here(),
             }),
     };
+    track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
     Ok(info)
@@ -63,6 +77,7 @@ pub fn create_book(
         .map(|book| book.with_models_root(models_root))
         .map_err(|e| e.to_string())?;
     let info = book_info(&book_path, &book);
+    track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
     Ok(info)
@@ -86,9 +101,30 @@ pub fn create_book_in_parent(
         .map(|book| book.with_models_root(models_root))
         .map_err(|e| e.to_string())?;
     let info = book_info(&book_path, &book);
+    track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
     Ok(info)
+}
+
+/// Books this device has successfully opened, created, or imported.
+#[tauri::command]
+pub fn list_tracked_books(app: AppHandle) -> Result<Vec<TrackedBookInfo>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("resolve app data dir: {e}"))?;
+    list_tracked_books_from_app_data(&app_data_dir)
+}
+
+/// Remove a book from the launcher's tracked list without touching files on disk.
+#[tauri::command]
+pub fn forget_tracked_book(app: AppHandle, path: String) -> Result<(), String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("resolve app data dir: {e}"))?;
+    forget_tracked_book_from_app_data(&app_data_dir, Path::new(&path))
 }
 
 /// Return the core library version string (used to verify the IPC bridge is alive).
@@ -166,6 +202,123 @@ fn models_root(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(models_root_from_app_data(&app_data_dir))
 }
 
+pub(crate) fn track_book_path(app: &AppHandle, path: &Path) -> Result<(), String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("resolve app data dir: {e}"))?;
+    track_book_path_in_app_data(&app_data_dir, path)
+}
+
+fn list_tracked_books_from_app_data(app_data_dir: &Path) -> Result<Vec<TrackedBookInfo>, String> {
+    let tracked = load_tracked_book_paths(app_data_dir)?;
+    Ok(tracked
+        .paths
+        .into_iter()
+        .map(|path| tracked_book_info(Path::new(&path)))
+        .collect())
+}
+
+fn forget_tracked_book_from_app_data(app_data_dir: &Path, path: &Path) -> Result<(), String> {
+    let mut tracked = load_tracked_book_paths(app_data_dir)?;
+    let normalized_path = normalized_book_path(path);
+    tracked
+        .paths
+        .retain(|tracked_path| tracked_path != &normalized_path);
+    save_tracked_book_paths(app_data_dir, &tracked)
+}
+
+fn track_book_path_in_app_data(app_data_dir: &Path, path: &Path) -> Result<(), String> {
+    let mut tracked = load_tracked_book_paths(app_data_dir)?;
+    let normalized_path = normalized_book_path(path);
+    tracked
+        .paths
+        .retain(|tracked_path| tracked_path != &normalized_path);
+    tracked.paths.insert(0, normalized_path);
+    save_tracked_book_paths(app_data_dir, &tracked)
+}
+
+fn tracked_book_info(path: &Path) -> TrackedBookInfo {
+    let path_string = path.display().to_string();
+    if !path.exists() {
+        return TrackedBookInfo {
+            name: path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Missing Book")
+                .to_string(),
+            path: path_string,
+            available: false,
+            status: Some("not found on disk".to_string()),
+        };
+    }
+
+    if !path.is_dir() {
+        return TrackedBookInfo {
+            name: path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Unavailable Book")
+                .to_string(),
+            path: path_string,
+            available: false,
+            status: Some("path is not a folder".to_string()),
+        };
+    }
+
+    match Book::open(path) {
+        Ok(book) => TrackedBookInfo {
+            name: book.metadata.name,
+            path: path_string,
+            available: true,
+            status: book
+                .open_warning
+                .map(|warning| format!("missing {}", warning.missing_reserved_files.join(", "))),
+        },
+        Err(error) => TrackedBookInfo {
+            name: path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Unavailable Book")
+                .to_string(),
+            path: path_string,
+            available: false,
+            status: Some(error.to_string()),
+        },
+    }
+}
+
+fn load_tracked_book_paths(app_data_dir: &Path) -> Result<TrackedBookPaths, String> {
+    let path = tracked_books_path(app_data_dir);
+    if !path.exists() {
+        return Ok(TrackedBookPaths::default());
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("read tracked books {}: {e}", path.display()))?;
+    serde_json::from_str(&content)
+        .map_err(|e| format!("parse tracked books {}: {e}", path.display()))
+}
+
+fn save_tracked_book_paths(app_data_dir: &Path, tracked: &TrackedBookPaths) -> Result<(), String> {
+    std::fs::create_dir_all(app_data_dir)
+        .map_err(|e| format!("create app data dir {}: {e}", app_data_dir.display()))?;
+    let path = tracked_books_path(app_data_dir);
+    let content = serde_json::to_string_pretty(tracked).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content)
+        .map_err(|e| format!("write tracked books {}: {e}", path.display()))
+}
+
+fn tracked_books_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join("tracked-books.json")
+}
+
+fn normalized_book_path(path: &Path) -> String {
+    std::fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,5 +342,59 @@ mod tests {
         assert_eq!(metadata.name, "Field Notes");
         assert_eq!(metadata.language, "es");
         assert_eq!(metadata.location.as_deref(), Some("Chicago"));
+    }
+
+    #[test]
+    fn tracked_book_persistence_deduplicates_paths() {
+        let app_data_dir = tempfile::tempdir().unwrap();
+        let book_dir = tempfile::tempdir().unwrap();
+
+        track_book_path_in_app_data(app_data_dir.path(), book_dir.path()).unwrap();
+        track_book_path_in_app_data(app_data_dir.path(), book_dir.path()).unwrap();
+
+        let tracked = load_tracked_book_paths(app_data_dir.path()).unwrap();
+        assert_eq!(tracked.paths.len(), 1);
+        assert_eq!(tracked.paths[0], normalized_book_path(book_dir.path()));
+    }
+
+    #[test]
+    fn list_tracked_books_returns_existing_book_names() {
+        let app_data_dir = tempfile::tempdir().unwrap();
+        let parent_dir = tempfile::tempdir().unwrap();
+        let book_root = parent_dir.path().join("field-book");
+        Book::create(&book_root, "Field Book").unwrap();
+
+        track_book_path_in_app_data(app_data_dir.path(), &book_root).unwrap();
+
+        let books = list_tracked_books_from_app_data(app_data_dir.path()).unwrap();
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].name, "Field Book");
+        assert!(books[0].available);
+    }
+
+    #[test]
+    fn list_tracked_books_marks_missing_paths_unavailable() {
+        let app_data_dir = tempfile::tempdir().unwrap();
+        let missing_path = app_data_dir.path().join("missing-book");
+
+        track_book_path_in_app_data(app_data_dir.path(), &missing_path).unwrap();
+
+        let books = list_tracked_books_from_app_data(app_data_dir.path()).unwrap();
+        assert_eq!(books.len(), 1);
+        assert!(!books[0].available);
+        assert_eq!(books[0].status.as_deref(), Some("not found on disk"));
+    }
+
+    #[test]
+    fn forget_tracked_book_removes_only_launcher_entry() {
+        let app_data_dir = tempfile::tempdir().unwrap();
+        let book_dir = tempfile::tempdir().unwrap();
+
+        track_book_path_in_app_data(app_data_dir.path(), book_dir.path()).unwrap();
+        forget_tracked_book_from_app_data(app_data_dir.path(), book_dir.path()).unwrap();
+
+        let tracked = load_tracked_book_paths(app_data_dir.path()).unwrap();
+        assert!(tracked.paths.is_empty());
+        assert!(book_dir.path().exists());
     }
 }

@@ -4485,6 +4485,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

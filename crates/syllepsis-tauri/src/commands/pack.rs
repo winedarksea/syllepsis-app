@@ -10,7 +10,7 @@ use syllepsis_core::app::pack::{
 };
 use syllepsis_core::pack::PackManifest;
 
-use crate::commands::book::{BookInfo, folder_name_for_book};
+use crate::commands::book::{folder_name_for_book, track_book_path, BookInfo};
 use crate::state::{models_root_from_app_data, AppState};
 
 macro_rules! with_book {
@@ -42,6 +42,13 @@ pub fn preview_pack(state: State<AppState>, path: String) -> Result<ImportPrevie
         let pack = app::read_pack(Path::new(&path)).map_err(|e| e.to_string())?;
         app::preview_import(book, &pack).map_err(|e| e.to_string())
     })
+}
+
+/// Read only the manifest from a pack file. Used before any book is open.
+#[tauri::command]
+pub fn read_pack_manifest(path: String) -> Result<PackManifest, String> {
+    let pack = app::read_pack(Path::new(&path)).map_err(|e| e.to_string())?;
+    Ok(pack.manifest)
 }
 
 /// Import a pack file into the open book using the user's selection and category mapping.
@@ -84,6 +91,7 @@ pub fn import_pack_as_book(
         path: book_path.to_string_lossy().into(),
         open_warning: None,
     };
+    track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
     Ok(info)

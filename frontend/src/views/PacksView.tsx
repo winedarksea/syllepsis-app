@@ -85,34 +85,34 @@ function ExportPanel({ categories, onNotice, onError }: PanelProps & { categorie
   }, [id, name, version, description, selected, exportAll, onNotice, onError]);
 
   return (
-    <section className=”pk-panel”>
-      <p className=”pk-hint”>Bundle every note in the chosen categories into a single distributable file.</p>
-      <label className=”pk-field”><span>Pack id</span>
-        <input value={id} onChange={(e) => setId(e.target.value)} placeholder=”permaculture-basics” /></label>
-      <label className=”pk-field”><span>Name</span>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder=”Permaculture Basics” /></label>
-      <label className=”pk-field”><span>Version</span>
-        <input value={version} onChange={(e) => setVersion(e.target.value)} placeholder=”1.0.0” /></label>
-      <label className=”pk-field”><span>Description</span>
+    <section className="pk-panel">
+      <p className="pk-hint">Bundle every note in the chosen categories into a single distributable file.</p>
+      <label className="pk-field"><span>Pack id</span>
+        <input value={id} onChange={(e) => setId(e.target.value)} placeholder="permaculture-basics" /></label>
+      <label className="pk-field"><span>Name</span>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Permaculture Basics" /></label>
+      <label className="pk-field"><span>Version</span>
+        <input value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0.0" /></label>
+      <label className="pk-field"><span>Description</span>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} /></label>
 
-      <label className=”pk-check pk-export-all-toggle”>
-        <input type=”checkbox” checked={exportAll} onChange={(e) => setExportAll(e.target.checked)} />
+      <label className="pk-check pk-export-all-toggle">
+        <input type="checkbox" checked={exportAll} onChange={(e) => setExportAll(e.target.checked)} />
         <span>Export entire book (all non-deleted notes)</span>
       </label>
 
-      <div className=”pk-subhead”>Categories to include</div>
-      {categories.length === 0 && <div className=”pk-state”>No categories in this book yet.</div>}
+      <div className="pk-subhead">Categories to include</div>
+      {categories.length === 0 && <div className="pk-state">No categories in this book yet.</div>}
       <div className={`pk-checklist${exportAll ? ' pk-checklist-disabled' : ''}`}>
         {categories.map((cat) => (
-          <label key={cat} className=”pk-check”>
-            <input type=”checkbox” checked={selected.has(cat)} onChange={() => toggle(cat)} disabled={exportAll} />
+          <label key={cat} className="pk-check">
+            <input type="checkbox" checked={selected.has(cat)} onChange={() => toggle(cat)} disabled={exportAll} />
             <span>#{cat}</span>
           </label>
         ))}
       </div>
 
-      <button className=”pk-btn pk-btn-primary” disabled={busy} onClick={exportPack}>
+      <button className="pk-btn pk-btn-primary" disabled={busy} onClick={exportPack}>
         {exportAll ? 'Export book…' : 'Export pack…'}
       </button>
     </section>

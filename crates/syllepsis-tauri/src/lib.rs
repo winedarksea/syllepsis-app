@@ -20,6 +20,8 @@ pub fn run() {
             open_book,
             create_book,
             create_book_in_parent,
+            list_tracked_books,
+            forget_tracked_book,
             // notes
             book_view,
             unsorted_notes,
@@ -77,6 +79,7 @@ pub fn run() {
             purge_expired,
             // knowledge packs (Phase 6)
             export_pack,
+            read_pack_manifest,
             preview_pack,
             import_pack,
             import_pack_as_book,

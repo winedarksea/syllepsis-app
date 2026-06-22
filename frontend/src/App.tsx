@@ -1,4 +1,5 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from './lib/store';
 import { api } from './lib/api';
@@ -13,35 +14,14 @@ import { PrivacyView } from './views/PrivacyView';
 import { PacksView } from './views/PacksView';
 import { Diagnostics } from './views/Diagnostics';
 import { Editor } from './editor/Editor';
-import type { BookInfo } from './types';
+import type { BookInfo, TrackedBookInfo } from './types';
 import './App.css';
 
-interface BookCreationDetails {
-  name: string;
-  language?: string;
-  location?: string;
-}
+const PACK_FILTER = [{ name: 'Syllepsis pack', extensions: ['synpack.json', 'json'] }];
 
 function missingBookFilesMessage(info: BookInfo): string {
   const missingFiles = info.open_warning?.missing_reserved_files.join(', ') ?? '';
   return `This folder is missing ${missingFiles}, so it may not be a Syllepsis book.`;
-}
-
-function promptForBookCreationDetails(defaultName = ''): BookCreationDetails | null {
-  const name = prompt('Book name:', defaultName);
-  if (!name?.trim()) return null;
-
-  const language = prompt('Primary language:', 'en');
-  if (language === null) return null;
-
-  const location = prompt('Location (optional):', '');
-  if (location === null) return null;
-
-  return {
-    name: name.trim(),
-    language: language.trim() || undefined,
-    location: location.trim() || undefined,
-  };
 }
 
 // ──────────────────────────────────────────────
@@ -49,6 +29,27 @@ function promptForBookCreationDetails(defaultName = ''): BookCreationDetails | n
 // ──────────────────────────────────────────────
 function BookPicker() {
   const { setBook, setCategories } = useStore();
+  const [trackedBooks, setTrackedBooks] = useState<TrackedBookInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyPath, setBusyPath] = useState<string | null>(null);
+  const [mode, setMode] = useState<'create' | 'import' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const reloadTrackedBooks = useCallback(async () => {
+    setLoading(true);
+    try {
+      setTrackedBooks(await api.listTrackedBooks());
+      setError(null);
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reloadTrackedBooks();
+  }, [reloadTrackedBooks]);
 
   const finishOpeningBook = useCallback(async (info: BookInfo) => {
     setBook(info);
@@ -56,68 +57,287 @@ function BookPicker() {
     setCategories(cats);
   }, [setBook, setCategories]);
 
-  const handleOpen = useCallback(async () => {
-    const selected = await openDialog({ directory: true, multiple: false, title: 'Open Syllepsis Book' });
-    if (!selected || typeof selected !== 'string') return;
-    let info = await api.openBook(selected);
+  const openExistingPath = useCallback(async (path: string) => {
+    setBusyPath(path);
+    setError(null);
+    let info: BookInfo;
+    try {
+      info = await api.openBook(path);
+    } catch (error) {
+      setError(String(error));
+      setBusyPath(null);
+      await reloadTrackedBooks();
+      return;
+    }
     const warning = info.open_warning;
 
-    if (warning?.should_offer_create_here) {
-      const shouldCreate = confirm(
-        `${missingBookFilesMessage(info)}\n\nCreate Syllepsis book files here? Cancel opens with in-memory defaults.`
-      );
-      if (shouldCreate) {
-        const details = promptForBookCreationDetails(info.name);
-        if (details) {
-          try {
-            info = await api.createBook(selected, details.name, details.language, details.location);
-          } catch (error) {
-            alert(`Could not create book files here: ${String(error)}`);
-          }
-        }
-      }
-    } else if (warning) {
+    if (warning) {
       alert(`${missingBookFilesMessage(info)}\n\nOpening with in-memory defaults.`);
     }
 
     await finishOpeningBook(info);
-  }, [finishOpeningBook]);
+  }, [finishOpeningBook, reloadTrackedBooks]);
 
-  const handleCreate = useCallback(async () => {
-    const parentDir = await openDialog({
-      directory: true,
-      multiple: false,
-      title: 'Choose where to create the new book folder',
-    });
-    if (!parentDir || typeof parentDir !== 'string') return;
-    const details = promptForBookCreationDetails();
-    if (!details) return;
-    let info: BookInfo;
+  const handleAddExisting = useCallback(async () => {
+    const selected = await openDialog({ directory: true, multiple: false, title: 'Add Existing Syllepsis Book' });
+    if (!selected || typeof selected !== 'string') return;
+    await openExistingPath(selected);
+  }, [openExistingPath]);
+
+  const handleForget = useCallback(async (path: string) => {
     try {
-      info = await api.createBookInParent(parentDir, details.name, details.language, details.location);
+      await api.forgetTrackedBook(path);
+      await reloadTrackedBooks();
     } catch (error) {
-      alert(`Could not create book: ${String(error)}`);
-      return;
+      setError(String(error));
     }
-    setBook(info);
-    setCategories([]);
-  }, [setBook, setCategories]);
+  }, [reloadTrackedBooks]);
+
+  const handleBookCreated = useCallback(async (info: BookInfo) => {
+    await finishOpeningBook(info);
+  }, [finishOpeningBook]);
 
   return (
     <div className="picker-root">
       <div className="picker-card">
-        <div className="picker-logo">✦</div>
+        <div className="picker-logo">S</div>
         <h1 className="picker-title">Syllepsis</h1>
-        <p className="picker-subtitle">Your local-first knowledge book</p>
+        <p className="picker-subtitle">Choose a local knowledge book.</p>
+        {error && <div className="picker-error" onClick={() => setError(null)}>{error}</div>}
+
+        <div className="tracked-books">
+          {loading ? (
+            <div className="picker-empty">Loading books...</div>
+          ) : trackedBooks.length === 0 ? (
+            <div className="picker-empty">No books are tracked on this device yet.</div>
+          ) : (
+            trackedBooks.map((book) => (
+              <div key={book.path} className={`tracked-book-row ${book.available ? '' : 'unavailable'}`}>
+                <button
+                  className="tracked-book-main"
+                  disabled={!book.available || busyPath === book.path}
+                  onClick={() => openExistingPath(book.path)}
+                >
+                  <span className="tracked-book-name">{book.name}</span>
+                  <span className="tracked-book-path">{book.path}</span>
+                  {book.status && <span className="tracked-book-status">{book.status}</span>}
+                </button>
+                {!book.available && (
+                  <button className="tracked-book-forget" onClick={() => handleForget(book.path)}>
+                    Forget
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+
         <div className="picker-actions">
-          <button className="picker-btn picker-btn-primary" onClick={handleOpen}>
-            Open Book
-          </button>
-          <button className="picker-btn picker-btn-secondary" onClick={handleCreate}>
+          <button className="picker-btn picker-btn-primary" onClick={() => setMode('create')}>
             Create New Book
+          </button>
+          <button className="picker-btn picker-btn-secondary" onClick={() => setMode('import')}>
+            Import Book
+          </button>
+          <button className="picker-btn picker-btn-secondary" onClick={handleAddExisting}>
+            Add Existing Book...
           </button>
         </div>
       </div>
+
+      {mode === 'create' && (
+        <CreateBookWizard
+          onCancel={() => setMode(null)}
+          onCreated={handleBookCreated}
+          onError={setError}
+        />
+      )}
+
+      {mode === 'import' && (
+        <ImportBookWizard
+          onCancel={() => setMode(null)}
+          onCreated={handleBookCreated}
+          onError={setError}
+        />
+      )}
+    </div>
+  );
+}
+
+interface BookWizardProps {
+  onCancel: () => void;
+  onCreated: (info: BookInfo) => Promise<void>;
+  onError: (message: string) => void;
+}
+
+function CreateBookWizard({ onCancel, onCreated, onError }: BookWizardProps) {
+  const [name, setName] = useState('');
+  const [language, setLanguage] = useState('en');
+  const [location, setLocation] = useState('');
+  const [parentPath, setParentPath] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const chooseParent = useCallback(async () => {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: 'Choose where to create the new book folder',
+    });
+    if (selected && typeof selected === 'string') setParentPath(selected);
+  }, []);
+
+  const submit = useCallback(async (event: FormEvent) => {
+    event.preventDefault();
+    if (!name.trim() || !parentPath) return;
+    setBusy(true);
+    try {
+      const info = await api.createBookInParent(
+        parentPath,
+        name.trim(),
+        language.trim() || undefined,
+        location.trim() || undefined,
+      );
+      await onCreated(info);
+    } catch (error) {
+      onError(String(error));
+      setBusy(false);
+    }
+  }, [language, location, name, onCreated, onError, parentPath]);
+
+  return (
+    <WizardShell title="Create New Book" onCancel={onCancel}>
+      <form className="wizard-form" onSubmit={submit}>
+        <label className="wizard-field">
+          <span>Book name</span>
+          <input value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+        </label>
+        <label className="wizard-field">
+          <span>Primary language</span>
+          <input value={language} onChange={(event) => setLanguage(event.target.value)} />
+        </label>
+        <label className="wizard-field">
+          <span>Location</span>
+          <input value={location} onChange={(event) => setLocation(event.target.value)} />
+        </label>
+        <label className="wizard-field">
+          <span>Parent folder</span>
+          <div className="path-picker">
+            <input value={parentPath} readOnly placeholder="Choose a folder" />
+            <button type="button" className="picker-btn picker-btn-secondary" onClick={chooseParent}>
+              Choose...
+            </button>
+          </div>
+        </label>
+        <div className="wizard-actions">
+          <button type="button" className="picker-btn picker-btn-secondary" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className="picker-btn picker-btn-primary" disabled={busy || !name.trim() || !parentPath}>
+            Create Book
+          </button>
+        </div>
+      </form>
+    </WizardShell>
+  );
+}
+
+function ImportBookWizard({ onCancel, onCreated, onError }: BookWizardProps) {
+  const [packPath, setPackPath] = useState('');
+  const [parentPath, setParentPath] = useState('');
+  const [bookName, setBookName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const choosePack = useCallback(async () => {
+    const selected = await openDialog({
+      multiple: false,
+      title: 'Choose exported book pack',
+      filters: PACK_FILTER,
+    });
+    if (!selected || typeof selected !== 'string') return;
+    setBusy(true);
+    try {
+      const manifest = await api.readPackManifest(selected);
+      setPackPath(selected);
+      setBookName((currentName) => currentName.trim() || manifest.name);
+    } catch (error) {
+      onError(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [onError]);
+
+  const chooseParent = useCallback(async () => {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: 'Choose where to create the imported book folder',
+    });
+    if (selected && typeof selected === 'string') setParentPath(selected);
+  }, []);
+
+  const submit = useCallback(async (event: FormEvent) => {
+    event.preventDefault();
+    if (!packPath || !parentPath || !bookName.trim()) return;
+    setBusy(true);
+    try {
+      const info = await api.importPackAsBook(packPath, parentPath, bookName.trim());
+      await onCreated(info);
+    } catch (error) {
+      onError(String(error));
+      setBusy(false);
+    }
+  }, [bookName, onCreated, onError, packPath, parentPath]);
+
+  return (
+    <WizardShell title="Import Book" onCancel={onCancel}>
+      <form className="wizard-form" onSubmit={submit}>
+        <label className="wizard-field">
+          <span>Pack file</span>
+          <div className="path-picker">
+            <input value={packPath} readOnly placeholder="Choose a .synpack.json file" />
+            <button type="button" className="picker-btn picker-btn-secondary" onClick={choosePack}>
+              Choose...
+            </button>
+          </div>
+        </label>
+        <label className="wizard-field">
+          <span>Book name</span>
+          <input value={bookName} onChange={(event) => setBookName(event.target.value)} />
+        </label>
+        <label className="wizard-field">
+          <span>Parent folder</span>
+          <div className="path-picker">
+            <input value={parentPath} readOnly placeholder="Choose a folder" />
+            <button type="button" className="picker-btn picker-btn-secondary" onClick={chooseParent}>
+              Choose...
+            </button>
+          </div>
+        </label>
+        <div className="wizard-actions">
+          <button type="button" className="picker-btn picker-btn-secondary" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className="picker-btn picker-btn-primary" disabled={busy || !packPath || !parentPath || !bookName.trim()}>
+            Import Book
+          </button>
+        </div>
+      </form>
+    </WizardShell>
+  );
+}
+
+function WizardShell({ title, onCancel, children }: { title: string; onCancel: () => void; children: ReactNode }) {
+  return (
+    <div className="wizard-backdrop" role="presentation">
+      <section className="wizard-panel" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+        <div className="wizard-header">
+          <h2 id="wizard-title">{title}</h2>
+          <button className="wizard-close" onClick={onCancel} aria-label="Close">
+            x
+          </button>
+        </div>
+        {children}
+      </section>
     </div>
   );
 }

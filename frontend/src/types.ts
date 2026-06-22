@@ -203,6 +203,13 @@ export interface BookInfo {
   open_warning: BookOpenWarningInfo | null;
 }
 
+export interface TrackedBookInfo {
+  name: string;
+  path: string;
+  available: boolean;
+  status?: string;
+}
+
 export interface BookOpenWarningInfo {
   missing_reserved_files: string[];
   should_offer_create_here: boolean;
