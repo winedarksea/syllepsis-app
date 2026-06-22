@@ -28,7 +28,7 @@ export function WorldView() {
   const { activeWorld, setActiveWorld, openEditor, setActiveCategory, setView } = useStore();
   const [worlds, setWorlds] = useState<World[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
-  const [backdrop, setBackdrop] = useState<string | null>(null);
+  const [backdropByWorld, setBackdropByWorld] = useState<{ worldId: string; data: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Load the world list once; default the active world to the first image world (or earth).
@@ -50,10 +50,9 @@ export function WorldView() {
     api.worldOverlay(activeWorld)
       .then((o) => { setOverlay(o); setError(null); })
       .catch((e) => setError(String(e)));
-    setBackdrop(null);
     api.worldBackdrop(activeWorld)
-      .then(setBackdrop)
-      .catch(() => setBackdrop(null));
+      .then((data) => setBackdropByWorld({ worldId: activeWorld, data }))
+      .catch(() => setBackdropByWorld({ worldId: activeWorld, data: null }));
   }, [activeWorld]);
 
   const openCategory = useCallback((name: string) => {
@@ -70,6 +69,7 @@ export function WorldView() {
   const aspect = world?.intrinsic_dimensions
     ? world.intrinsic_dimensions[0] / world.intrinsic_dimensions[1]
     : 16 / 9;
+  const backdrop = backdropByWorld?.worldId === activeWorld ? backdropByWorld.data : null;
 
   return (
     <div className="wv-root">
