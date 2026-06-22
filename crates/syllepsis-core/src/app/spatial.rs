@@ -5,12 +5,15 @@
 //! the book's stored worlds, then resolve `loc:` tokens and build a world's overlay of pins and
 //! regions over its (image or geo) backdrop.
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::{CoreError, CoreResult};
-use crate::model::{Note, World, DEFAULT_WORLD_ID};
+use crate::model::{Note, World, WorldKind, DEFAULT_WORLD_ID};
 use crate::spatial::{
     build_overlay, resolve_token, LookupEntry, Overlay, ResolvedLocation, WorldRegistry,
 };
 use crate::storage::{Book, NoteStore};
+use crate::sync::AssetRegistry;
 
 /// Build the world registry for a book (its stored worlds plus the implicit `earth`).
 fn registry_for(book: &Book) -> CoreResult<WorldRegistry> {
@@ -51,9 +54,7 @@ pub fn world_overlay(book: &Book, world_id: &str) -> CoreResult<Overlay> {
         .store
         .read_all_notes()?
         .into_iter()
-        .filter(|n| {
-            !n.metadata.lifecycle.archived && n.metadata.lifecycle.marked_for_deletion_at.is_none()
-        })
+        .filter(|n| n.metadata.is_visible_in_default_views())
         .collect();
     let categories = book.store.categories()?;
     let registry = registry_for(book)?;
@@ -79,6 +80,56 @@ pub fn resolve_location(book: &Book, token: &str) -> CoreResult<ResolvedLocation
     let registry = registry_for(book)?;
     let lookup = book.store.read_location_lookup()?;
     resolve_token(token, &registry, &lookup)
+}
+
+/// The resolved on-disk backdrop of an image-backed world: the asset's absolute path plus the MIME
+/// type inferred from its extension. The shell reads the file and serves it to the overlay view
+/// (spatial-worlds.md — the floorplan/mind-palace backdrop the pins and regions sit over).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackdropRef {
+    pub path: String,
+    pub mime: String,
+}
+
+/// Resolve a world's backdrop asset to a concrete file. Returns `None` (not an error) when the
+/// world is geo, has no backdrop set, or its backdrop UUID is not tracked by any asset on disk yet
+/// — all normal "nothing to draw behind the overlay" states the view renders as a placeholder.
+pub fn world_backdrop(book: &Book, world_id: &str) -> CoreResult<Option<BackdropRef>> {
+    let Some(world) = registry_for(book)?.get(world_id).cloned() else {
+        return Err(CoreError::NotFound(format!("world '{world_id}'")));
+    };
+    if world.kind != WorldKind::Image {
+        return Ok(None);
+    }
+    let Some(backdrop_uuid) = world.backdrop else {
+        return Ok(None);
+    };
+    let registry = AssetRegistry::scan(&book.root)?;
+    let Some(relative_path) = registry.resolve(&backdrop_uuid) else {
+        return Ok(None);
+    };
+    let absolute = book.root.join(relative_path);
+    Ok(Some(BackdropRef {
+        mime: mime_for_path(relative_path).to_string(),
+        path: absolute.to_string_lossy().into_owned(),
+    }))
+}
+
+/// MIME type for a backdrop image/drawing from its extension (the kinds `sync::assets` tracks).
+fn mime_for_path(path: &str) -> &'static str {
+    match path
+        .rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "application/octet-stream",
+    }
 }
 
 #[cfg(test)]
@@ -172,6 +223,43 @@ mod tests {
         let (_d, book) = book();
         let resolved = resolve_location(&book, "47.6,-122.3").unwrap();
         assert_eq!(resolved.world, DEFAULT_WORLD_ID);
-        assert_eq!(resolved.point, WorldPoint::Geo { lat: 47.6, lon: -122.3 });
+        assert_eq!(
+            resolved.point,
+            WorldPoint::Geo {
+                lat: 47.6,
+                lon: -122.3
+            }
+        );
+    }
+
+    #[test]
+    fn backdrop_resolves_a_tracked_asset_and_skips_geo() {
+        let (_d, book) = book();
+        // Geo world (earth) has no backdrop.
+        assert_eq!(world_backdrop(&book, DEFAULT_WORLD_ID).unwrap(), None);
+
+        // An image world whose backdrop UUID is not yet on disk → None (placeholder state).
+        create_world(
+            &book,
+            World::image("firstfloor", "First Floor", "missing-uuid", (1000, 800)),
+        )
+        .unwrap();
+        assert_eq!(world_backdrop(&book, "firstfloor").unwrap(), None);
+
+        // Drop a real SVG asset, track it by UUID, and point a world at it.
+        std::fs::write(book.root.join("floorplan.svg"), b"<svg/>").unwrap();
+        let uuid = crate::sync::assign_asset_uuid(&book.root, "floorplan.svg").unwrap();
+        create_world(
+            &book,
+            World::image("floor2", "Second Floor", &uuid, (1000, 800)),
+        )
+        .unwrap();
+
+        let backdrop = world_backdrop(&book, "floor2").unwrap().unwrap();
+        assert!(backdrop.path.ends_with("floorplan.svg"));
+        assert_eq!(backdrop.mime, "image/svg+xml");
+
+        // Unknown world id is an error, not None.
+        assert!(world_backdrop(&book, "nope").is_err());
     }
 }

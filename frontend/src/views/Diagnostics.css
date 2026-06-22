@@ -21,7 +21,7 @@
   text-align: center;
   color: var(--color-text-secondary);
 }
-.dg-error { color: #a00; }
+.dg-error { color: var(--color-error); }
 
 .dg-section {
   padding: var(--sp-5) var(--sp-6) 0;
@@ -60,10 +60,11 @@
 .dg-link:hover { text-decoration: underline; }
 
 .dg-sim {
+  font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--color-text-secondary);
-  background: var(--color-tag-bg);
+  background: var(--color-surface-raised);
   border-radius: var(--radius-sm);
   padding: 1px var(--sp-2);
 }

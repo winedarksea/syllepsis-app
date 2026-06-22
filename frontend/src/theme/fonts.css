@@ -1,0 +1,22 @@
+/* Self-hosted fonts (offline-safe for Tauri) — three voices + icon font.
+   Weights resolved from @fontsource / material-symbols in node_modules;
+   Vite inlines the woff2 at build time, so nothing is fetched at runtime. */
+
+/* Structural Sans — Inter (body UI, controls, navigation) */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+
+/* Saga Serif — Lora (book/chapter/empty-state titles, wordmark) */
+@import '@fontsource/lora/400.css';
+@import '@fontsource/lora/500.css';
+@import '@fontsource/lora/600.css';
+@import '@fontsource/lora/400-italic.css';
+
+/* Survey Mono — JetBrains Mono (ids, timestamps, coordinates, diagnostics) */
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+
+/* Icons — Material Symbols Outlined (ligature font, straight-stroke geometry) */
+@import 'material-symbols/outlined.css';

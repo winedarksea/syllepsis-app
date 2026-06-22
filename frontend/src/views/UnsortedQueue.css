@@ -73,7 +73,7 @@
   height: 100%;
   color: var(--color-text-secondary);
 }
-.uq-error { color: #a00; }
+.uq-error { color: var(--color-error); }
 
 .uq-empty {
   display: flex;
@@ -125,6 +125,7 @@
 }
 
 .uq-card-type {
+  font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   text-transform: uppercase;
@@ -162,6 +163,7 @@
 }
 
 .uq-card-date {
+  font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   margin-top: var(--sp-1);

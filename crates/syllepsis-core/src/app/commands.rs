@@ -8,9 +8,10 @@
 use chrono::Utc;
 
 use crate::app::dto::NoteDto;
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::markdown::dialect;
+use crate::model::metadata::LockMode;
 use crate::model::{Category, Note, ObjectType, PriorEdge};
 use crate::sort::{self, RenderItem};
 use crate::storage::{Book, NoteStore};
@@ -27,18 +28,14 @@ pub fn export_markdown(book: &Book) -> CoreResult<String> {
     Ok(sort::to_markdown(&book_view(book)?))
 }
 
-/// The unsorted queue: quick captures awaiting organization. Excludes archived and
-/// marked-for-deletion notes; newest first.
+/// The unsorted queue: quick captures awaiting organization. Excludes hidden (archived/private)
+/// and marked-for-deletion notes; newest first.
 pub fn unsorted_notes(book: &Book) -> CoreResult<Vec<NoteDto>> {
     let mut notes: Vec<Note> = book
         .store
         .read_all_notes()?
         .into_iter()
-        .filter(|n| {
-            !n.is_sorted()
-                && !n.metadata.lifecycle.archived
-                && n.metadata.lifecycle.marked_for_deletion_at.is_none()
-        })
+        .filter(|n| !n.is_sorted() && n.metadata.is_visible_in_default_views())
         .collect();
     // ulid is time-ordered; descending gives newest-first.
     notes.sort_by(|a, b| b.id.ulid().cmp(a.id.ulid()));
@@ -50,16 +47,14 @@ pub fn all_categories(book: &Book) -> CoreResult<Vec<Category>> {
     book.store.categories()
 }
 
-/// Every visible note (archived / pending-deletion excluded), title-sorted. Backs views that
+/// Every visible note (hidden / pending-deletion excluded), title-sorted. Backs views that
 /// need the whole corpus at once — e.g. the graph view's nodes and edges.
 pub fn list_notes(book: &Book) -> CoreResult<Vec<NoteDto>> {
     let mut notes: Vec<Note> = book
         .store
         .read_all_notes()?
         .into_iter()
-        .filter(|n| {
-            !n.metadata.lifecycle.archived && n.metadata.lifecycle.marked_for_deletion_at.is_none()
-        })
+        .filter(|n| n.metadata.is_visible_in_default_views())
         .collect();
     notes.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     Ok(notes.iter().map(NoteDto::from_note).collect())
@@ -92,12 +87,37 @@ pub fn create_note(
 
 /// Persist edits to a note. Bumps the updated timestamp and folds any inline `#tags` in the
 /// body into the category set (object-types.md: inline categories merge into the loose array).
+///
+/// Two policies are enforced here against the *stored* note: a locked note's body is protected
+/// from direct edits (privacy-security.md — body changes must go through unlock or a proposed
+/// rewrite), and editing a knowledge-pack note marks it `locally_modified` so a later pack-version
+/// re-import will not overwrite the user's change (core-concepts.md).
 pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
     let mut note = dto.into_note(book.config.markdown.dialect_version.clone())?;
+    if let Ok(stored) = book.store.read_note(&note.id) {
+        if stored.metadata.lifecycle.lock != LockMode::None && stored.body != note.body {
+            return Err(CoreError::Locked(format!(
+                "'{}' is locked; unlock it or accept a proposed rewrite to change its body",
+                note.title
+            )));
+        }
+        if !note.metadata.packs.packs.is_empty() && content_changed(&stored, &note) {
+            note.metadata.packs.locally_modified = true;
+        }
+    }
     note.metadata.dates.updated = Utc::now();
     merge_inline_categories(&mut note);
     book.save_note(&note)?;
     Ok(NoteDto::from_note(&note))
+}
+
+/// Whether a user-meaningful field of a note changed (the parts a pack re-import would overwrite).
+/// Lifecycle/authorship/date churn does not count as a "local modification".
+fn content_changed(before: &Note, after: &Note) -> bool {
+    before.title != after.title
+        || before.summary != after.summary
+        || before.body != after.body
+        || before.categories != after.categories
 }
 
 /// Set (or clear) a note's sort position.
@@ -177,6 +197,26 @@ mod tests {
             child.categories,
             vec!["energy".to_string(), "design".into()]
         );
+    }
+
+    #[test]
+    fn locked_note_rejects_a_direct_body_edit() {
+        let (_dir, book) = book();
+        let note = create_note(&book, ObjectType::Note, "protected", None).unwrap();
+        crate::app::lifecycle::set_note_lock(&book, &note.id, LockMode::UnlockDelay).unwrap();
+
+        let mut edit = get_note(&book, &note.id).unwrap();
+        edit.body = "a direct overwrite that should be refused".into();
+        assert!(matches!(
+            update_note(&book, edit).unwrap_err(),
+            CoreError::Locked(_)
+        ));
+
+        // Unlocking first, then editing, is the supported path.
+        crate::app::lifecycle::set_note_lock(&book, &note.id, LockMode::None).unwrap();
+        let mut edit = get_note(&book, &note.id).unwrap();
+        edit.body = "now editable".into();
+        assert_eq!(update_note(&book, edit).unwrap().body, "now editable");
     }
 
     #[test]

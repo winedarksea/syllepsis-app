@@ -65,7 +65,7 @@
   color: var(--color-text-secondary);
 }
 .sv-hint { color: var(--color-text-tertiary); }
-.sv-error { color: #a00; }
+.sv-error { color: var(--color-error); }
 
 .sv-results {
   padding: var(--sp-4) var(--sp-6);

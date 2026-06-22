@@ -18,6 +18,8 @@
 //! - [`llm`] — optional, per-task LLM features behind the [`llm::LlmProvider`] seam.
 //! - [`onnx`] — the shared model-runtime pattern (manifest, download, cache, verify, execution
 //!   providers) the local embedder and local LLM both build on.
+//! - [`pack`] — portable, versioned knowledge packs that import into an existing book.
+//! - [`publish`] — read-only static-site export and the private-content git exclusion.
 //! - [`text`] — the single tokenizer shared by embeddings and search.
 
 pub mod app;
@@ -30,6 +32,8 @@ pub mod llm;
 pub mod markdown;
 pub mod model;
 pub mod onnx;
+pub mod pack;
+pub mod publish;
 pub mod search;
 pub mod sort;
 pub mod spatial;
@@ -44,9 +48,9 @@ pub use error::{CoreError, CoreResult};
 pub use id::NoteId;
 pub use llm::{LlmProvider, LlmService, LlmTask, Proposal, ProposalStatus};
 pub use model::{Category, Metadata, Note, ObjectType, PriorEdge, PriorKind};
+pub use model::{SpatialRegion, World, WorldKind};
 pub use onnx::{ModelCache, ModelKind, ModelManifest, RuntimeDiagnostics};
 pub use search::{SearchEngine, SearchHit, SearchResults};
-pub use model::{SpatialRegion, World, WorldKind};
 pub use sort::{render, to_markdown, RenderItem};
 pub use spatial::{
     build_overlay, LocationLookup, Overlay, ResolvedLocation, WorldPoint, WorldRegistry,

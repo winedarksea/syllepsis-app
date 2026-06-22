@@ -17,15 +17,17 @@
 }
 
 .sidebar-app-name {
+  font-family: var(--font-serif);
   font-weight: 600;
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-lg);
   color: var(--color-heading);
-  letter-spacing: -0.3px;
+  letter-spacing: 0.2px;
 }
 
 .sidebar-theme-btn {
+  display: flex;
+  align-items: center;
   color: var(--color-text-secondary);
-  font-size: var(--font-size-lg);
   padding: var(--sp-1);
   border-radius: var(--radius-sm);
   transition: color var(--transition-fast);
@@ -64,27 +66,38 @@
   width: 100%;
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-md);
+  border-left: 2px solid transparent;
   color: var(--color-sidebar-text);
   font-size: var(--font-size-sm);
   text-align: left;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .sidebar-item:hover {
   background: var(--color-sidebar-active);
 }
 
+/* Active: subtle tonal fill + glacial-blue left hairline, not a heavy pill */
 .sidebar-item.active {
   background: var(--color-sidebar-active);
+  border-left-color: var(--color-accent);
   color: var(--color-text);
   font-weight: 500;
 }
 
+.sidebar-item.active .sidebar-item-icon {
+  color: var(--color-accent);
+}
+
 .sidebar-item-icon {
-  font-size: var(--font-size-sm);
-  width: 16px;
+  width: 20px;
+  color: var(--color-text-secondary);
   text-align: center;
   flex-shrink: 0;
+}
+
+.sidebar-item-emoji {
+  font-size: var(--font-size-sm);
 }
 
 .sidebar-badge {
@@ -115,6 +128,10 @@
 
 .sidebar-new-note {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
   padding: var(--sp-2) var(--sp-3);
   background: var(--color-accent);
   color: var(--color-text-inverse);
@@ -129,7 +146,6 @@
 }
 
 .sidebar-sync-status {
-  font-size: var(--font-size-lg);
   color: var(--color-text-tertiary);
   cursor: default;
 }

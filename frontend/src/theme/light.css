@@ -1,40 +1,50 @@
-/* Light theme color tokens */
+/* Light theme — "Pale Daylight": ash paper, bleached wood, stone under northern daylight */
 [data-theme='light'] {
-  --color-bg: #f8f7f4;
-  --color-surface: #ffffff;
-  --color-surface-raised: #f0ede8;
-  --color-border: #e0dbd4;
-  --color-border-focus: #a08060;
+  --color-bg: #e8e5de;            /* Ash White — main writing canvas */
+  --color-surface: #f3f0e8;       /* Bone — app bars, sheets, panels */
+  --color-surface-raised: #dde4e6;/* Glacial Dust — group regions, elevated */
+  --color-border: #9a9992;        /* Stone Hairline — 1px rules, dividers */
+  --color-border-focus: #2f7fa3;  /* Geothermal Blue focus ring */
 
-  --color-text: #1a1714;
-  --color-text-secondary: #6b6460;
-  --color-text-tertiary: #9c9490;
-  --color-text-inverse: #ffffff;
+  --color-text: #1f2528;          /* Basalt Ink — primary text */
+  --color-text-secondary: #555e61;/* Weathered Slate — metadata, labels */
+  --color-text-tertiary: #8a8e89; /* quieter still */
+  --color-text-inverse: #f3f0e8;  /* text on accent fills */
 
-  --color-accent: #7c4f28;
-  --color-accent-hover: #6a4020;
-  --color-accent-subtle: #f2e8df;
+  --color-accent: #2f7fa3;        /* Geothermal Blue — primary actions, links, selection */
+  --color-accent-hover: #266a8a;
+  --color-accent-subtle: #d7e3e8; /* pale glacial tonal fill */
 
-  --color-heading: #2c2420;
-  --color-link: #7c4f28;
+  --color-secondary: #6f8767;     /* Moss — categories, spatial regions, secondary active */
+  --color-secondary-subtle: #dde3d7;
+  --color-tertiary: #a45a36;      /* Volcanic Ember — warnings, rare emphasis */
+  --color-tertiary-subtle: #f0e1d8;
+  --color-error: #b0433e;         /* Iron Red — error role only */
 
-  --color-tag-bg: #f2e8df;
-  --color-tag-text: #7c4f28;
-  --color-tag-border: #d4b8a0;
+  --color-heading: #18242a;
+  --color-link: #2f7fa3;
 
-  --color-cloze-bg: #fff9e6;
-  --color-cloze-border: #e8d080;
-  --color-cloze-text: #5c4808;
+  --color-tag-bg: #d7e3e8;
+  --color-tag-text: #266a8a;
+  --color-tag-border: #b6cdd6;
 
-  --color-todo-pending: #cc6600;
-  --color-todo-done: #5a7a50;
+  --color-cloze-bg: #efe3d6;
+  --color-cloze-border: #c9a87e;
+  --color-cloze-text: #6e3f22;
 
-  --color-unsorted-badge: #cc4444;
+  --color-todo-pending: #a45a36;  /* ember */
+  --color-todo-done: #6f8767;     /* moss */
 
-  --color-sidebar-bg: #f0ede8;
-  --color-sidebar-active: #e4ddd6;
-  --color-sidebar-text: #3c3430;
+  --color-unsorted-badge: #a45a36;/* ember — needs attention */
 
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.10);
+  --color-sidebar-bg: #f3f0e8;    /* Bone */
+  --color-sidebar-active: #dde4e6;/* Glacial Dust tonal fill */
+  --color-sidebar-text: #555e61;
+
+  /* Graph/contour scaffolding hairline */
+  --color-scaffold: #9a9992;
+
+  /* Flat tonal — no drop shadows in this theme */
+  --shadow-sm: none;
+  --shadow-md: none;
 }

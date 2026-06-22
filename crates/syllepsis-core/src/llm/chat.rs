@@ -2,28 +2,29 @@
 //! the model's raw output.
 //!
 //! Kept free of the runtime ([`onnx`](super::onnx)) so it is unit-testable without a model. A
-//! chat model does not see plain text — it sees a sequence of role-delimited turns. Gemma uses
-//! `<start_of_turn>{role}\n…<end_of_turn>`, ending with an open model turn the model completes.
-//! If a system prompt is provided it is folded into the user turn (the recommended practice for
-//! Gemma models without a dedicated system turn). Centralizing both prompt building and output
-//! cleaning here means the decode loop only has to run tokens in and tokens out.
+//! chat model does not see plain text - it sees a sequence of role-delimited turns. Gemma 4 uses
+//! `<|turn>{role}\n...<turn|>`, ending with an open model turn the model completes.
+//! If a system prompt is provided it is sent as its own system turn. Centralizing both prompt
+//! building and output cleaning here means the decode loop only has to run tokens in and tokens out.
 
 /// Gemma turn delimiters.
-pub const TURN_START: &str = "<start_of_turn>";
-pub const TURN_END: &str = "<end_of_turn>";
+pub const TURN_START: &str = "<|turn>";
+pub const TURN_END: &str = "<turn|>";
 /// The token the model emits to end its turn; decoding stops here.
 pub const STOP_TOKEN: &str = TURN_END;
 
-/// Build a Gemma prompt ending in an open model turn for the model to complete. The system
-/// prompt, when non-blank, is prepended to the user message in the user turn (the recommended
-/// Gemma pattern for single-turn tasks). A blank `system` is omitted.
+/// Build a Gemma prompt ending in an open model turn for the model to complete. A blank `system`
+/// is omitted.
 pub fn build_prompt(system: &str, user: &str) -> String {
-    let user_content = if system.trim().is_empty() {
-        user.trim().to_string()
+    let user_content = user.trim();
+    if system.trim().is_empty() {
+        format!("{TURN_START}user\n{user_content}{TURN_END}\n{TURN_START}model\n")
     } else {
-        format!("{}\n\n{}", system.trim(), user.trim())
-    };
-    format!("{TURN_START}user\n{user_content}{TURN_END}\n{TURN_START}model\n")
+        format!(
+            "{TURN_START}system\n{}{TURN_END}\n{TURN_START}user\n{user_content}{TURN_END}\n{TURN_START}model\n",
+            system.trim()
+        )
+    }
 }
 
 /// Remove a `<think>…</think>` reasoning block from generated text and trim. Handles three cases:
@@ -52,12 +53,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chatml_includes_system_then_user_then_open_assistant() {
+    fn gemma4_prompt_includes_system_then_user_then_open_model_turn() {
         let p = build_prompt("Be terse.", "Summarize this note.");
         assert_eq!(
             p,
-            "<start_of_turn>user\nBe terse.\n\nSummarize this note.<end_of_turn>\n\
-             <start_of_turn>model\n"
+            "<|turn>system\nBe terse.<turn|>\n\
+             <|turn>user\nSummarize this note.<turn|>\n\
+             <|turn>model\n"
         );
     }
 
@@ -65,8 +67,8 @@ mod tests {
     fn blank_system_is_omitted() {
         let p = build_prompt("   ", "hello");
         assert!(!p.contains("system"));
-        assert!(p.starts_with("<start_of_turn>user\nhello"));
-        assert!(p.ends_with("<start_of_turn>model\n"));
+        assert!(p.starts_with("<|turn>user\nhello"));
+        assert!(p.ends_with("<|turn>model\n"));
     }
 
     #[test]

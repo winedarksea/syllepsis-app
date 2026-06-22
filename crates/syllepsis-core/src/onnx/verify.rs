@@ -3,8 +3,8 @@
 //! A model is a multi-gigabyte download a user trusts the app to run; a truncated or tampered
 //! file should be caught before it is ever loaded into the runtime (llm-ai-features.md, "a
 //! sha256-verified first-run download"). Hashing is deliberately separate from presence
-//! ([`cache`](super::cache)): presence is the cheap per-open gate, hashing is the expensive
-//! one-time check run right after a download completes. A file whose manifest entry has no
+//! ([`cache`](super::cache)): presence/size checks are the cheap per-open gate, while hashing runs
+//! in the explicit download/repair path and right after a download completes. A file whose manifest entry has no
 //! pinned hash yet is reported [`Unverified`](FileIntegrity::Unverified) rather than treated as
 //! valid — honest about what was and wasn't checked, with no silent pass.
 
@@ -12,6 +12,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::CoreResult;
@@ -19,7 +20,8 @@ use crate::onnx::cache::ModelCache;
 use crate::onnx::manifest::ModelManifest;
 
 /// The outcome of checking one file against its expected hash.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FileIntegrity {
     /// Hash present and matched.
     Verified,

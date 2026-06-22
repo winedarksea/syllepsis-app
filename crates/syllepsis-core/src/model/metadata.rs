@@ -187,6 +187,14 @@ impl Metadata {
     pub fn is_hidden_from_default_views(&self) -> bool {
         self.lifecycle.private || self.lifecycle.archived
     }
+
+    /// Whether the note should appear in default views and RAG retrieval: not hidden (private or
+    /// archived) and not pending deletion. This is the single predicate the read paths
+    /// (unsorted queue, note list, search, overlays) share so "what the user sees by default"
+    /// has one definition (privacy-security.md).
+    pub fn is_visible_in_default_views(&self) -> bool {
+        !self.is_hidden_from_default_views() && self.lifecycle.marked_for_deletion_at.is_none()
+    }
 }
 
 #[cfg(test)]

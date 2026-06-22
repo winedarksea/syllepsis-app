@@ -1,40 +1,50 @@
-/* Dark theme color tokens */
+/* Dark theme — "Volcanic": basalt ground with meltwater and lichen glowing against it */
 [data-theme='dark'] {
-  --color-bg: #19161400;
-  --color-surface: #211e1b;
-  --color-surface-raised: #2a2622;
-  --color-border: #3a3530;
-  --color-border-focus: #b08060;
+  --color-bg: #111416;            /* Obsidian — main canvas */
+  --color-surface: #20262a;       /* Basalt — app bars, panels, notes */
+  --color-surface-raised: #2c3438;/* Lava Stone — elevated surfaces */
+  --color-border: #3a4145;        /* hairline; brighter #6e7779 reserved for graph scaffolding */
+  --color-border-focus: #6fa8c7;  /* Glacial Blue focus ring */
 
-  --color-text: #e8e0d8;
-  --color-text-secondary: #a09080;
-  --color-text-tertiary: #706560;
-  --color-text-inverse: #1a1714;
+  --color-text: #ece8de;          /* Ash Text — primary text */
+  --color-text-secondary: #b8c0be;/* Cold Mist — metadata, labels */
+  --color-text-tertiary: #7e8785;
+  --color-text-inverse: #111416;  /* dark text on light-blue fills */
 
-  --color-accent: #c8905c;
-  --color-accent-hover: #d8a06c;
-  --color-accent-subtle: #2e2418;
+  --color-accent: #6fa8c7;        /* Glacial Blue — primary actions, links, selection */
+  --color-accent-hover: #84b8d4;
+  --color-accent-subtle: #233038; /* dark tonal blue fill */
 
-  --color-heading: #f0e8e0;
-  --color-link: #c8905c;
+  --color-secondary: #5e7e58;     /* Lichen Moss */
+  --color-secondary-subtle: #24302a;
+  --color-tertiary: #c8754d;      /* Ember */
+  --color-tertiary-subtle: #2e2117;
+  --color-error: #e0736a;         /* Heated Iron — error role only */
 
-  --color-tag-bg: #2e2418;
-  --color-tag-text: #c8905c;
-  --color-tag-border: #5c4030;
+  --color-heading: #f2eee4;
+  --color-link: #6fa8c7;
 
-  --color-cloze-bg: #28240e;
+  --color-tag-bg: #233038;
+  --color-tag-text: #84b8d4;
+  --color-tag-border: #355063;
+
+  --color-cloze-bg: #2e2a14;
   --color-cloze-border: #807040;
   --color-cloze-text: #d4c060;
 
-  --color-todo-pending: #e07830;
-  --color-todo-done: #7aaa68;
+  --color-todo-pending: #c8754d;  /* ember */
+  --color-todo-done: #7aaa68;     /* moss */
 
-  --color-unsorted-badge: #e06060;
+  --color-unsorted-badge: #c8754d;/* ember — needs attention */
 
-  --color-sidebar-bg: #1c1917;
-  --color-sidebar-active: #2a2622;
-  --color-sidebar-text: #c0b8b0;
+  --color-sidebar-bg: #1a1f22;
+  --color-sidebar-active: #2c3438;/* Lava Stone tonal fill */
+  --color-sidebar-text: #b8c0be;
 
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.30);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.40);
+  /* Graph/contour scaffolding hairline (brighter than default border) */
+  --color-scaffold: #6e7779;
+
+  /* Flat tonal — no drop shadows in this theme */
+  --shadow-sm: none;
+  --shadow-md: none;
 }

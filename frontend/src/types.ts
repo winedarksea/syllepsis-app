@@ -360,10 +360,127 @@ export interface ModelManifest {
 
 export interface ModelDownloadFileReport {
   file_name: string;
-  integrity: string;
+  integrity: 'verified' | 'unverified' | { mismatch: { expected: string; actual: string } };
 }
 
 export interface ModelDownloadReport {
   model_id: string;
   downloaded_files: ModelDownloadFileReport[];
+}
+
+export type ModelFileCacheState =
+  | 'missing'
+  | 'wrong_size'
+  | 'present'
+  | 'verified'
+  | 'unverified'
+  | 'mismatch';
+
+export interface ModelFileCacheStatus {
+  file_name: string;
+  repo_path: string;
+  role: string;
+  expected_size_bytes?: number;
+  actual_size_bytes?: number;
+  sha256_configured: boolean;
+  state: ModelFileCacheState;
+  mismatch_expected?: string;
+  mismatch_actual?: string;
+}
+
+export interface ModelCacheStatus {
+  model_id: string;
+  display_name: string;
+  kind: string;
+  cached: boolean;
+  loadable: boolean;
+  files: ModelFileCacheStatus[];
+}
+
+// ── Privacy & lifecycle (mirrors syllepsis_core::app::lifecycle) ──
+
+export interface NoteRef {
+  id: string;
+  title: string;
+}
+
+export interface LockedNote {
+  id: string;
+  title: string;
+  mode: LockMode;
+}
+
+export interface PendingDeletion {
+  id: string;
+  title: string;
+  marked_at: string;
+  purge_at: string;
+}
+
+export interface PolicyOverview {
+  private_notes: NoteRef[];
+  archived_notes: NoteRef[];
+  locked_notes: LockedNote[];
+  pending_deletion: PendingDeletion[];
+  private_categories: string[];
+}
+
+// ── Knowledge packs (mirrors syllepsis_core::app::pack and ::pack) ──
+
+export interface PackManifest {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+}
+
+export interface ExportSpec {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  categories: string[];
+  note_ids: string[];
+}
+
+export type ImportStatus = 'new' | 'update' | 'locally_modified';
+
+export interface ImportNotePreview {
+  id: string;
+  title: string;
+  status: ImportStatus;
+}
+
+export interface CategoryMapping {
+  incoming: string;
+  suggested_local: string | null;
+}
+
+export interface ImportPreview {
+  manifest: PackManifest;
+  notes: ImportNotePreview[];
+  category_suggestions: CategoryMapping[];
+}
+
+export interface ImportOptions {
+  selected_note_ids: string[];
+  category_map: Record<string, string>;
+}
+
+export interface ImportReport {
+  imported: string[];
+  skipped_locally_modified: string[];
+  created_categories: string[];
+}
+
+// ── Publishing & serving (mirrors syllepsis_core::app::publish) ──
+
+export interface PublishReport {
+  index_path: string;
+  published_notes: number;
+  excluded_private: number;
+}
+
+export interface GitignoreReport {
+  excluded_paths: string[];
 }

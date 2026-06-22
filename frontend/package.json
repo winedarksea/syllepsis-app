@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/lora": "^5.2.8",
     "@lexical/history": "^0.45.0",
     "@lexical/link": "^0.45.0",
     "@lexical/markdown": "^0.45.0",
@@ -18,6 +21,7 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "lexical": "^0.45.0",
+    "material-symbols": "^0.45.2",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "zustand": "^5.0.14"

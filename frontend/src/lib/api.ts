@@ -7,8 +7,11 @@ import type {
   SearchResults, RelatedNote, EmbeddingDiagnostics,
   LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, CloudLlmPrompt, CloudLlmCompletion,
   CloudLlmProviderDescriptor, CloudLlmProviderSettings, CloudLlmProviderStatus,
-  ModelManifest, ModelDownloadReport,
+  ModelManifest, ModelCacheStatus, ModelDownloadReport,
   World, Overlay, LookupEntry, ResolvedLocation,
+  LockMode, PolicyOverview,
+  ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
+  PublishReport, GitignoreReport,
 } from '../types';
 
 export const api = {
@@ -50,6 +53,12 @@ export const api = {
     invoke<CloudLlmProviderStatus>('save_cloud_llm_provider_settings', { settings }),
   clearCloudLlmProviderSettings: (provider: string) =>
     invoke<CloudLlmProviderStatus>('clear_cloud_llm_provider_settings', { provider }),
+  generateCloudProposal: (noteId: string, task: LlmTask, modelOverride?: ModelRef) =>
+    invoke<Proposal>('generate_cloud_proposal', {
+      note_id: noteId,
+      task,
+      model_override: modelOverride ?? null,
+    }),
   generateProposal: (noteId: string, task: LlmTask, modelOverride?: ModelRef) =>
     invoke<Proposal>('generate_proposal', {
       note_id: noteId,
@@ -64,12 +73,15 @@ export const api = {
     }),
   proposalFromCloudCompletion: (completion: CloudLlmCompletion) =>
     invoke<Proposal>('proposal_from_cloud_completion', { completion }),
-  acceptProposal: (proposal: Proposal, storeOldAsCommentary = false) =>
+  acceptProposal: (proposal: Proposal, storeOldAsCommentary = false, factCheckPassed = false) =>
     invoke<NoteDto>('accept_proposal', {
       proposal,
       store_old_as_commentary: storeOldAsCommentary,
+      fact_check_passed: factCheckPassed,
     }),
   builtinModelManifests: () => invoke<ModelManifest[]>('builtin_model_manifests'),
+  builtinModelCacheStatuses: (verifyHashes = false) =>
+    invoke<ModelCacheStatus[]>('builtin_model_cache_statuses', { verify_hashes: verifyHashes }),
   downloadBuiltinModel: (modelId: string) =>
     invoke<ModelDownloadReport>('download_builtin_model', { model_id: modelId }),
 
@@ -78,8 +90,33 @@ export const api = {
   createWorld: (world: World) => invoke<void>('create_world', { world }),
   deleteWorld: (id: string) => invoke<void>('delete_world', { id }),
   worldOverlay: (worldId: string) => invoke<Overlay>('world_overlay', { world_id: worldId }),
+  worldBackdrop: (worldId: string) => invoke<string | null>('world_backdrop', { world_id: worldId }),
   locationLookup: () => invoke<LookupEntry[]>('location_lookup'),
   setLocationLookupEntry: (entry: LookupEntry) =>
     invoke<void>('set_location_lookup_entry', { entry }),
   resolveLocation: (token: string) => invoke<ResolvedLocation>('resolve_location', { token }),
+
+  // Privacy & lifecycle (Phase 6)
+  policyOverview: () => invoke<PolicyOverview>('policy_overview'),
+  setNotePrivate: (id: string, isPrivate: boolean) =>
+    invoke<NoteDto>('set_note_private', { id, private: isPrivate }),
+  setNoteArchived: (id: string, archived: boolean) =>
+    invoke<NoteDto>('set_note_archived', { id, archived }),
+  setNoteLock: (id: string, mode: LockMode) => invoke<NoteDto>('set_note_lock', { id, mode }),
+  setCategoryPrivate: (name: string, isPrivate: boolean) =>
+    invoke<void>('set_category_private', { name, private: isPrivate }),
+  requestDeletion: (id: string) => invoke<NoteDto>('request_deletion', { id }),
+  restoreNote: (id: string) => invoke<NoteDto>('restore_note', { id }),
+  purgeExpired: () => invoke<string[]>('purge_expired'),
+
+  // Knowledge packs (Phase 6)
+  exportPack: (spec: ExportSpec, path: string) =>
+    invoke<PackManifest>('export_pack', { spec, path }),
+  previewPack: (path: string) => invoke<ImportPreview>('preview_pack', { path }),
+  importPack: (path: string, options: ImportOptions) =>
+    invoke<ImportReport>('import_pack', { path, options }),
+
+  // Publishing & serving (Phase 6)
+  publishSite: (outDir: string) => invoke<PublishReport>('publish_site', { out_dir: outDir }),
+  refreshPrivateGitignore: () => invoke<GitignoreReport>('refresh_private_gitignore'),
 };

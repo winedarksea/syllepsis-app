@@ -113,7 +113,13 @@ mod tests {
         let p = parse_location("47.6,-122.3").unwrap();
         let r = resolve(&p, &registry(), &LocationLookup::new()).unwrap();
         assert_eq!(r.world, DEFAULT_WORLD_ID);
-        assert_eq!(r.point, WorldPoint::Geo { lat: 47.6, lon: -122.3 });
+        assert_eq!(
+            r.point,
+            WorldPoint::Geo {
+                lat: 47.6,
+                lon: -122.3
+            }
+        );
     }
 
     #[test]

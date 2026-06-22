@@ -13,8 +13,9 @@
 }
 
 .gv-title {
+  font-family: var(--font-serif);
   font-size: var(--font-size-xl);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--color-heading);
 }
 
@@ -25,7 +26,7 @@
   height: 100%;
   color: var(--color-text-secondary);
 }
-.gv-error { color: #a00; }
+.gv-error { color: var(--color-error); }
 
 .gv-canvas {
   flex: 1;
@@ -38,23 +39,46 @@
   height: 100%;
 }
 
+/* Edge weave: a background-colored casing under each line so later edges
+   notch a gap through earlier ones at crossings (interlace effect). */
+.gv-edge-casing {
+  stroke: var(--color-bg);
+  stroke-width: calc(var(--stroke-graph) + var(--weave-gap));
+  stroke-linecap: round;
+}
+
 .gv-edge {
-  stroke: var(--color-border);
-  stroke-width: 1;
-  opacity: 0.6;
+  stroke: var(--color-accent);
+  stroke-width: var(--stroke-graph);
+  stroke-linecap: round;
+  opacity: 0.55;
 }
 
 .gv-node {
   cursor: pointer;
 }
 
+/* Quiet pale-stone discs; category carried by the ring color (blue/moss/stone). */
 .gv-node-dot {
-  transition: r var(--transition-fast);
-  stroke: var(--color-surface);
+  transition: r var(--transition-fast), stroke-width var(--transition-fast);
+  fill: var(--color-surface-raised);
+  stroke: var(--color-text-tertiary);
   stroke-width: 1.5;
 }
 
+.gv-node--0 .gv-node-dot { stroke: var(--color-accent); }
+.gv-node--1 .gv-node-dot { stroke: var(--color-secondary); }
+.gv-node--2 .gv-node-dot { stroke: var(--color-text-secondary); }
+.gv-node--3 .gv-node-dot { stroke: var(--color-accent-hover); }
+.gv-node--4 .gv-node-dot { stroke: var(--color-tertiary); }
+
+.gv-node-active .gv-node-dot {
+  stroke-width: 2.5;
+  fill: var(--color-accent-subtle);
+}
+
 .gv-node-label {
+  font-family: var(--font-sans);
   font-size: 13px;
   fill: var(--color-heading);
   paint-order: stroke;

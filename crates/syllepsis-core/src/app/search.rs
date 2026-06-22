@@ -15,16 +15,15 @@ use crate::search::{
 use crate::storage::layout;
 use crate::storage::{Book, NoteStore};
 
-/// Build a search engine over the book's *visible* notes (archived and pending-deletion notes
-/// are excluded so they never surface in results), using the configured embedding provider.
+/// Build a search engine over the book's *visible* notes (hidden — archived/private — and
+/// pending-deletion notes are excluded so they never surface in RAG results), using the
+/// configured embedding provider.
 fn engine_for(book: &Book) -> CoreResult<SearchEngine> {
     let notes: Vec<Note> = book
         .store
         .read_all_notes()?
         .into_iter()
-        .filter(|n| {
-            !n.metadata.lifecycle.archived && n.metadata.lifecycle.marked_for_deletion_at.is_none()
-        })
+        .filter(|n| n.metadata.is_visible_in_default_views())
         .collect();
     let provider = select_embedder(book.models_root(), &book.config.embedding);
     Ok(SearchEngine::build(notes, provider, &book.config))

@@ -169,6 +169,32 @@ mod tests {
         LwwTextDocument::new(&ActorId::new(actor), text)
     }
 
+    /// A snapshot with a fully-controlled clock — used to test merge order-independence without
+    /// the real wall clock (`now_ms`) leaking into the comparison.
+    fn snapshot_at(actor: &str, text: &str, wall_ms: u64, counter: u64) -> Vec<u8> {
+        serde_json::to_vec(&LwwSnapshot {
+            text: text.to_string(),
+            clock: Hlc {
+                wall_ms,
+                counter,
+                actor: actor.to_string(),
+            },
+        })
+        .unwrap()
+    }
+
+    /// A document whose clock is pinned to an explicit wall time, so tests are independent of when
+    /// the document happened to be constructed.
+    fn doc_at(actor: &str, text: &str, wall_ms: u64) -> LwwTextDocument {
+        let mut d = doc(actor, text);
+        d.clock = Hlc {
+            wall_ms,
+            counter: 0,
+            actor: actor.to_string(),
+        };
+        d
+    }
+
     #[test]
     fn snapshot_round_trips_text() {
         let d = doc("a", "hello world");
@@ -205,22 +231,29 @@ mod tests {
 
     #[test]
     fn merge_is_commutative_and_idempotent() {
-        let mut a = doc("a", "base");
-        let mut b = doc("b", "base");
-        a.set_text_at("edit-a", 5_000);
-        b.set_text_at("edit-b", 5_000); // identical wall time → actor breaks the tie ("b" > "a")
-        let (sa, sb) = (a.snapshot().unwrap(), b.snapshot().unwrap());
+        // Two concurrent edits stamped at the *same* wall time and counter, so only the actor id
+        // breaks the tie ("b" > "a"). Clocks are explicit so the comparison can't depend on when
+        // these docs were constructed (the real `now_ms`).
+        let sa = snapshot_at("a", "edit-a", 5_000, 1);
+        let sb = snapshot_at("b", "edit-b", 5_000, 1);
 
-        let mut left = doc("a", "base");
+        // Base docs sit at an earlier wall time, so both incoming edits supersede the base.
+        let mut left = doc_at("a", "base", 1_000);
         left.merge(&sa).unwrap();
         left.merge(&sb).unwrap();
         left.merge(&sb).unwrap(); // idempotent: a second merge of the same snapshot changes nothing
 
-        let mut right = doc("z", "base");
+        let mut right = doc_at("z", "base", 1_000);
         right.merge(&sb).unwrap();
         right.merge(&sa).unwrap();
 
         assert_eq!(left.text(), right.text(), "merge must be order-independent");
-        assert_eq!(left.text(), "edit-b");
+        assert_eq!(
+            left.text(),
+            "edit-b",
+            "the actor tie-break ('b' > 'a') decides"
+        );
+        // Converged state is byte-identical regardless of merge order (loop-prevention contract).
+        assert_eq!(left.snapshot().unwrap(), right.snapshot().unwrap());
     }
 }

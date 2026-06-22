@@ -13,6 +13,7 @@ import { CategoryNode } from './nodes/CategoryNode';
 import { ClozeNode } from './nodes/ClozeNode';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
+import { Icon } from '../components/Icon';
 import type { NoteDto } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import './Editor.css';
@@ -135,7 +136,10 @@ export function Editor({ noteId }: Props) {
   return (
     <div className="editor-container selectable">
       <div className="editor-toolbar">
-        <button className="editor-back" onClick={closeEditor}>← Back</button>
+        <button className="editor-back" onClick={closeEditor}>
+          <Icon name="arrow_back" size={16} />
+          <span>Back</span>
+        </button>
         <div className="editor-toolbar-center">
           <span className="editor-type-badge">{note.type}</span>
         </div>

@@ -79,22 +79,30 @@ to an OS app-data models directory shared across books, driven by config-driven 
 files, quantization, hash, size, required execution providers). The LLM and embedder share the same
 download/cache/verify/EP-selection infrastructure behind the `onnx` Cargo feature. ORT picks the best
 available execution provider with a CPU fallback and records which it used (for Diagnostics).
+All built-in manifest files pin sha256 and byte size from Hugging Face metadata, so first-run
+downloads fail closed on integrity mismatch instead of silently accepting changed model bytes.
+
+For live verification outside the app shell, populate a cache with the same core downloader:
+
+```bash
+cargo run -p syllepsis-core --features onnx --example download_builtin_models -- .model-cache
+SYLLEPSIS_MODEL_CACHE=.model-cache cargo test -p syllepsis-core --features onnx --test onnx_live -- --ignored --nocapture
+```
 
 ## Providers & Routing
 
 LLM work is gated behind the `LlmProvider` seam, with three kinds of provider:
 - **Local** — the bundled Gemma 4 E2B via ONNX Runtime (above).
-- **Cloud** — hybrid execution: Rust owns the router, prompt-building, and the proposal/accept flow,
-  while the frontend runs the actual call via the [Vercel AI SDK](https://sdk.vercel.ai/) (streaming +
-  structured output, which replaces hand-parsing of category/status replies) and posts the result back
-  for Rust to wrap as a proposal.
+- **Cloud** — Tauri executes provider HTTP calls from OS-keychain credentials; Rust owns routing,
+  prompt-building, response parsing, and the proposal/accept flow so secrets never cross IPC.
 - **Bring-your-own** — any OpenAI-compatible endpoint (llama.cpp server, Ollama, LM Studio, most
   clouds) via a base URL; Anthropic for Claude.
 
 **Keys** live in the OS keychain and are never written to synced config or markdown — consistent with
 "no credentials are managed by this app" ([platform-infra.md](platform-infra.md)).
 The desktop shell exposes keychain-backed provider status/save/clear commands that return only
-configured/not-configured booleans to the UI; secret values are never returned over IPC.
+configured/not-configured booleans to the UI; secret values are never returned over IPC. The
+OpenAI-compatible route accepts a base URL with no API key, which covers a local llama.cpp server.
 
 Users configure **per-task routing**: each task names a `{provider, model}` pair, so (for example)
 summaries run on the local model while fact-checks run on a cloud Opus model. A per-action override

@@ -4,7 +4,8 @@ pub mod commands;
 pub mod state;
 
 use commands::{
-    book::*, categories::*, cloud_llm::*, llm::*, notes::*, search::*, spatial::*, sync::*,
+    book::*, categories::*, cloud_llm::*, lifecycle::*, llm::*, notes::*, pack::*, publish::*,
+    search::*, spatial::*, sync::*,
 };
 use state::AppState;
 
@@ -43,11 +44,13 @@ pub fn run() {
             cloud_llm_provider_statuses,
             save_cloud_llm_provider_settings,
             clear_cloud_llm_provider_settings,
+            generate_cloud_proposal,
             generate_proposal,
             prepare_cloud_prompt,
             proposal_from_cloud_completion,
             accept_proposal,
             builtin_model_manifests,
+            builtin_model_cache_statuses,
             download_builtin_model,
             // sync (Phase 4)
             sync_to_folder,
@@ -58,9 +61,26 @@ pub fn run() {
             create_world,
             delete_world,
             world_overlay,
+            world_backdrop,
             location_lookup,
             set_location_lookup_entry,
             resolve_location,
+            // privacy & lifecycle (Phase 6)
+            policy_overview,
+            set_note_private,
+            set_note_archived,
+            set_note_lock,
+            set_category_private,
+            request_deletion,
+            restore_note,
+            purge_expired,
+            // knowledge packs (Phase 6)
+            export_pack,
+            preview_pack,
+            import_pack,
+            // publishing & serving (Phase 6)
+            publish_site,
+            refresh_private_gitignore,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Syllepsis");

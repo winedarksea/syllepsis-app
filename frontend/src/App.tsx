@@ -9,6 +9,8 @@ import { CategoryView } from './views/CategoryView';
 import { SearchView } from './views/SearchView';
 import { GraphView } from './views/GraphView';
 import { WorldView } from './views/WorldView';
+import { PrivacyView } from './views/PrivacyView';
+import { PacksView } from './views/PacksView';
 import { Diagnostics } from './views/Diagnostics';
 import { Editor } from './editor/Editor';
 import './App.css';
@@ -90,6 +92,10 @@ function Workspace() {
           <GraphView />
         ) : view === 'worlds' ? (
           <WorldView />
+        ) : view === 'privacy' ? (
+          <PrivacyView />
+        ) : view === 'packs' ? (
+          <PacksView />
         ) : view === 'diagnostics' ? (
           <Diagnostics />
         ) : (

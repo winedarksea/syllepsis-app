@@ -2,8 +2,8 @@
 //! is built and downloaded — otherwise the offline heuristic provider.
 //!
 //! Mirrors [`embeddings::selection`](crate::embeddings::selection). Cloud providers are *not*
-//! constructed here: per the design, cloud calls execute in the frontend (Vercel AI SDK) and only
-//! their results re-enter the core, so from the core's perspective the live local model and the
+//! constructed here: the shell owns cloud/local-server HTTP execution with keychain credentials and
+//! only their results re-enter the core. From core's perspective, the live local model and the
 //! offline heuristic are the only in-process providers. Anything other than a present, loadable
 //! local model falls back to [`OfflineLlmProvider`] so the proposal flow always works.
 

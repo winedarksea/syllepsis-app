@@ -217,8 +217,7 @@ mod tests {
         let mut lookup = LocationLookup::new();
         lookup.upsert(LookupEntry::new("loft", "firstfloor", 0.3, 0.4));
         let notes = vec![note_with(Some("@loft"), "")];
-        let overlay =
-            build_overlay("firstfloor", &notes, &[], &floor_registry(), &lookup).unwrap();
+        let overlay = build_overlay("firstfloor", &notes, &[], &floor_registry(), &lookup).unwrap();
         assert_eq!(overlay.pins.len(), 1);
         assert_eq!(overlay.pins[0].point, WorldPoint::Plane { x: 0.3, y: 0.4 });
     }

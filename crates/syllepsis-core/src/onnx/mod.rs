@@ -22,6 +22,7 @@ pub mod cache;
 pub mod download;
 pub mod execution_provider;
 pub mod manifest;
+pub mod status;
 pub mod verify;
 
 #[cfg(feature = "onnx")]
@@ -41,6 +42,9 @@ pub use execution_provider::{
 pub use manifest::{
     builtin, builtin_manifests, ModelFile, ModelKind, ModelManifest, PoolingStrategy, Quantization,
     BUNDLED_LLM_ID, QWEN3_EMBEDDING_ID,
+};
+pub use status::{
+    inspect_model_cache, ModelCacheStatus, ModelFileCacheState, ModelFileCacheStatus,
 };
 pub use verify::{verify_manifest, FileIntegrity};
 

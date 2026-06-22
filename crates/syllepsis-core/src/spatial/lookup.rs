@@ -63,7 +63,11 @@ impl LocationLookup {
             if fields.len() != 4 {
                 return Err(CoreError::parse(
                     "location lookup csv",
-                    format!("line {}: expected 4 columns, got {}", line_no + 1, fields.len()),
+                    format!(
+                        "line {}: expected 4 columns, got {}",
+                        line_no + 1,
+                        fields.len()
+                    ),
                 ));
             }
             let first = fields[2].parse::<f64>().map_err(|_| {
@@ -93,7 +97,10 @@ impl LocationLookup {
         let mut out = String::from(CSV_HEADER);
         out.push('\n');
         for e in &self.entries {
-            out.push_str(&format!("{},{},{},{}\n", e.name, e.world, e.first, e.second));
+            out.push_str(&format!(
+                "{},{},{},{}\n",
+                e.name, e.world, e.first, e.second
+            ));
         }
         out
     }
@@ -102,7 +109,11 @@ impl LocationLookup {
     /// preferred; otherwise the first case-insensitive name match wins.
     pub fn resolve(&self, name: &str, world_hint: Option<&str>) -> Option<&LookupEntry> {
         let name_lc = name.to_lowercase();
-        let matches = || self.entries.iter().filter(|e| e.name.to_lowercase() == name_lc);
+        let matches = || {
+            self.entries
+                .iter()
+                .filter(|e| e.name.to_lowercase() == name_lc)
+        };
         if let Some(world) = world_hint {
             if let Some(hit) = matches().find(|e| e.world == world) {
                 return Some(hit);
@@ -153,7 +164,10 @@ mod tests {
         // Case-insensitive name match.
         assert!(t.resolve("KITCHEN", None).is_some());
         // World hint disambiguates duplicate names across worlds.
-        assert_eq!(t.resolve("kitchen", Some("secondfloor")).unwrap().second, 0.7);
+        assert_eq!(
+            t.resolve("kitchen", Some("secondfloor")).unwrap().second,
+            0.7
+        );
     }
 
     #[test]
@@ -168,7 +182,10 @@ mod tests {
     #[test]
     fn empty_or_header_only_csv_is_empty() {
         assert!(LocationLookup::from_csv("").unwrap().entries().is_empty());
-        assert!(LocationLookup::from_csv(CSV_HEADER).unwrap().entries().is_empty());
+        assert!(LocationLookup::from_csv(CSV_HEADER)
+            .unwrap()
+            .entries()
+            .is_empty());
     }
 
     #[test]

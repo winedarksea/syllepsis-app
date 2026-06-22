@@ -402,10 +402,18 @@ mod tests {
             .write_world(&World::image("firstfloor", "First Floor", "d-1", (10, 10)))
             .unwrap();
         let mut lookup = LocationLookup::new();
-        lookup.upsert(crate::spatial::LookupEntry::new("kitchen", "firstfloor", 0.4, 0.3));
+        lookup.upsert(crate::spatial::LookupEntry::new(
+            "kitchen",
+            "firstfloor",
+            0.4,
+            0.3,
+        ));
         store.write_location_lookup(&lookup).unwrap();
 
-        assert_eq!(store.read_location_lookup().unwrap().entries(), lookup.entries());
+        assert_eq!(
+            store.read_location_lookup().unwrap().entries(),
+            lookup.entries()
+        );
         // The lookup CSV is not picked up by the world scan.
         assert_eq!(store.worlds().unwrap().len(), 1);
     }

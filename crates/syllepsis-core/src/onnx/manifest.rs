@@ -92,12 +92,12 @@ pub struct ModelFile {
 }
 
 impl ModelFile {
-    fn new(repo_path: &str, role: FileRole) -> ModelFile {
+    fn pinned(repo_path: &str, role: FileRole, sha256: &str, size_bytes: u64) -> ModelFile {
         ModelFile {
             repo_path: repo_path.to_string(),
             role,
-            sha256: None,
-            size_bytes: None,
+            sha256: Some(sha256.to_string()),
+            size_bytes: Some(size_bytes),
         }
     }
 
@@ -198,10 +198,30 @@ fn qwen3_embedding_0_6b() -> ModelManifest {
         kind: ModelKind::Embedding,
         quantization: Quantization::Int8,
         files: vec![
-            ModelFile::new("onnx/model_quantized.onnx", FileRole::Weights),
-            ModelFile::new("tokenizer.json", FileRole::Tokenizer),
-            ModelFile::new("tokenizer_config.json", FileRole::TokenizerConfig),
-            ModelFile::new("config.json", FileRole::Config),
+            ModelFile::pinned(
+                "onnx/model_quantized.onnx",
+                FileRole::Weights,
+                "87cd124e0ef1fd1f223ebc283efccbaeac386d0b08344701c46975d0657b591f",
+                613_527_631,
+            ),
+            ModelFile::pinned(
+                "tokenizer.json",
+                FileRole::Tokenizer,
+                "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
+                11_423_705,
+            ),
+            ModelFile::pinned(
+                "tokenizer_config.json",
+                FileRole::TokenizerConfig,
+                "977648852447cb6587327ff3205b0a84cf2fc9f05621d6c8e88a497caafab2e1",
+                9_731,
+            ),
+            ModelFile::pinned(
+                "config.json",
+                FileRole::Config,
+                "66a10929782f3c9a3cd5dec90e2a95c60e05736134a63cd54479eeae80bed175",
+                1_576,
+            ),
         ],
         hidden_size: 1024,
         max_context_tokens: 32_768,
@@ -235,17 +255,54 @@ fn gemma_4_e2b() -> ModelManifest {
         kind: ModelKind::Llm,
         quantization: Quantization::Q4,
         files: vec![
-            ModelFile::new("onnx/embed_tokens_q4.onnx", FileRole::TokenEmbeddings),
-            ModelFile::new("onnx/embed_tokens_q4.onnx_data", FileRole::WeightsData),
-            ModelFile::new("onnx/decoder_model_merged_q4.onnx", FileRole::Decoder),
-            ModelFile::new(
+            ModelFile::pinned(
+                "onnx/embed_tokens_q4.onnx",
+                FileRole::TokenEmbeddings,
+                "2d8c8a2bcc30e8ded7f636967c2a58a346116583356dd933720b005fc88079c4",
+                5_142,
+            ),
+            ModelFile::pinned(
+                "onnx/embed_tokens_q4.onnx_data",
+                FileRole::WeightsData,
+                "40fa957d9988b8a0160c8b0eb5c3f781a237627e9f7153f30514a4ffb2e62888",
+                1_762_656_256,
+            ),
+            ModelFile::pinned(
+                "onnx/decoder_model_merged_q4.onnx",
+                FileRole::Decoder,
+                "c6edb929bf342c524728d37efd400285ee71525e8fe64ff996341f78c3e577d2",
+                647_599,
+            ),
+            ModelFile::pinned(
                 "onnx/decoder_model_merged_q4.onnx_data",
                 FileRole::WeightsData,
+                "b879fe4b946c9b9ff6acb60f7c5eda3d2c9c4df8625895feb2d1e269002f0345",
+                1_864_102_912,
             ),
-            ModelFile::new("tokenizer.json", FileRole::Tokenizer),
-            ModelFile::new("tokenizer_config.json", FileRole::TokenizerConfig),
-            ModelFile::new("config.json", FileRole::Config),
-            ModelFile::new("generation_config.json", FileRole::GenerationConfig),
+            ModelFile::pinned(
+                "tokenizer.json",
+                FileRole::Tokenizer,
+                "47bd35616c7c782aaca6ccf48c75f3461d5877170984b8836b375107d0a9f566",
+                19_439_251,
+            ),
+            ModelFile::pinned(
+                "tokenizer_config.json",
+                FileRole::TokenizerConfig,
+                "06afbf54e228050cba79c4a0afd83543cc89070a2d62b8337d0aa8b4cdc348c3",
+                18_807,
+            ),
+            ModelFile::pinned(
+                "config.json",
+                FileRole::Config,
+                "5494e6677d9e150ea20ba3101ae8a32b0f141004626f052725d8bf48991b9faa",
+                5_549,
+            ),
+            ModelFile::pinned(
+                "generation_config.json",
+                FileRole::GenerationConfig,
+                "e6a0b50de21a511f15ac4857b7f227f68ee60ecb1f11255d07b75e0bdc60e155",
+                238,
+            ),
         ],
         hidden_size: 2048,
         max_context_tokens: 8_192,
@@ -305,6 +362,29 @@ mod tests {
     }
 
     #[test]
+    fn every_builtin_model_file_has_pinned_integrity_metadata() {
+        for manifest in builtin_manifests() {
+            for file in &manifest.files {
+                assert!(
+                    file.sha256
+                        .as_ref()
+                        .is_some_and(|hash| hash.len() == 64
+                            && hash.chars().all(|ch| ch.is_ascii_hexdigit())),
+                    "{}:{} lacks a pinned sha256",
+                    manifest.id,
+                    file.repo_path
+                );
+                assert!(
+                    file.size_bytes.is_some_and(|size| size > 0),
+                    "{}:{} lacks a positive size",
+                    manifest.id,
+                    file.repo_path
+                );
+            }
+        }
+    }
+
+    #[test]
     fn gemma_manifest_matches_split_text_export() {
         let m = builtin(BUNDLED_LLM_ID).unwrap();
         assert_eq!(m.repo, "onnx-community/gemma-4-E2B-it-ONNX");
@@ -329,7 +409,12 @@ mod tests {
 
     #[test]
     fn file_name_strips_repo_subdir() {
-        let f = ModelFile::new("onnx/model_q4f16.onnx", FileRole::Weights);
+        let f = ModelFile::pinned(
+            "onnx/model_q4f16.onnx",
+            FileRole::Weights,
+            &"0".repeat(64),
+            1,
+        );
         assert_eq!(f.file_name(), "model_q4f16.onnx");
     }
 

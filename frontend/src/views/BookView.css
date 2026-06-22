@@ -5,9 +5,9 @@
 }
 
 .bv-document {
-  max-width: 720px;
+  max-width: 700px;
   margin: 0 auto;
-  padding: var(--sp-8) var(--sp-6);
+  padding: var(--sp-8) var(--sp-6) calc(var(--sp-8) * 2);
 }
 
 .bv-state {
@@ -23,12 +23,15 @@
   padding: var(--sp-8);
 }
 
-.bv-error { color: #a00; }
+.bv-error { color: var(--color-error); }
 .bv-empty { color: var(--color-text-tertiary); }
 
+/* Saga serif headings as chapter markers: strong space before, modest after. */
 .bv-heading {
+  font-family: var(--font-serif);
   color: var(--color-heading);
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: 0.2px;
   margin: var(--sp-8) 0 var(--sp-4);
   line-height: var(--line-height-tight);
 }
@@ -36,6 +39,19 @@
 .bv-h2 { font-size: var(--font-size-xl); }
 .bv-h3 { font-size: var(--font-size-lg); }
 .bv-h4, .bv-h5, .bv-h6 { font-size: var(--font-size-base); }
+
+/* Chapter rule: a quiet dot-dash divider above top-level category headings. */
+.bv-h1, .bv-h2 {
+  margin-top: calc(var(--sp-8) * 1.5);
+  padding-top: var(--sp-5);
+  border-top: 1px dashed var(--color-border);
+}
+.bv-document > .bv-h1:first-child,
+.bv-document > .bv-h2:first-child {
+  margin-top: var(--sp-3);
+  padding-top: 0;
+  border-top: none;
+}
 
 .bv-note {
   display: flex;
@@ -68,8 +84,10 @@
 }
 
 .bv-note-body {
+  font-family: var(--font-serif);
+  font-size: var(--font-size-lg);
   color: var(--color-text);
-  line-height: var(--line-height-base);
+  line-height: var(--line-height-loose);
 }
 
 .bv-empty-body {

@@ -39,7 +39,9 @@ docs/                  design docs + implementation plan
 | `crdt` | `NoteCrdt`/`CrdtBackend` seams + always-on LWW-register backend + `LoroDocument` (fine-grained text CRDT, `loro` feature) |
 | `sync` | `SyncProvider` seam + `LocalFolderSync` default; the sync engine (markdown ⇄ sidecar reconcile, plan/apply, conflict copies, loop prevention), per-device state, asset UUID sidecars |
 | `spatial` | Worlds & overlays: the `loc:` grammar parser, the world registry (implicit `earth`), the CSV text→coordinate lookup table, coordinate resolution, and overlay (pins + regions) assembly over an image/geo world |
-| `app` | Framework-agnostic command surface (DTOs + operations) the Tauri shell will wrap |
+| `pack` | Knowledge packs: the portable, versioned [`Pack`] envelope (manifest + notes + categories) and its single-file JSON (de)serialization |
+| `publish` | Read-only static-site rendering (markdown→HTML) and the idempotent managed-`.gitignore` block that excludes private content from a git publish |
+| `app` | Framework-agnostic command surface (DTOs + operations) the Tauri shell wraps — including `lifecycle` (privacy/lock/deletion), `pack` (export/import), and `publish` (site + git exclusion) |
 | `config` / `error` | Typed per-book config (no magic numbers) and the crate-wide error type |
 
 ## Status
@@ -70,12 +72,24 @@ and inline `loc:` body tokens become overlay **pins**; a category's `location` b
 raster backdrops). The `app::spatial` command surface (list/create/delete worlds, build a world overlay,
 read/edit the lookup table, resolve a token) is wrapped by Tauri commands, and the React **Worlds** view
 renders pins and regions over a normalized coordinate plane (clicking a note pin opens the note; clicking a
-category pin/region runs its filtered-sorted view). Loading the actual backdrop image bytes and geo map tiles
-are later passes.
+category pin/region runs its filtered-sorted view). An image world's backdrop is served from the core as a
+self-contained `data:` URL and drawn behind the overlay; geo map tiles remain a later pass.
 
-Next: cloud HTTP sync providers and git integration; sync UI; backdrop-image/SVG asset serving and the geo
-map-tile view; plus remaining Phase 3 product UI work for keychain-backed cloud execution and richer LLM
-management.
+**Phase 6 packs / privacy / serving is in place** (`clippy -D warnings` clean default + `--features loro`,
+257 core tests / 260 with loro): the privacy & lifecycle behavior layer (`app::lifecycle`) finally acts on
+the Phase-1 fields — private/archived/locked toggles, a delayed-deletion "mark for deletion" flow with a
+scheduled purge (and self-destruct `vanish_at`), and the centralized policy overview — with private notes and
+notes in private categories dropped from default views and RAG retrieval. Locked notes gate body changes: an
+unlock delay holds a rewrite until the configured window elapses, and a fact-check gate requires a passing
+check, enforced both in the LLM proposal-accept flow and on direct edits. Knowledge **packs** (`pack` +
+`app::pack`) export a curated, versioned set of notes as a single distributable JSON file and import it with
+category mapping and `locally_modified` overwrite protection on version re-imports. **Serving** (`publish` +
+`app::publish`) renders a read-only static HTML site that excludes private content, and rewrites a managed
+`.gitignore` block so a git publish never carries private notes/categories. The React **Privacy** and
+**Packs** views drive all of it.
+
+Next: cloud HTTP sync providers and git integration; sync UI; the geo map-tile view; plus remaining Phase 3
+product UI work for keychain-backed cloud execution and richer LLM management.
 
 ## Developing
 

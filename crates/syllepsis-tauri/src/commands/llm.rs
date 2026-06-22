@@ -9,14 +9,15 @@ use syllepsis_core::app::llm::{
 };
 use syllepsis_core::config::ModelRef;
 use syllepsis_core::llm::{LlmTask, Proposal};
-use syllepsis_core::onnx::{self, ModelCache, ModelManifest};
+use syllepsis_core::onnx::{self, FileIntegrity, ModelCache, ModelCacheStatus, ModelManifest};
 
+use crate::commands::cloud_llm::cloud_provider_is_configured;
 use crate::state::{models_root_from_app_data, AppState};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelDownloadFileReport {
     pub file_name: String,
-    pub integrity: String,
+    pub integrity: FileIntegrity,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,7 +54,17 @@ pub fn llm_status(state: State<AppState>) -> Result<LlmStatus, String> {
 /// Effective provider/model route for every LLM task.
 #[tauri::command]
 pub fn llm_route_statuses(state: State<AppState>) -> Result<Vec<LlmRouteStatus>, String> {
-    with_book!(state, book, { Ok(app::llm_route_statuses(book)) })
+    with_book!(state, book, {
+        app::llm_route_statuses(book)
+            .into_iter()
+            .map(|mut route| {
+                if route.execution_mode == app::LlmExecutionMode::Cloud {
+                    route.available = cloud_provider_is_configured(&route.provider)?;
+                }
+                Ok(route)
+            })
+            .collect()
+    })
 }
 
 /// Generate (but do not apply) a proposal for a note and task.
@@ -72,7 +83,7 @@ pub fn generate_proposal(
     })
 }
 
-/// Prepare a routed prompt for a frontend-owned cloud provider call.
+/// Prepare a routed prompt for shell-owned cloud/local-server execution.
 #[tauri::command]
 pub fn prepare_cloud_prompt(
     state: State<AppState>,
@@ -85,7 +96,7 @@ pub fn prepare_cloud_prompt(
     })
 }
 
-/// Wrap frontend cloud output into the shared proposal/acceptance flow.
+/// Wrap external provider output into the shared proposal/acceptance flow.
 #[tauri::command]
 pub fn proposal_from_cloud_completion(
     state: State<AppState>,
@@ -96,15 +107,17 @@ pub fn proposal_from_cloud_completion(
     })
 }
 
-/// Apply a proposal to its target note.
+/// Apply a proposal to its target note. `fact_check_passed` satisfies a fact-check-gated lock.
 #[tauri::command]
 pub fn accept_proposal(
     state: State<AppState>,
     proposal: Proposal,
     store_old_as_commentary: bool,
+    fact_check_passed: bool,
 ) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        app::accept_proposal(book, &proposal, store_old_as_commentary).map_err(|e| e.to_string())
+        app::accept_proposal(book, &proposal, store_old_as_commentary, fact_check_passed)
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -112,6 +125,25 @@ pub fn accept_proposal(
 #[tauri::command]
 pub fn builtin_model_manifests() -> Vec<ModelManifest> {
     onnx::builtin_manifests()
+}
+
+/// Inspect the machine-local cache status for every built-in model.
+#[tauri::command]
+pub fn builtin_model_cache_statuses(
+    app: AppHandle,
+    verify_hashes: bool,
+) -> Result<Vec<ModelCacheStatus>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("resolve app data dir: {e}"))?;
+    let cache = ModelCache::new(models_root_from_app_data(&app_data_dir));
+    onnx::builtin_manifests()
+        .iter()
+        .map(|manifest| {
+            onnx::inspect_model_cache(&cache, manifest, verify_hashes).map_err(|e| e.to_string())
+        })
+        .collect()
 }
 
 /// Download any missing files for a built-in model into the machine-local app-data cache.
@@ -134,7 +166,7 @@ pub fn download_builtin_model(
         .into_iter()
         .map(|(file_name, integrity)| ModelDownloadFileReport {
             file_name,
-            integrity: format!("{integrity:?}"),
+            integrity,
         })
         .collect();
     state.invalidate_llm_service();
@@ -142,4 +174,35 @@ pub fn download_builtin_model(
         model_id,
         downloaded_files: downloaded,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn download_report_serializes_integrity_as_a_typed_enum() {
+        let report = ModelDownloadFileReport {
+            file_name: "model.onnx".to_string(),
+            integrity: FileIntegrity::Verified,
+        };
+
+        let json = serde_json::to_value(report).unwrap();
+
+        assert_eq!(json["integrity"], "verified");
+
+        let mismatch_report = ModelDownloadFileReport {
+            file_name: "model.onnx".to_string(),
+            integrity: FileIntegrity::Mismatch {
+                expected: "expected".to_string(),
+                actual: "actual".to_string(),
+            },
+        };
+        let mismatch_json = serde_json::to_value(mismatch_report).unwrap();
+        assert_eq!(
+            mismatch_json["integrity"]["mismatch"]["expected"],
+            "expected"
+        );
+        assert_eq!(mismatch_json["integrity"]["mismatch"]["actual"], "actual");
+    }
 }

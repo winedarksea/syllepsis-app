@@ -69,6 +69,11 @@ In sorted view, users can filter by a secondary category. For example, house des
 
 ## Knowledge Packs
 
+> **Status (Phase 6, implemented):** packs are a single distributable JSON file (`syllepsis-core::pack`);
+> `app::pack` handles export by category, an import preview (per-note new/update/locally-modified status +
+> category-mapping suggestions), and the import itself, which honors the `locally_modified` overwrite
+> protection below. The React **Packs** view drives export and import.
+
 Knowledge packs are curated collections of notes intended to be loaded into an existing book, as opposed to a standalone book.
 
 Key behaviors:

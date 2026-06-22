@@ -1,8 +1,11 @@
 pub mod book;
 pub mod categories;
 pub mod cloud_llm;
+pub mod lifecycle;
 pub mod llm;
 pub mod notes;
+pub mod pack;
+pub mod publish;
 pub mod search;
 pub mod spatial;
 pub mod sync;

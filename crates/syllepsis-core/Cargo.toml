@@ -23,7 +23,7 @@ rusqlite = { workspace = true }
 # remain the default providers). `ort` is the ONNX Runtime; `tokenizers` is the Hugging Face fast
 # tokenizer the Qwen3 models ship; `reqwest` fetches the first-run model download.
 ort = { version = "2.0.0-rc.12", optional = true, default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls"] }
-ndarray = { version = "0.16", optional = true }
+ndarray = { version = "0.17", optional = true }
 # default-features off drops the oniguruma (C) and esaxx (C++) builds; Qwen's ByteLevel BPE
 # tokenizer.json loads without them.
 tokenizers = { version = "0.23", optional = true, default-features = false, features = ["fancy-regex"] }

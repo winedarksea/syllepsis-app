@@ -10,8 +10,9 @@
   --sp-6: 24px;
   --sp-8: 32px;
 
-  /* Typography */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  /* Typography — three voices: structural sans, saga serif, survey mono */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-serif: 'Lora', Cormorant Garamond, Georgia, 'Times New Roman', serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, monospace;
   --font-size-xs: 11px;
   --font-size-sm: 13px;
@@ -23,12 +24,25 @@
   --line-height-base: 1.6;
   --line-height-loose: 1.9;
 
-  /* Radii */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* Radii — crisp, architectural (0–4dp per Nordic/Icelandic guide) */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
 
-  /* Transitions */
+  /* Chamfer for hero components only (graph nodes, category chips, book covers) */
+  --clip-chamfer: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+
+  /* Strokes — hairline default, heavier graph lines, weave gap */
+  --stroke-hairline: 1px;
+  --stroke-graph: 1.5px;
+  --stroke-graph-active: 2.5px;
+  --weave-gap: 5px;
+
+  /* Spatial canvas scaffold opacities */
+  --grid-opacity: 0.06;
+  --contour-opacity: 0.10;
+
+  /* Transitions — weighty, settled (no bounce) */
   --transition-fast: 120ms ease;
   --transition-base: 200ms ease;
 

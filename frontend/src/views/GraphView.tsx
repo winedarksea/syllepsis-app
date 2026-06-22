@@ -11,14 +11,18 @@ import './GraphView.css';
 
 const WIDTH = 1000;
 const HEIGHT = 720;
-const PALETTE = ['#4f8cff', '#34c98b', '#e0a23a', '#d9647a', '#9b6bdf', '#46b8c8', '#c97b4f', '#7a8aa0'];
+// Above this edge count, drop the weave casing to keep dense graphs legible.
+const WEAVE_LIMIT = 140;
+// Cluster colors come from theme tokens (see .gv-node--N in GraphView.css);
+// we only carry the cluster index so the palette stays theme-driven.
+const CLUSTERS = 5;
 
 interface Node {
   id: string;
   title: string;
   x: number;
   y: number;
-  color: string;
+  cluster: number;
 }
 
 function buildLayout(notes: NoteDto[]): { nodes: Node[]; edges: [string, string][] } {
@@ -41,7 +45,7 @@ function buildLayout(notes: NoteDto[]): { nodes: Node[]; edges: [string, string]
     const groupY = groupKeys.length === 1 ? cy : cy + Math.sin(groupAngle) * ringRadius;
     const members = groups.get(key)!;
     const localRadius = Math.min(120, 30 + members.length * 8);
-    const color = PALETTE[gi % PALETTE.length];
+    const cluster = gi % CLUSTERS;
 
     members.forEach((n, mi) => {
       const a = (mi / Math.max(members.length, 1)) * Math.PI * 2;
@@ -51,7 +55,7 @@ function buildLayout(notes: NoteDto[]): { nodes: Node[]; edges: [string, string]
         title: n.title || '(untitled)',
         x: groupX + Math.cos(a) * r,
         y: groupY + Math.sin(a) * r,
-        color,
+        cluster,
       });
     });
   });
@@ -89,12 +93,22 @@ export function GraphView() {
       <div className="gv-header"><h2 className="gv-title">Graph</h2></div>
       <div className="gv-canvas">
         <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="gv-svg">
+          {/* Edges drawn casing-then-line in sequence so later edges weave over
+              earlier ones at crossings (runic interlace). Dropped on dense graphs. */}
           <g className="gv-edges">
             {edges.map(([from, to], i) => {
               const a = byId.get(from);
               const b = byId.get(to);
               if (!a || !b) return null;
-              return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="gv-edge" />;
+              const weave = edges.length <= WEAVE_LIMIT;
+              return (
+                <g key={i}>
+                  {weave && (
+                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="gv-edge-casing" />
+                  )}
+                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="gv-edge" />
+                </g>
+              );
             })}
           </g>
           <g className="gv-nodes">
@@ -102,14 +116,14 @@ export function GraphView() {
               <g
                 key={n.id}
                 transform={`translate(${n.x} ${n.y})`}
-                className="gv-node"
+                className={`gv-node gv-node--${n.cluster}${hover === n.id ? ' gv-node-active' : ''}`}
                 onClick={() => openEditor(n.id)}
                 onMouseEnter={() => setHover(n.id)}
                 onMouseLeave={() => setHover((h) => (h === n.id ? null : h))}
               >
-                <circle r={hover === n.id ? 9 : 6} fill={n.color} className="gv-node-dot" />
+                <circle r={hover === n.id ? 8 : 6} className="gv-node-dot" />
                 {hover === n.id && (
-                  <text x={11} y={4} className="gv-node-label">{n.title}</text>
+                  <text x={12} y={4} className="gv-node-label">{n.title}</text>
                 )}
               </g>
             ))}

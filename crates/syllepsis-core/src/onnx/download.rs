@@ -4,9 +4,10 @@
 //! already cached into a list of (url, destination, expected-hash) work items — is pure and
 //! always compiled. *Fetching* the bytes is the side-effecting part, hidden behind the
 //! [`ModelFetcher`] seam so the orchestration ([`download_missing`]) can be driven by a fake in
-//! tests and by a real HTTP client (feature `onnx`, see [`http`](super::http)) in the app. After
-//! every file lands it is run through [`verify`](super::verify); a hash mismatch aborts loudly
-//! rather than leaving a corrupt model in the cache.
+//! tests and by a real HTTP client (feature `onnx`, see [`http`](super::http)) in the app. Cached
+//! files with pinned hashes are verified before planning, and freshly fetched files are verified
+//! before they are accepted; a hash mismatch aborts loudly rather than leaving a corrupt model in
+//! the cache.
 
 use std::path::PathBuf;
 
@@ -69,12 +70,14 @@ pub fn download_missing(
     manifest: &ModelManifest,
     fetcher: &dyn ModelFetcher,
 ) -> CoreResult<Vec<(String, FileIntegrity)>> {
-    let plan = plan_download(cache, manifest);
     std::fs::create_dir_all(cache.model_dir(manifest))?;
+    remove_mismatched_cached_files(cache, manifest)?;
+    let plan = plan_download(cache, manifest);
 
     let mut report = Vec::with_capacity(plan.len());
     for item in &plan {
         fetcher.fetch(item)?;
+        verify_downloaded_size(item)?;
         let integrity = verify_file(&item.dest, item.sha256.as_deref())?;
         if let FileIntegrity::Mismatch { expected, actual } = &integrity {
             // Don't leave a corrupt file masquerading as present.
@@ -93,6 +96,35 @@ pub fn download_missing(
         report.push((name, integrity));
     }
     Ok(report)
+}
+
+fn verify_downloaded_size(item: &DownloadItem) -> CoreResult<()> {
+    let Some(expected_size) = item.size_bytes else {
+        return Ok(());
+    };
+    let actual_size = item.dest.metadata()?.len();
+    if actual_size == expected_size {
+        return Ok(());
+    }
+    let _ = std::fs::remove_file(&item.dest);
+    Err(CoreError::Model(format!(
+        "size mismatch for {}: expected {expected_size} bytes, got {actual_size}",
+        item.dest.display()
+    )))
+}
+
+fn remove_mismatched_cached_files(cache: &ModelCache, manifest: &ModelManifest) -> CoreResult<()> {
+    for file in &manifest.files {
+        let path = cache.file_path(manifest, file);
+        if !path.is_file() {
+            continue;
+        }
+        let integrity = verify_file(&path, file.sha256.as_deref())?;
+        if let FileIntegrity::Mismatch { .. } = integrity {
+            std::fs::remove_file(path)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -143,7 +175,12 @@ mod tests {
     fn downloads_every_missing_file_then_skips_cached_ones() {
         let dir = tempfile::tempdir().unwrap();
         let cache = ModelCache::new(dir.path());
-        let m = builtin(BUNDLED_LLM_ID).unwrap();
+        let mut m = builtin(BUNDLED_LLM_ID).unwrap();
+        for file in &mut m.files {
+            file.sha256 =
+                Some("9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c".into());
+            file.size_bytes = Some(7);
+        }
         let fetcher = FakeFetcher {
             contents: b"weights",
             fetched: RefCell::new(Vec::new()),
@@ -152,8 +189,7 @@ mod tests {
         let report = download_missing(&cache, &m, &fetcher).unwrap();
         assert_eq!(report.len(), m.files.len());
         assert!(cache.is_cached(&m), "all files should now be present");
-        // No pinned hashes yet → every file is Unverified, but loadable.
-        assert!(report.iter().all(|(_, i)| *i == FileIntegrity::Unverified));
+        assert!(report.iter().all(|(_, i)| *i == FileIntegrity::Verified));
 
         // A second pass plans nothing and fetches nothing.
         let again = download_missing(&cache, &m, &fetcher).unwrap();
@@ -183,5 +219,55 @@ mod tests {
         assert!(matches!(err, CoreError::Model(_)));
         // The corrupt file was removed, so the model is not (wrongly) considered cached.
         assert!(!cache.file_path(&m, &m.files[0]).exists());
+    }
+
+    #[test]
+    fn size_mismatch_aborts_and_removes_the_bad_file_even_without_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ModelCache::new(dir.path());
+        let mut m = builtin(BUNDLED_LLM_ID).unwrap();
+        m.files.truncate(1);
+        m.files[0].sha256 = None;
+        m.files[0].size_bytes = Some(99);
+        let fetcher = FakeFetcher {
+            contents: b"weights",
+            fetched: RefCell::new(Vec::new()),
+        };
+
+        let err = download_missing(&cache, &m, &fetcher).unwrap_err();
+
+        assert!(err.to_string().contains("size mismatch"));
+        assert!(!cache.file_path(&m, &m.files[0]).exists());
+    }
+
+    #[test]
+    fn present_hash_mismatch_is_repaired_by_refetching_that_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ModelCache::new(dir.path());
+        let mut m = builtin(BUNDLED_LLM_ID).unwrap();
+        for file in &mut m.files {
+            file.sha256 =
+                Some("9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c".into());
+            file.size_bytes = Some(7);
+        }
+        for file in &m.files {
+            let path = cache.file_path(&m, file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"weights").unwrap();
+        }
+        std::fs::write(cache.file_path(&m, &m.files[0]), b"corrupt").unwrap();
+        let fetcher = FakeFetcher {
+            contents: b"weights",
+            fetched: RefCell::new(Vec::new()),
+        };
+
+        let report = download_missing(&cache, &m, &fetcher).unwrap();
+
+        assert_eq!(report.len(), 1);
+        assert_eq!(
+            fetcher.fetched.borrow().as_slice(),
+            ["embed_tokens_q4.onnx"]
+        );
+        assert!(cache.is_cached(&m));
     }
 }

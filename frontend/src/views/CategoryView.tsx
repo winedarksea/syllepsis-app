@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
+import { Icon } from '../components/Icon';
 import type { NoteDto } from '../types';
 import './CategoryView.css';
 
@@ -78,8 +79,11 @@ export function CategoryView() {
                 <p className="cv-card-body">{note.body.slice(0, 180)}{note.body.length > 180 ? '…' : ''}</p>
               )}
               <div className="cv-card-meta">
-                <span>{note.sorted ? '✓ Sorted' : '○ Unsorted'}</span>
-                <span>{new Date(note.metadata.dates.updated).toLocaleDateString()}</span>
+                <span className={note.sorted ? 'cv-status cv-status-done' : 'cv-status cv-status-pending'}>
+                  <Icon name={note.sorted ? 'check_circle' : 'radio_button_unchecked'} size={13} />
+                  {note.sorted ? 'Sorted' : 'Unsorted'}
+                </span>
+                <span className="cv-card-date">{new Date(note.metadata.dates.updated).toLocaleDateString()}</span>
               </div>
             </div>
           ))}

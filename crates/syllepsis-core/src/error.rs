@@ -43,6 +43,11 @@ pub enum CoreError {
     #[error("llm error: {0}")]
     Llm(String),
 
+    /// A locked note's protected body cannot change yet: the unlock delay has not elapsed or the
+    /// required fact-check has not passed (privacy-security.md "Locked Files").
+    #[error("locked: {0}")]
+    Locked(String),
+
     /// A local model could not be fetched, failed integrity verification, or the ONNX runtime
     /// could not load/run it (the shared embedding+LLM model-runtime pattern).
     #[error("model error: {0}")]

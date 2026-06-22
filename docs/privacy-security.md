@@ -1,5 +1,11 @@
 # Privacy & Security
 
+> **Status (Phase 6, implemented):** the behavior described here is wired up in
+> `syllepsis-core::app::lifecycle` (private/archived/locked toggles, the delayed-deletion flow with
+> a scheduled purge, vanishing notes, and the policy overview) and surfaced in the React **Privacy**
+> view. Private content is dropped from default views and RAG retrieval; locked notes gate body
+> rewrites by unlock delay or fact-check; the git exclusion lives in `app::publish`.
+
 ## Centralized Policy View
 
 A dedicated UI panel provides a single place to manage:

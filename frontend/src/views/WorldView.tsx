@@ -1,14 +1,15 @@
-// Spatial overlay view (Phase 5). Renders a world's pins and regions over a normalized
-// coordinate plane. Image worlds (floorplans, mind palaces) are the first-pass target; geo worlds
-// fall back to a simple equirectangular projection until the map-tile view lands (a later phase).
+// Spatial overlay view (Phase 5). Renders a world's pins and regions over its backdrop. Image
+// worlds (floorplans, mind palaces) are the first-pass target; geo worlds fall back to a simple
+// equirectangular projection until the map-tile view lands (a later phase).
 //
-// The actual backdrop image/SVG is not yet fetched (asset serving is a later task), so the plane
-// is drawn as a labeled placeholder; pins and regions are anchored by their normalized 0..1
-// coordinates so they will sit correctly once a real backdrop is dropped in behind them.
+// The backdrop image/SVG is fetched from the core as a self-contained data URL and drawn behind
+// the overlay; pins and regions are anchored by their normalized 0..1 coordinates so they sit
+// correctly over it. When a world has no backdrop on disk yet, a labeled placeholder is shown.
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
+import { Icon } from '../components/Icon';
 import type { Overlay, Pin, OverlayRegion, World, WorldPoint } from '../types';
 import './WorldView.css';
 
@@ -27,6 +28,7 @@ export function WorldView() {
   const { activeWorld, setActiveWorld, openEditor, setActiveCategory, setView } = useStore();
   const [worlds, setWorlds] = useState<World[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [backdrop, setBackdrop] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Load the world list once; default the active world to the first image world (or earth).
@@ -42,12 +44,16 @@ export function WorldView() {
       .catch((e) => setError(String(e)));
   }, [activeWorld, setActiveWorld]);
 
-  // Load the overlay whenever the active world changes.
+  // Load the overlay and backdrop whenever the active world changes.
   useEffect(() => {
     if (!activeWorld) return;
     api.worldOverlay(activeWorld)
       .then((o) => { setOverlay(o); setError(null); })
       .catch((e) => setError(String(e)));
+    setBackdrop(null);
+    api.worldBackdrop(activeWorld)
+      .then(setBackdrop)
+      .catch(() => setBackdrop(null));
   }, [activeWorld]);
 
   const openCategory = useCallback((name: string) => {
@@ -76,7 +82,7 @@ export function WorldView() {
               className={`wv-world-tab ${activeWorld === w.id ? 'active' : ''}`}
               onClick={() => setActiveWorld(w.id)}
             >
-              <span className="wv-world-kind">{w.kind === 'image' ? '🗺' : '🌍'}</span>
+              <Icon className="wv-world-kind" name={w.kind === 'image' ? 'map' : 'public'} size={16} />
               {w.display_name}
             </button>
           ))}
@@ -90,11 +96,15 @@ export function WorldView() {
             style={{ aspectRatio: String(aspect) }}
             data-kind={world?.kind}
           >
-            <div className="wv-backdrop-note">
-              {isImage
-                ? `backdrop: ${world?.backdrop ?? '(none set)'} — image preview pending asset serving`
-                : 'geo world — equirectangular projection (map tiles are a later phase)'}
-            </div>
+            {backdrop ? (
+              <img className="wv-backdrop-img" src={backdrop} alt={`${world?.display_name ?? ''} backdrop`} />
+            ) : (
+              <div className="wv-backdrop-note">
+                {isImage
+                  ? `backdrop: ${world?.backdrop ?? '(none set)'} — no image asset on disk yet`
+                  : 'geo world — equirectangular projection (map tiles are a later phase)'}
+              </div>
+            )}
 
             {overlay.regions.map((r, i) => (
               <RegionMark key={`r-${i}`} region={r} onOpen={() => openCategory(r.category)} />

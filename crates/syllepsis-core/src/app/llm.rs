@@ -43,7 +43,7 @@ pub enum LlmExecutionMode {
     Disabled,
     /// Use the in-process bundled ONNX provider.
     Local,
-    /// Use the frontend cloud handoff (`prepare_cloud_prompt` → provider SDK → proposal wrap).
+    /// Use shell-owned cloud/local-server execution.
     Cloud,
     /// Use deterministic offline heuristics because no live provider is available.
     OfflineFallback,
@@ -59,8 +59,8 @@ pub struct LlmRouteStatus {
     pub available: bool,
 }
 
-/// A prompt package for a frontend-owned cloud provider call. Rust still owns routing and prompt
-/// construction so cloud SDK differences do not drift the task contracts.
+/// A prompt package for a shell-owned cloud/local-server provider call. Rust owns routing and
+/// prompt construction so provider differences do not drift the task contracts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CloudLlmPrompt {
     pub target_note_id: String,
@@ -126,7 +126,7 @@ pub fn generate_proposal(book: &Book, note_id: &str, task: LlmTask) -> CoreResul
     generate_proposal_with_service(book, &service, note_id, task, None)
 }
 
-/// Prepare a routed prompt for a frontend-owned cloud call. Local/offline routes should use
+/// Prepare a routed prompt for a shell-owned cloud/local-server call. Local/offline routes should use
 /// [`generate_proposal`] so the built-in model and offline fallback remain centralized.
 pub fn prepare_cloud_prompt(
     book: &Book,
@@ -152,7 +152,7 @@ pub fn prepare_cloud_prompt(
     })
 }
 
-/// Wrap frontend cloud output into a normal proposal. This keeps acceptance, audit labels, and
+/// Wrap external provider output into a normal proposal. This keeps acceptance, audit labels, and
 /// commentary-note behavior identical across local and cloud providers.
 pub fn proposal_from_cloud_completion(
     book: &Book,
@@ -266,11 +266,19 @@ fn output_contract(task: LlmTask) -> &'static str {
 
 /// Apply a proposal to its target note. `store_old_as_commentary` only applies to body-replacing
 /// tasks: when set, the pre-edit body is preserved as a linked commentary note before the
-/// rewrite lands. Returns the updated target note.
+/// rewrite lands. `fact_check_passed` reports whether a passing fact-check accompanies the change,
+/// which a [`FactCheckGate`](crate::model::metadata::LockMode::FactCheckGate)-locked note requires
+/// before its body may be rewritten. Returns the updated target note.
+///
+/// Body-replacing tasks on a locked note are gated (privacy-security.md "Locked Files"): an
+/// `UnlockDelay` lock holds the merge until the configured delay after the proposal was created,
+/// and a `FactCheckGate` lock requires `fact_check_passed`. Non-body tasks (summaries, attached
+/// fact-check / devil's-advocate commentary) are never gated — they do not touch the protected text.
 pub fn accept_proposal(
     book: &Book,
     proposal: &Proposal,
     store_old_as_commentary: bool,
+    fact_check_passed: bool,
 ) -> CoreResult<NoteDto> {
     let mut note = book.store.read_note(&proposal.target)?;
 
@@ -279,6 +287,13 @@ pub fn accept_proposal(
             note.summary = proposal.content.clone();
         }
         LlmTask::Grammar | LlmTask::Rewrite => {
+            crate::app::lifecycle::guard_locked_merge(
+                &note,
+                proposal.created_at,
+                fact_check_passed,
+                &book.config.privacy,
+                Utc::now(),
+            )?;
             if store_old_as_commentary && !note.body.trim().is_empty() {
                 let title = format!("Previous version of {}", note.title);
                 create_commentary(book, &note, &title, &note.body.clone())?;
@@ -392,7 +407,7 @@ mod tests {
         let (_d, book) = book();
         let note = seed(&book, "Turn the breaker off first. Then test.");
         let proposal = generate_proposal(&book, &note.id, LlmTask::Summarize).unwrap();
-        let updated = accept_proposal(&book, &proposal, false).unwrap();
+        let updated = accept_proposal(&book, &proposal, false, false).unwrap();
         assert!(!updated.summary.is_empty());
         assert_eq!(updated.summary, proposal.content);
     }
@@ -402,7 +417,7 @@ mod tests {
         let (_d, book) = book();
         let note = seed(&book, "breaker breaker electrical panel kitchen breaker");
         let proposal = generate_proposal(&book, &note.id, LlmTask::CategorySuggest).unwrap();
-        let updated = accept_proposal(&book, &proposal, false).unwrap();
+        let updated = accept_proposal(&book, &proposal, false, false).unwrap();
         assert!(updated.categories.contains(&"breaker".to_string()));
     }
 
@@ -412,7 +427,7 @@ mod tests {
         let note = seed(&book, "Solar pays back in two years guaranteed.");
         let before = book.store.read_all_notes().unwrap().len();
         let proposal = generate_proposal(&book, &note.id, LlmTask::FactCheck).unwrap();
-        accept_proposal(&book, &proposal, false).unwrap();
+        accept_proposal(&book, &proposal, false, false).unwrap();
 
         let notes = book.store.read_all_notes().unwrap();
         assert_eq!(
@@ -438,7 +453,7 @@ mod tests {
         let mut proposal = generate_proposal(&book, &note.id, LlmTask::Rewrite).unwrap();
         // Simulate a live rewrite result (offline would be a no-op).
         proposal.content = "a cleaner rewritten body".into();
-        let updated = accept_proposal(&book, &proposal, true).unwrap();
+        let updated = accept_proposal(&book, &proposal, true, false).unwrap();
 
         assert_eq!(updated.body, "a cleaner rewritten body");
         let archived = book
@@ -451,6 +466,59 @@ mod tests {
             archived,
             "the previous body should be preserved as a commentary"
         );
+    }
+
+    #[test]
+    fn unlock_delay_lock_blocks_an_immediate_rewrite_merge() {
+        use crate::model::metadata::LockMode;
+        let (_d, book) = book();
+        let note = seed(&book, "carefully written notes worth protecting");
+        crate::app::lifecycle::set_note_lock(&book, &note.id, LockMode::UnlockDelay).unwrap();
+
+        let mut proposal = generate_proposal(&book, &note.id, LlmTask::Rewrite).unwrap();
+        proposal.content = "an impulsive late-night rewrite".into();
+        // A freshly-created proposal is inside the delay window → blocked.
+        let err = accept_proposal(&book, &proposal, false, false).unwrap_err();
+        assert!(matches!(err, CoreError::Locked(_)));
+        // The body is untouched.
+        assert_eq!(
+            book.store.read_note(&proposal.target).unwrap().body,
+            "carefully written notes worth protecting"
+        );
+
+        // A proposal old enough to clear the delay merges.
+        proposal.created_at = Utc::now() - chrono::Duration::hours(48);
+        let updated = accept_proposal(&book, &proposal, false, false).unwrap();
+        assert_eq!(updated.body, "an impulsive late-night rewrite");
+    }
+
+    #[test]
+    fn fact_check_gate_lock_requires_a_passing_check_to_rewrite() {
+        use crate::model::metadata::LockMode;
+        let (_d, book) = book();
+        let note = seed(&book, "a claim that must be verified before rewriting");
+        crate::app::lifecycle::set_note_lock(&book, &note.id, LockMode::FactCheckGate).unwrap();
+
+        let mut proposal = generate_proposal(&book, &note.id, LlmTask::Rewrite).unwrap();
+        proposal.content = "a revised claim".into();
+        assert!(matches!(
+            accept_proposal(&book, &proposal, false, false).unwrap_err(),
+            CoreError::Locked(_)
+        ));
+        // With a passing fact-check it goes through.
+        let updated = accept_proposal(&book, &proposal, false, true).unwrap();
+        assert_eq!(updated.body, "a revised claim");
+    }
+
+    #[test]
+    fn locked_note_still_accepts_a_non_body_summary() {
+        use crate::model::metadata::LockMode;
+        let (_d, book) = book();
+        let note = seed(&book, "Turn the breaker off first. Then test.");
+        crate::app::lifecycle::set_note_lock(&book, &note.id, LockMode::UnlockDelay).unwrap();
+        // Summaries never touch the protected body, so the lock does not block them.
+        let proposal = generate_proposal(&book, &note.id, LlmTask::Summarize).unwrap();
+        assert!(accept_proposal(&book, &proposal, false, false).is_ok());
     }
 
     #[test]

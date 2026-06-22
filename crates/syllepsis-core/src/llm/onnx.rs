@@ -13,6 +13,7 @@
 use std::borrow::Cow;
 use std::sync::Mutex;
 
+use ndarray::Array4;
 use ort::session::{Session, SessionInputValue};
 use ort::value::{Outlet, Tensor};
 use serde::Deserialize;
@@ -33,6 +34,10 @@ struct LlmModelConfig {
     num_key_value_heads: usize,
     num_attention_heads: usize,
     hidden_size: usize,
+    #[serde(default)]
+    layer_types: Vec<String>,
+    #[serde(default)]
+    global_head_dim: Option<usize>,
     /// Qwen3 sets head_dim explicitly (decoupled from hidden_size/heads); older configs omit it.
     #[serde(default)]
     head_dim: Option<usize>,
@@ -43,6 +48,18 @@ impl LlmModelConfig {
     fn head_dim(&self) -> usize {
         self.head_dim
             .unwrap_or_else(|| self.hidden_size / self.num_attention_heads.max(1))
+    }
+
+    fn cache_head_dim_for_layer(&self, layer: usize) -> usize {
+        if self
+            .layer_types
+            .get(layer)
+            .is_some_and(|layer_type| layer_type == "full_attention")
+        {
+            self.global_head_dim.unwrap_or_else(|| self.head_dim())
+        } else {
+            self.head_dim()
+        }
     }
 }
 
@@ -56,6 +73,8 @@ pub struct OnnxLlmProvider {
     config: LlmModelConfig,
     decoder_token_input_name: String,
     decoder_cache_position_input_name: Option<String>,
+    decoder_num_logits_to_keep_input_name: Option<String>,
+    decoder_per_layer_input_name: Option<String>,
     decoder_past_input_names: Vec<(String, String)>,
     decoder_present_output_names: Vec<(String, String)>,
     logits_output_name: String,
@@ -99,8 +118,7 @@ impl OnnxLlmProvider {
         let tokenizer = ModelTokenizer::from_file(&cache.file_path(manifest, tok_file))?;
 
         let config_text = std::fs::read_to_string(cache.file_path(manifest, config_file))?;
-        let config: LlmModelConfig = serde_json::from_str(&config_text)
-            .map_err(|e| CoreError::Model(format!("config.json parse: {e}")))?;
+        let config = parse_llm_model_config(&config_text)?;
 
         // Resolve stop tokens by name so a renumbered vocab can't silently disable EOS.
         let eos_ids: Vec<i64> = [STOP_TOKEN, "<eos>", "<end_of_sequence>"]
@@ -111,7 +129,6 @@ impl OnnxLlmProvider {
         if eos_ids.is_empty() {
             return Err(CoreError::Model("tokenizer defines no stop token".into()));
         }
-        let layers = config.num_hidden_layers;
         let decoder_token_input_name = if token_embeddings_session.is_some() {
             required_name(
                 &decoder_input_names,
@@ -125,6 +142,32 @@ impl OnnxLlmProvider {
                 "decoder token id input",
             )?
         };
+        let decoder_past_input_names = available_cache_names(
+            &decoder_input_names,
+            &["past_key_values.{i}.key"],
+            &["past_key_values.{i}.value"],
+            "decoder cache input",
+        )?;
+        let decoder_present_output_names = available_cache_names(
+            &decoder_output_names,
+            &["present.{i}.key"],
+            &["present.{i}.value"],
+            "decoder cache output",
+        )?;
+        if decoder_past_input_names.len() != decoder_present_output_names.len() {
+            return Err(CoreError::Model(format!(
+                "decoder cache input/output layer count mismatch: {} inputs, {} outputs",
+                decoder_past_input_names.len(),
+                decoder_present_output_names.len()
+            )));
+        }
+        if decoder_past_input_names.len() > config.num_hidden_layers {
+            return Err(CoreError::Model(format!(
+                "decoder exposes {} cache layers but config only declares {}",
+                decoder_past_input_names.len(),
+                config.num_hidden_layers
+            )));
+        }
 
         Ok(OnnxLlmProvider {
             token_embeddings_session,
@@ -136,20 +179,16 @@ impl OnnxLlmProvider {
                 &decoder_input_names,
                 &["cache_position"],
             ),
-            decoder_past_input_names: cache_names(
+            decoder_num_logits_to_keep_input_name: optional_name(
                 &decoder_input_names,
-                layers,
-                &["past_key_values.{i}.key"],
-                &["past_key_values.{i}.value"],
-                "decoder cache input",
-            )?,
-            decoder_present_output_names: cache_names(
-                &decoder_output_names,
-                layers,
-                &["present.{i}.key"],
-                &["present.{i}.value"],
-                "decoder cache output",
-            )?,
+                &["num_logits_to_keep"],
+            ),
+            decoder_per_layer_input_name: optional_name(
+                &decoder_input_names,
+                &["per_layer_inputs"],
+            ),
+            decoder_past_input_names,
+            decoder_present_output_names,
             logits_output_name: required_name(
                 &decoder_output_names,
                 &["logits"],
@@ -170,9 +209,11 @@ impl OnnxLlmProvider {
     /// Greedy autoregressive decode with a threaded KV cache. Returns the generated token ids
     /// (excluding the stop token).
     fn generate(&self, prompt_ids: Vec<i64>) -> CoreResult<Vec<u32>> {
-        let layers = self.config.num_hidden_layers;
+        let layers = self.decoder_past_input_names.len();
         let kv_heads = self.config.num_key_value_heads as i64;
-        let head_dim = self.config.head_dim() as i64;
+        let cache_head_dims: Vec<usize> = (0..layers)
+            .map(|layer| self.config.cache_head_dim_for_layer(layer))
+            .collect();
 
         // Per-layer (key, value) cache contents, flat row-major; starts empty (past_len = 0).
         let mut past: Vec<(Vec<f32>, Vec<f32>)> = vec![(Vec::new(), Vec::new()); layers];
@@ -205,6 +246,35 @@ impl OnnxLlmProvider {
                         .map_err(map_ort_err)?
                         .into(),
                 )),
+                DecoderTokenInput::InputsEmbedsAndPerLayer {
+                    data,
+                    hidden_size,
+                    per_layer_data,
+                    layer_count,
+                    layer_width,
+                } => {
+                    inputs.push((
+                        self.decoder_token_input_name.clone().into(),
+                        Tensor::from_array((vec![1_i64, seq as i64, hidden_size as i64], data))
+                            .map_err(map_ort_err)?
+                            .into(),
+                    ));
+                    let per_layer_name =
+                        self.decoder_per_layer_input_name.as_ref().ok_or_else(|| {
+                            CoreError::Model(
+                                "token embeddings produced per-layer inputs but decoder does not declare per_layer_inputs".into(),
+                            )
+                        })?;
+                    inputs.push((
+                        per_layer_name.clone().into(),
+                        Tensor::from_array((
+                            vec![1_i64, seq as i64, layer_count as i64, layer_width as i64],
+                            per_layer_data,
+                        ))
+                        .map_err(map_ort_err)?
+                        .into(),
+                    ));
+                }
             }
             inputs.push((
                 "attention_mask".into(),
@@ -229,21 +299,48 @@ impl OnnxLlmProvider {
                     .into(),
                 ));
             }
+            if let Some(name) = &self.decoder_num_logits_to_keep_input_name {
+                inputs.push((
+                    name.clone().into(),
+                    Tensor::from_array(((), vec![1_i64]))
+                        .map_err(map_ort_err)?
+                        .into(),
+                ));
+            }
             for (i, (key, value)) in past.iter().enumerate() {
+                let head_dim = cache_head_dims[i] as i64;
                 let shape = vec![1_i64, kv_heads, past_len as i64, head_dim];
                 let (key_name, value_name) = &self.decoder_past_input_names[i];
-                inputs.push((
-                    key_name.clone().into(),
+                let key_tensor: SessionInputValue = if past_len == 0 {
+                    Tensor::from_array(Array4::<f32>::zeros((
+                        1,
+                        kv_heads as usize,
+                        0,
+                        head_dim as usize,
+                    )))
+                    .map_err(map_ort_err)?
+                    .into()
+                } else {
                     Tensor::from_array((shape.clone(), key.clone()))
                         .map_err(map_ort_err)?
-                        .into(),
-                ));
-                inputs.push((
-                    value_name.clone().into(),
+                        .into()
+                };
+                let value_tensor: SessionInputValue = if past_len == 0 {
+                    Tensor::from_array(Array4::<f32>::zeros((
+                        1,
+                        kv_heads as usize,
+                        0,
+                        head_dim as usize,
+                    )))
+                    .map_err(map_ort_err)?
+                    .into()
+                } else {
                     Tensor::from_array((shape, value.clone()))
                         .map_err(map_ort_err)?
-                        .into(),
-                ));
+                        .into()
+                };
+                inputs.push((key_name.clone().into(), key_tensor));
+                inputs.push((value_name.clone().into(), value_tensor));
             }
 
             let outputs = decoder_session.run(inputs).map_err(map_ort_err)?;
@@ -262,7 +359,12 @@ impl OnnxLlmProvider {
             if vocab == 0 {
                 return Err(CoreError::Model("logits had zero vocab dim".into()));
             }
-            let last = (seq - 1) * vocab;
+            let logits_seq = logits_shape
+                .get(logits_shape.len().saturating_sub(2))
+                .copied()
+                .unwrap_or(seq as i64)
+                .max(1) as usize;
+            let last = (logits_seq - 1) * vocab;
             let next_id = argmax(&logits[last..last + vocab]) as i64;
 
             // Capture the refreshed cache before the borrowed `outputs` is dropped.
@@ -330,22 +432,84 @@ impl OnnxLlmProvider {
                 "token embeddings had zero hidden dim".into(),
             ));
         }
-        Ok(DecoderTokenInput::InputsEmbeds {
-            data: data.to_vec(),
-            hidden_size,
-        })
+        let embeddings_data = data.to_vec();
+        if let Some(output_name) = &token_embeddings.per_layer_output_name {
+            let per_layer_output = outputs.get(output_name).ok_or_else(|| {
+                CoreError::Model(format!("missing token embeddings output {output_name}"))
+            })?;
+            let (per_layer_shape, per_layer_data) = per_layer_output
+                .try_extract_tensor::<f32>()
+                .map_err(map_ort_err)?;
+            let layer_width = per_layer_shape.last().copied().unwrap_or(0) as usize;
+            let layer_count = per_layer_shape
+                .get(per_layer_shape.len().saturating_sub(2))
+                .copied()
+                .unwrap_or(0) as usize;
+            if layer_count == 0 || layer_width == 0 {
+                return Err(CoreError::Model(
+                    "per-layer token embeddings had zero layer dimensions".into(),
+                ));
+            }
+            Ok(DecoderTokenInput::InputsEmbedsAndPerLayer {
+                data: embeddings_data,
+                hidden_size,
+                per_layer_data: per_layer_data.to_vec(),
+                layer_count,
+                layer_width,
+            })
+        } else {
+            Ok(DecoderTokenInput::InputsEmbeds {
+                data: embeddings_data,
+                hidden_size,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LlmModelConfigEnvelope {
+    text_config: Option<LlmModelConfig>,
+}
+
+fn parse_llm_model_config(config_text: &str) -> CoreResult<LlmModelConfig> {
+    match serde_json::from_str::<LlmModelConfig>(config_text) {
+        Ok(config) => Ok(config),
+        Err(root_error) => {
+            let envelope: LlmModelConfigEnvelope =
+                serde_json::from_str(config_text).map_err(|nested_error| {
+                    CoreError::Model(format!(
+                        "config.json parse: {root_error}; nested text_config parse: {nested_error}"
+                    ))
+                })?;
+            envelope.text_config.ok_or_else(|| {
+                CoreError::Model(format!(
+                    "config.json parse: {root_error}; missing nested text_config"
+                ))
+            })
+        }
     }
 }
 
 enum DecoderTokenInput {
     InputIds(Vec<i64>),
-    InputsEmbeds { data: Vec<f32>, hidden_size: usize },
+    InputsEmbeds {
+        data: Vec<f32>,
+        hidden_size: usize,
+    },
+    InputsEmbedsAndPerLayer {
+        data: Vec<f32>,
+        hidden_size: usize,
+        per_layer_data: Vec<f32>,
+        layer_count: usize,
+        layer_width: usize,
+    },
 }
 
 struct TokenEmbeddingsSession {
     session: Mutex<Session>,
     input_name: String,
     output_name: String,
+    per_layer_output_name: Option<String>,
 }
 
 impl TokenEmbeddingsSession {
@@ -355,10 +519,12 @@ impl TokenEmbeddingsSession {
         Ok(TokenEmbeddingsSession {
             session: Mutex::new(loaded.session),
             input_name: required_name(&input_names, &["input_ids"], "token embeddings input")?,
-            output_name: output_names
-                .first()
-                .cloned()
-                .ok_or_else(|| CoreError::Model("token embeddings graph has no outputs".into()))?,
+            output_name: required_name(
+                &output_names,
+                &["inputs_embeds"],
+                "token embeddings output",
+            )?,
+            per_layer_output_name: optional_name(&output_names, &["per_layer_inputs"]),
         })
     }
 }
@@ -367,38 +533,40 @@ fn outlet_names(outlets: &[Outlet]) -> Vec<String> {
     outlets.iter().map(|o| o.name().to_string()).collect()
 }
 
-fn cache_names(
+fn available_cache_names(
     names: &[String],
-    layers: usize,
     key_patterns: &[&str],
     value_patterns: &[&str],
     label: &str,
 ) -> CoreResult<Vec<(String, String)>> {
-    let mut out = Vec::with_capacity(layers);
-    for layer in 0..layers {
-        out.push((
-            required_pattern_name(names, key_patterns, layer, label)?,
-            required_pattern_name(names, value_patterns, layer, label)?,
-        ));
+    let mut out = Vec::new();
+    for layer in 0.. {
+        let key_name = optional_pattern_name(names, key_patterns, layer);
+        let value_name = optional_pattern_name(names, value_patterns, layer);
+        match (key_name, value_name) {
+            (Some(key_name), Some(value_name)) => out.push((key_name, value_name)),
+            (None, None) => break,
+            _ => {
+                return Err(CoreError::Model(format!(
+                    "incomplete {label} for layer {layer}; available names: {names:?}"
+                )))
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(CoreError::Model(format!(
+            "missing {label}; available names: {names:?}"
+        )));
     }
     Ok(out)
 }
 
-fn required_pattern_name(
-    names: &[String],
-    patterns: &[&str],
-    layer: usize,
-    label: &str,
-) -> CoreResult<String> {
+fn optional_pattern_name(names: &[String], patterns: &[&str], layer: usize) -> Option<String> {
     let candidates: Vec<String> = patterns
         .iter()
         .map(|pattern| pattern.replace("{i}", &layer.to_string()))
         .collect();
-    optional_name_owned(names, &candidates).ok_or_else(|| {
-        CoreError::Model(format!(
-            "missing {label} for layer {layer}; tried {candidates:?}; available names: {names:?}"
-        ))
-    })
+    optional_name_owned(names, &candidates)
 }
 
 fn required_name(names: &[String], candidates: &[&str], label: &str) -> CoreResult<String> {
@@ -477,6 +645,8 @@ mod tests {
             num_key_value_heads: 8,
             num_attention_heads: 16,
             hidden_size: 2048,
+            layer_types: Vec::new(),
+            global_head_dim: None,
             head_dim: None,
         };
         assert_eq!(c.head_dim(), 128);
@@ -486,5 +656,52 @@ mod tests {
             ..c
         };
         assert_eq!(explicit.head_dim(), 128);
+    }
+
+    #[test]
+    fn parses_nested_gemma_text_config() {
+        let config = parse_llm_model_config(
+            r#"{
+                "model_type": "gemma4",
+                "text_config": {
+                    "num_hidden_layers": 35,
+                    "num_key_value_heads": 1,
+                    "num_attention_heads": 8,
+                    "hidden_size": 1536,
+                    "head_dim": 256
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.num_hidden_layers, 35);
+        assert_eq!(config.num_key_value_heads, 1);
+        assert_eq!(config.num_attention_heads, 8);
+        assert_eq!(config.hidden_size, 1536);
+        assert_eq!(config.head_dim(), 256);
+        assert_eq!(config.cache_head_dim_for_layer(0), 256);
+        assert_eq!(config.cache_head_dim_for_layer(4), 256);
+    }
+
+    #[test]
+    fn full_attention_layers_use_global_head_dim_when_present() {
+        let config = LlmModelConfig {
+            num_hidden_layers: 5,
+            num_key_value_heads: 1,
+            num_attention_heads: 8,
+            hidden_size: 1536,
+            layer_types: vec![
+                "sliding_attention".to_string(),
+                "sliding_attention".to_string(),
+                "sliding_attention".to_string(),
+                "sliding_attention".to_string(),
+                "full_attention".to_string(),
+            ],
+            global_head_dim: Some(512),
+            head_dim: Some(256),
+        };
+
+        assert_eq!(config.cache_head_dim_for_layer(0), 256);
+        assert_eq!(config.cache_head_dim_for_layer(4), 512);
     }
 }

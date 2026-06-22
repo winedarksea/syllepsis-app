@@ -49,7 +49,7 @@
   height: 100%;
   color: var(--color-text-secondary);
 }
-.cv-error { color: #a00; }
+.cv-error { color: var(--color-error); }
 
 .cv-empty {
   display: flex;
@@ -119,7 +119,18 @@
 .cv-card-meta {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   margin-top: var(--sp-2);
 }
+
+.cv-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.cv-status-done { color: var(--color-secondary); }      /* moss = healthy/sorted */
+.cv-status-pending { color: var(--color-tertiary); }    /* ember = needs attention */
+
+.cv-card-date { font-family: var(--font-mono); }

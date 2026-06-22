@@ -3,7 +3,9 @@
 import { create } from 'zustand';
 import type { BookInfo, Category } from '../types';
 
-export type View = 'book' | 'unsorted' | 'category' | 'editor' | 'search' | 'graph' | 'diagnostics' | 'worlds';
+export type View =
+  | 'book' | 'unsorted' | 'category' | 'editor' | 'search' | 'graph'
+  | 'diagnostics' | 'worlds' | 'privacy' | 'packs';
 
 interface AppStore {
   // Book
