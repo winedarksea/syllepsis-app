@@ -79,6 +79,7 @@ pub fn run() {
             export_pack,
             preview_pack,
             import_pack,
+            import_pack_as_book,
             // publishing & serving (Phase 6)
             publish_site,
             refresh_private_gitignore,

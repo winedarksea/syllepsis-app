@@ -433,11 +433,14 @@ export interface PolicyOverview {
 
 // ── Knowledge packs (mirrors syllepsis_core::app::pack and ::pack) ──
 
+export type ExportKind = 'pack' | 'book';
+
 export interface PackManifest {
   id: string;
   name: string;
   version: string;
   description: string;
+  export_kind: ExportKind;
 }
 
 export interface ExportSpec {
@@ -447,6 +450,7 @@ export interface ExportSpec {
   description: string;
   categories: string[];
   note_ids: string[];
+  export_all: boolean;
 }
 
 export type ImportStatus = 'new' | 'update' | 'locally_modified';

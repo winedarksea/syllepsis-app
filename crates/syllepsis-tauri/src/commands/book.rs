@@ -1,7 +1,7 @@
 //! Commands for opening and creating books, and fetching the version string.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
 use syllepsis_core::storage::{Book, BookMetadata};
@@ -97,7 +97,7 @@ pub fn get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-fn book_info(book_path: &PathBuf, book: &Book) -> BookInfo {
+fn book_info(book_path: &Path, book: &Book) -> BookInfo {
     BookInfo {
         name: book.metadata.name.clone(),
         path: book_path.display().to_string(),
@@ -136,7 +136,7 @@ fn trimmed_non_empty(value: Option<String>) -> Option<String> {
     })
 }
 
-fn folder_name_for_book(name: &str) -> String {
+pub(crate) fn folder_name_for_book(name: &str) -> String {
     let mut folder = String::new();
     let mut previous_was_separator = false;
 

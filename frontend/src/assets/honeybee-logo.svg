@@ -38,7 +38,7 @@
     // otherwise make the style-strip regex match the wrong span and corrupt
     // the document. The comment regex is built from fragments so this very
     // file does not contain a literal comment-close sequence in its body.
-    svg = svg.replace(new RegExp('<' + '!--[\\s\\S]*?--' + '>', 'g'), '');
+    svg = svg.replace(new RegExp('<' + '!-' + '-[\\s\\S]*?-' + '-' + '>', 'g'), '');
     svg = svg.replace(/<style>[\s\S]*?<\/style>/g, '');
     const dir = 'crates/syllepsis-tauri/icons';
     for (const [name, w] of [['32x32.png',32],['128x128.png',128],['128x128@2x.png',256],['icon.png',512]])

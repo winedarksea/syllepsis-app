@@ -128,6 +128,12 @@ export const api = {
   previewPack: (path: string) => invoke<ImportPreview>('preview_pack', { path }),
   importPack: (path: string, options: ImportOptions) =>
     invoke<ImportReport>('import_pack', { path, options }),
+  importPackAsBook: (packPath: string, parentPath: string, bookName: string) =>
+    invoke<BookInfo>('import_pack_as_book', {
+      pack_path: packPath,
+      parent_path: parentPath,
+      book_name: bookName,
+    }),
 
   // Publishing & serving (Phase 6)
   publishSite: (outDir: string) => invoke<PublishReport>('publish_site', { out_dir: outDir }),

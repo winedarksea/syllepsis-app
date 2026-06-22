@@ -14,12 +14,13 @@ use crate::error::CoreResult;
 use crate::id::NoteId;
 use crate::model::metadata::Metadata;
 use crate::model::{Category, Note};
-use crate::pack::{Pack, PackManifest, PackNote};
+use crate::pack::{ExportKind, Pack, PackManifest, PackNote};
 use crate::storage::{Book, NoteStore};
 
 /// What to put in an exported pack: the manifest fields plus the note selection. A note is
 /// included if it carries one of `categories` **or** is named directly in `note_ids` (so an author
-/// can export "everything tagged #permaculture, plus these three extras").
+/// can export "everything tagged #permaculture, plus these three extras"). When `export_all` is
+/// true the category/id filters are ignored and every non-deleted note is included.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExportSpec {
     pub id: String,
@@ -31,26 +32,37 @@ pub struct ExportSpec {
     pub categories: Vec<String>,
     #[serde(default)]
     pub note_ids: Vec<String>,
+    #[serde(default)]
+    pub export_all: bool,
 }
 
 /// Assemble (but do not write) a pack from the book per `spec`. Pending-deletion notes are never
 /// exported; the categories the selected notes use are bundled so the import side can recreate them.
+/// When `spec.export_all` is true all non-deleted notes are included and `export_kind` is set to
+/// `Book`; otherwise the category/id filter applies and `export_kind` is `Pack`.
 pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
-    let wanted_categories: BTreeSet<&str> = spec.categories.iter().map(String::as_str).collect();
-    let wanted_ids: BTreeSet<&str> = spec.note_ids.iter().map(String::as_str).collect();
+    let all_notes = book.store.read_all_notes()?;
 
-    let selected: Vec<Note> = book
-        .store
-        .read_all_notes()?
-        .into_iter()
-        .filter(|n| {
-            n.metadata.lifecycle.marked_for_deletion_at.is_none()
-                && (wanted_ids.contains(n.id.to_string().as_str())
-                    || n.categories
-                        .iter()
-                        .any(|c| wanted_categories.contains(c.as_str())))
-        })
-        .collect();
+    let selected: Vec<Note> = if spec.export_all {
+        all_notes
+            .into_iter()
+            .filter(|n| n.metadata.lifecycle.marked_for_deletion_at.is_none())
+            .collect()
+    } else {
+        let wanted_categories: BTreeSet<&str> =
+            spec.categories.iter().map(String::as_str).collect();
+        let wanted_ids: BTreeSet<&str> = spec.note_ids.iter().map(String::as_str).collect();
+        all_notes
+            .into_iter()
+            .filter(|n| {
+                n.metadata.lifecycle.marked_for_deletion_at.is_none()
+                    && (wanted_ids.contains(n.id.to_string().as_str())
+                        || n.categories
+                            .iter()
+                            .any(|c| wanted_categories.contains(c.as_str())))
+            })
+            .collect()
+    };
 
     let used: BTreeSet<String> = selected
         .iter()
@@ -63,6 +75,11 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
         .filter(|c| used.contains(&c.name))
         .collect();
 
+    let export_kind = if spec.export_all {
+        ExportKind::Book
+    } else {
+        ExportKind::Pack
+    };
     let notes = selected.iter().map(PackNote::from_note).collect();
     Ok(Pack::new(
         PackManifest {
@@ -70,6 +87,7 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
             name: spec.name.clone(),
             version: spec.version.clone(),
             description: spec.description.clone(),
+            export_kind,
         },
         notes,
         categories,
@@ -232,6 +250,21 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
     Ok(report)
 }
 
+/// Create a brand-new book at `root` and import every note from `pack` into it.
+///
+/// If `Book::create` succeeds but `import_pack` fails the empty book folder remains on disk
+/// (matches `create_book_in_parent` behavior — caller must clean up on error).
+pub fn import_pack_as_new_book(root: &Path, name: &str, pack: &Pack) -> CoreResult<Book> {
+    let book = Book::create(root, name)?;
+    let all_ids: Vec<String> = pack.notes.iter().map(|n| n.id.clone()).collect();
+    let options = ImportOptions {
+        selected_note_ids: all_ids,
+        category_map: Default::default(),
+    };
+    import_pack(&book, pack, &options)?;
+    Ok(book)
+}
+
 /// A fresh note shell carrying the pack note's identity; content is filled by the caller.
 fn new_pack_note(book: &Book, id: NoteId, pack_note: &PackNote) -> Note {
     Note {
@@ -319,6 +352,7 @@ mod tests {
     use super::*;
     use crate::app::commands::{create_note, get_note, update_note};
     use crate::model::ObjectType;
+    use crate::pack::ExportKind;
 
     fn book() -> (tempfile::TempDir, Book) {
         let dir = tempfile::tempdir().unwrap();
@@ -341,6 +375,7 @@ mod tests {
             description: "garden notes".into(),
             categories: vec!["garden".into()],
             note_ids: vec![],
+            export_all: false,
         }
     }
 
@@ -441,6 +476,75 @@ mod tests {
             get_note(&target, &note_id).unwrap().body,
             "user's own careful notes"
         );
+    }
+
+    #[test]
+    fn import_pack_as_new_book_creates_book_with_all_notes() {
+        let (_d, source) = book();
+        add(&source, "Compost", "greens and browns", &["garden"]);
+        add(&source, "Wiring", "breaker panel", &["electrical"]);
+        source
+            .store
+            .write_category(&Category::new("garden"))
+            .unwrap();
+        source
+            .store
+            .write_category(&Category::new("electrical"))
+            .unwrap();
+        let pack = build_pack(
+            &source,
+            &ExportSpec {
+                id: "full".into(),
+                name: "Full".into(),
+                version: "1.0.0".into(),
+                export_all: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let dest_dir = tempfile::tempdir().unwrap();
+        let book_path = dest_dir.path().join("new-book");
+        let new_book =
+            crate::app::pack::import_pack_as_new_book(&book_path, "New Book", &pack).unwrap();
+        let notes = new_book.store.read_all_notes().unwrap();
+        assert_eq!(notes.len(), 2);
+        assert!(notes.iter().any(|n| n.title == "Compost"));
+        assert!(notes.iter().any(|n| n.title == "Wiring"));
+        let cats: Vec<_> = new_book
+            .store
+            .categories()
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert!(cats.contains(&"garden".to_string()));
+        assert!(cats.contains(&"electrical".to_string()));
+    }
+
+    #[test]
+    fn export_all_exports_every_non_deleted_note() {
+        let (_d, book) = book();
+        add(&book, "Compost", "greens and browns", &["garden"]);
+        add(&book, "Wiring", "breaker panel", &["electrical"]);
+        let deleted_id = add(&book, "Draft", "wip", &["scratch"]);
+        let nid = NoteId::parse(&deleted_id).unwrap();
+        let mut draft = book.store.read_note(&nid).unwrap();
+        draft.metadata.lifecycle.marked_for_deletion_at = Some(chrono::Utc::now());
+        book.save_note(&draft).unwrap();
+
+        let all_spec = ExportSpec {
+            id: "full-book".into(),
+            name: "Full Book".into(),
+            version: "1.0.0".into(),
+            export_all: true,
+            ..Default::default()
+        };
+        let pack = build_pack(&book, &all_spec).unwrap();
+        assert_eq!(pack.notes.len(), 2, "deleted note must be excluded");
+        assert!(pack.notes.iter().any(|n| n.title == "Compost"));
+        assert!(pack.notes.iter().any(|n| n.title == "Wiring"));
+        assert_eq!(pack.manifest.export_kind, ExportKind::Book);
     }
 
     #[test]

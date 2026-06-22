@@ -18,6 +18,15 @@ use crate::model::{Category, Note, ObjectType};
 /// future format instead of silently mis-parsing it.
 pub const PACK_FORMAT: &str = "syllepsis_pack_001";
 
+/// Whether a pack was exported as a full book archive or a curated subset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportKind {
+    #[default]
+    Pack,
+    Book,
+}
+
 /// Identity and descriptive metadata for a pack (core-concepts.md: "Knowledge packs carry a
 /// version number"). `id` is the stable key used for `PackMembership` and version re-imports;
 /// `version` is the user-facing pack version.
@@ -28,6 +37,8 @@ pub struct PackManifest {
     pub version: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub export_kind: ExportKind,
 }
 
 /// One note's portable content inside a pack. Only the shareable fields travel — none of the
@@ -130,6 +141,7 @@ mod tests {
                 name: "Permaculture Basics".into(),
                 version: "1.2.0".into(),
                 description: "Starter notes on permaculture.".into(),
+                export_kind: ExportKind::Pack,
             },
             vec![PackNote {
                 id: "note-compost-01HABC".into(),
@@ -164,5 +176,12 @@ mod tests {
     fn rejects_an_unknown_format() {
         let json = r#"{"format":"from_the_future","manifest":{"id":"x","name":"x","version":"1"},"notes":[],"categories":[]}"#;
         assert!(Pack::from_json(json).is_err());
+    }
+
+    #[test]
+    fn export_kind_defaults_to_pack_for_legacy_json() {
+        let json = r#"{"format":"syllepsis_pack_001","manifest":{"id":"x","name":"x","version":"1"},"notes":[],"categories":[]}"#;
+        let pack = Pack::from_json(json).unwrap();
+        assert_eq!(pack.manifest.export_kind, ExportKind::Pack);
     }
 }
