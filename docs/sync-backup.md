@@ -25,6 +25,20 @@ Near-real-time saves and cloud syncs use a CRDT library. Candidates:
 
 **Note:** CRDT does not track binary files (images). Images use UUID-based sidecars so the app handles file moves correctly regardless of path changes.
 
+### Phase 4 implementation (in place)
+
+Built behind two seams mirroring the embeddings/LLM pattern (`crates/syllepsis-core/src/crdt`, `…/src/sync`):
+
+- **`NoteCrdt` / `CrdtBackend`** — per-note convergent documents. Each note carries a CRDT **sidecar** at `_crdt/{ulid}.crdt` (keyed on the ulid so a retitle/move never orphans it). The sidecar — not the markdown — is the cross-device merge authority; markdown is the source of truth for *local* edits and is rendered from the merged sidecar.
+  - **Default backend `lww`** (always compiled): a last-writer-wins register over the whole body, keyed by a hybrid logical clock `(wall_ms, counter, actor)`. A genuine CRDT (total-order `max` — commutative/associative/idempotent), correct for the primary one-user/many-devices target. Whole-body winner, not paragraph-level merge.
+  - **Backend `loro`** (optional `loro` Cargo feature): the fine-grained text CRDT — concurrent edits to *different* regions of a note both survive.
+- **`SyncProvider`** — the user-owned remote reduced to list/get/put/delete over book-relative paths. Default impl **`LocalFolderSync`** (a synced folder is exactly how the Drive/Dropbox desktop clients expose the cloud; revision = content sha256). Google Drive / GitHub are advertised in `provider_descriptors()` for the UI but not yet wired (honestly flagged `implemented: false`).
+- **`SyncEngine`** — one pass: reconcile markdown→sidecars, fingerprint local + list remote, run a **pure planner** (`sync::plan`) over per-file state, then apply push/pull/**merge**/**conflict**/delete. Concurrent note bodies merge through their sidecars; non-mergeable files (categories, `_book.md`, …) get a deterministic `.conflict-{hash}` copy (winner = greater content hash, so both devices converge on the same pair). Per-device **`SyncState`** under `_sync/` (never synced) records last-synced fingerprints so an unchanged file is skipped — **infinite-write-loop prevention** is "skip when neither side changed".
+
+Storage: `_crdt/` (sidecars) is synced but git-ignored; `_sync/` (per-device state + actor id) is local-only. Both are excluded from the note scan. Binary assets are tracked by UUID sidecars (`sync::assets`), not CRDT'd.
+
+Known POC limitations: concurrent *frontmatter* (metadata) edits last-writer-win (only the body merges); the cloud HTTP providers and git integration are not implemented yet.
+
 ### Conflict Management
 - Actively manage cloud conflict files: merge and delete (identified by UUID).
 - Implement mitigations to prevent infinite write loops.

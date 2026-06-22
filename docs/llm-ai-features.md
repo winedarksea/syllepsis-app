@@ -28,20 +28,21 @@ is a manifest entry, not a code change.
 
 The bundled model is **[Qwen3-Embedding-0.6B](https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX)**
 (Int8 quantized): 1024-dim, 32k context, Matryoshka dimensions that can be truncated for cheaper storage/prefilter,
-and *asymmetric* — queries use an instruction prefix while documents embed raw. It is from the same Qwen3 family as
-the bundled LLM, sharing tokenizer format and ONNX runtime infrastructure. Pooling is last-token (causal decoder
+and *asymmetric* — queries use an instruction prefix while documents embed raw. It shares Hugging Face tokenizer
+format and ONNX runtime infrastructure with the bundled LLM. Pooling is last-token (causal decoder
 architecture).
 
 The model is used purely as a **dense** embedder. The sparse / BM25 arm of search comes from SQLite **FTS5**
 ([search.md](search.md)), not the embedding model, so a model with no native sparse output (Qwen3) loses
-nothing, and bge-m3's learned-sparse head is an optional bonus the pipeline does not depend on. Vectors are
-stored in SQLite via `sqlite-vec`, with the column width pinned to the active model's dimension.
+nothing; learned-sparse heads from other embedders are optional bonuses the pipeline does not depend on. Vectors are
+stored in SQLite under `_derived/`; `sqlite-vec` remains the intended acceleration layer once a
+reliable Rust binding is available, with the vector width pinned to the active model's dimension.
 
 ### Multiple Vectors Per Note
 - One vector for the **summary**
 - One or more vectors for the **main body**
 - Long notes are chunked for retrieval granularity — chunk size is a configurable tuning knob, not a model
-  limit (bge-m3 handles ~8192 tokens) — and each chunk gets its own vector, tokenized with the model's own tokenizer
+  limit (Qwen3-Embedding handles 32k tokens) — and each chunk gets its own vector, tokenized with the model's own tokenizer
 
 ### Category Vectors
 A category's vector is computed as an average of its member notes' vectors. This enables category-to-category similarity (duplicate/near-duplicate category detection) and the category upweighting used in the [related carousel](ui-views.md#related-carousel).
@@ -60,9 +61,10 @@ A category's vector is computed as an average of its member notes' vectors. This
 ## Local LLM (bundled)
 
 Goal: package a small-but-capable model so LLM features **just work** on the user's device with no
-configuration. The bundled model is **Gemma 4 E2B, 4-bit quantized** (`model_q4.onnx` — fp32 I/O,
-int4 weights). Replacing it with a later Gemma release is a manifest entry, not a code change. Users
-with capable machines can opt into a larger model (e.g. the 12B 4-bit), gated behind a RAM check.
+configuration. The bundled model is **Gemma 4 E2B IT, 4-bit quantized** using the ONNX Community
+split text path (`embed_tokens_q4.onnx` + `decoder_model_merged_q4.onnx`, with external
+`.onnx_data` files). Replacing it with a later Gemma release is a manifest entry, not a code
+change. Users with capable machines can opt into a larger model, gated behind a RAM check.
 
 **Runtime: ONNX Runtime.** The bundled model runs through [`ort`](https://github.com/pykeio/ort)
 on desktop (with CoreML / DirectML / CUDA execution providers and a CPU fallback), and
@@ -91,6 +93,8 @@ LLM work is gated behind the `LlmProvider` seam, with three kinds of provider:
 
 **Keys** live in the OS keychain and are never written to synced config or markdown — consistent with
 "no credentials are managed by this app" ([platform-infra.md](platform-infra.md)).
+The desktop shell exposes keychain-backed provider status/save/clear commands that return only
+configured/not-configured booleans to the UI; secret values are never returned over IPC.
 
 Users configure **per-task routing**: each task names a `{provider, model}` pair, so (for example)
 summaries run on the local model while fact-checks run on a cloud Opus model. A per-action override

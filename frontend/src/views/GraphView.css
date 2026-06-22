@@ -1,0 +1,63 @@
+.gv-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.gv-header {
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  flex-shrink: 0;
+}
+
+.gv-title {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: var(--color-heading);
+}
+
+.gv-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-secondary);
+}
+.gv-error { color: #a00; }
+
+.gv-canvas {
+  flex: 1;
+  overflow: auto;
+  background: var(--color-bg);
+}
+
+.gv-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.gv-edge {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+
+.gv-node {
+  cursor: pointer;
+}
+
+.gv-node-dot {
+  transition: r var(--transition-fast);
+  stroke: var(--color-surface);
+  stroke-width: 1.5;
+}
+
+.gv-node-label {
+  font-size: 13px;
+  fill: var(--color-heading);
+  paint-order: stroke;
+  stroke: var(--color-bg);
+  stroke-width: 3px;
+}

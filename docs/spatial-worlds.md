@@ -77,7 +77,7 @@ Imported **SVGs are treated as [drawings](object-types.md#drawings)**, and the f
 
 ## Phasing
 
-1. **First pass** — image-backed worlds from imported SVG (preferred) or raster images; overlay pins and regions; `loc:` inline syntax and note-level `location` metadata; the text→coordinate lookup table generalized with a `world` column.
+1. **First pass** *(implemented — see `syllepsis-core::spatial` and the `app::spatial` command surface)* — image-backed worlds from imported SVG (preferred) or raster images; overlay pins and regions; `loc:` inline syntax and note-level `location` metadata; the text→coordinate lookup table generalized with a `world` column. The world registry always supplies the implicit `earth` geo world; a numeric coordinate pair is resolved against its world's kind (lat/long vs normalized x/y) and range-checked. The React **Worlds** view renders the overlay over a normalized coordinate plane.
 2. **Future** — Map view with tiles for geo worlds; the in-app drawing tool producing SVG worlds; richer multi-floor world grouping.
 
 The authoring of detailed floorplans is **out of scope** for Syllepsis — that lives in the separate `catlin-house` IFC/BIM tooling, which already renders floorplan images. Syllepsis *imports* a floorplan as a world backdrop rather than reimplementing a CAD editor.

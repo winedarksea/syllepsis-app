@@ -1,0 +1,83 @@
+.rc-root {
+  border-top: 1px solid var(--color-border);
+  padding: var(--sp-3) var(--sp-6);
+  background: var(--color-surface);
+  flex-shrink: 0;
+}
+
+.rc-label {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--sp-2);
+}
+
+.rc-state {
+  padding: var(--sp-3) var(--sp-6);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.rc-track {
+  display: flex;
+  gap: var(--sp-3);
+  overflow-x: auto;
+  padding-bottom: var(--sp-1);
+}
+
+.rc-card {
+  flex: 0 0 200px;
+  text-align: left;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.rc-card:hover {
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-sm);
+}
+
+.rc-card-title {
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+  color: var(--color-heading);
+  margin-bottom: var(--sp-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rc-card-summary {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.rc-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--sp-2);
+}
+
+.rc-sim {
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.rc-shared {
+  font-size: var(--font-size-xs);
+  color: var(--color-tag-text);
+  background: var(--color-tag-bg);
+  border: 1px solid var(--color-tag-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--sp-1);
+}

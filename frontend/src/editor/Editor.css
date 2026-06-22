@@ -1,0 +1,176 @@
+.editor-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-secondary);
+}
+
+.editor-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  flex-shrink: 0;
+}
+
+.editor-back {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+.editor-back:hover { color: var(--color-text); }
+
+.editor-toolbar-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.editor-type-badge {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  background: var(--color-surface-raised);
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.editor-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.editor-dirty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.editor-save-btn {
+  padding: var(--sp-1) var(--sp-4);
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  transition: background var(--transition-fast);
+}
+.editor-save-btn:hover:not(:disabled) { background: var(--color-accent-hover); }
+.editor-save-btn:disabled { opacity: 0.45; cursor: default; }
+
+.editor-error-banner {
+  background: #fee;
+  color: #a00;
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--font-size-sm);
+  border-bottom: 1px solid #fcc;
+}
+
+.editor-meta {
+  padding: var(--sp-6) var(--sp-8) var(--sp-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.editor-title {
+  width: 100%;
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
+  color: var(--color-heading);
+  background: transparent;
+  border: none;
+  outline: none;
+  margin-bottom: var(--sp-2);
+  line-height: 1.2;
+}
+
+.editor-summary {
+  width: 100%;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  outline: none;
+  margin-bottom: var(--sp-3);
+  font-style: italic;
+}
+
+.editor-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.editor-category-chip {
+  font-size: var(--font-size-xs);
+  background: var(--color-tag-bg);
+  color: var(--color-tag-text);
+  border: 1px solid var(--color-tag-border);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--sp-2);
+}
+
+/* Lexical editor area */
+.lexical-content-editable {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-6) var(--sp-8);
+  outline: none;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-loose);
+  color: var(--color-text);
+}
+
+.lexical-placeholder {
+  position: absolute;
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+  user-select: none;
+}
+
+.lexical-root { position: relative; }
+.lexical-paragraph { margin-bottom: var(--sp-4); }
+.lexical-bold { font-weight: 700; }
+.lexical-italic { font-style: italic; }
+.lexical-underline { text-decoration: underline; }
+.lexical-code-inline { font-family: var(--font-mono); font-size: 0.9em; background: var(--color-surface-raised); padding: 1px 4px; border-radius: var(--radius-sm); }
+
+/* Inline dialect node chips */
+.lexical-category-chip {
+  display: inline-block;
+  background: var(--color-tag-bg);
+  color: var(--color-tag-text);
+  border: 1px solid var(--color-tag-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--sp-2);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: default;
+}
+
+.lexical-cloze-chip {
+  display: inline-block;
+  background: var(--color-cloze-bg);
+  color: var(--color-cloze-text);
+  border: 1px dashed var(--color-cloze-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--sp-2);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}

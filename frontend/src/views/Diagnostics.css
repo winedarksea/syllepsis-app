@@ -1,0 +1,70 @@
+.dg-root {
+  height: 100%;
+  overflow-y: auto;
+  padding-bottom: var(--sp-8);
+}
+
+.dg-header {
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.dg-title {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: var(--color-heading);
+}
+
+.dg-state {
+  padding: var(--sp-8);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.dg-error { color: #a00; }
+
+.dg-section {
+  padding: var(--sp-5) var(--sp-6) 0;
+}
+
+.dg-section-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-heading);
+}
+
+.dg-section-hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--sp-3);
+}
+
+.dg-pair,
+.dg-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  margin-bottom: var(--sp-2);
+}
+
+.dg-link {
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  text-align: left;
+}
+.dg-link:hover { text-decoration: underline; }
+
+.dg-sim {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-tag-bg);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--sp-2);
+}
+.dg-sim-weak { margin-left: auto; }

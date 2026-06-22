@@ -1,0 +1,656 @@
+//! [`SyncEngine`]: one sync pass that reconciles a book's markdown with its CRDT sidecars and
+//! exchanges both with a [`SyncProvider`].
+//!
+//! A pass is four steps:
+//! 1. **Reconcile** — fold every note's markdown body (the local source of truth) into its CRDT
+//!    sidecar, so an edit made in the editor *or* by an external tool is captured before diffing.
+//! 2. **Fingerprint** — hash local files and list the remote, then run the pure
+//!    [`plan`](super::plan::plan) to classify each path.
+//! 3. **Apply** — push / pull / merge / conflict / delete per the plan. Note bodies merge through
+//!    their sidecars (convergent); non-mergeable files get deterministic `.conflict-*` copies.
+//! 4. **Persist** — write back the per-file [`SyncState`] so the next pass skips everything quiet,
+//!    which is what stops write loops.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use serde::Serialize;
+
+use crate::config::SyncConfig;
+use crate::crdt::{select_crdt_backend, ActorId, CrdtBackend, NoteCrdt};
+use crate::error::CoreResult;
+use crate::markdown::frontmatter;
+use crate::sync::local_folder::content_revision;
+use crate::sync::plan::{plan, SyncAction};
+use crate::sync::provider::SyncProvider;
+use crate::sync::state::SyncState;
+use crate::sync::{is_local_only, is_note_md, is_sidecar, sidecar_rel_path};
+
+/// What one sync pass did. The vectors name the affected paths (for the UI's activity log and for
+/// tests); [`is_noop`](SyncReport::is_noop) is the loop-prevention assertion — a second pass with
+/// no real change must be a no-op.
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct SyncReport {
+    pub pushed: Vec<String>,
+    pub pulled: Vec<String>,
+    pub merged: Vec<String>,
+    pub conflicted: Vec<String>,
+    pub deleted_local: Vec<String>,
+    pub deleted_remote: Vec<String>,
+    pub skipped: usize,
+}
+
+impl SyncReport {
+    /// True if the pass changed nothing on either side (every path was skipped).
+    pub fn is_noop(&self) -> bool {
+        self.pushed.is_empty()
+            && self.pulled.is_empty()
+            && self.merged.is_empty()
+            && self.conflicted.is_empty()
+            && self.deleted_local.is_empty()
+            && self.deleted_remote.is_empty()
+    }
+}
+
+/// Drives a single book's sync against one provider. Constructed per pass; owns its provider and
+/// CRDT backend so the call site need only hand it the book root and config.
+pub struct SyncEngine {
+    book_root: PathBuf,
+    provider: Box<dyn SyncProvider>,
+    backend: Box<dyn CrdtBackend>,
+    actor: ActorId,
+    conflict_marker: String,
+}
+
+impl SyncEngine {
+    /// Build an engine for `book_root` syncing through `provider`, selecting the CRDT backend and
+    /// conflict-copy marker from `cfg` and attributing local edits to `actor`.
+    pub fn new(
+        book_root: impl Into<PathBuf>,
+        provider: Box<dyn SyncProvider>,
+        actor: ActorId,
+        cfg: &SyncConfig,
+    ) -> SyncEngine {
+        SyncEngine {
+            book_root: book_root.into(),
+            provider,
+            backend: select_crdt_backend(cfg),
+            actor,
+            conflict_marker: cfg.conflict_marker.clone(),
+        }
+    }
+
+    /// Run one sync pass and report what changed.
+    pub fn sync(&self) -> CoreResult<SyncReport> {
+        let mut state = SyncState::load(&self.book_root, self.provider.name())?;
+        let mut report = SyncReport::default();
+
+        // 1. Markdown → sidecar, so local/external edits are in the CRDT before we diff.
+        self.reconcile_sidecars()?;
+
+        // 2. Fingerprint both sides. Sidecars and device-local dirs are excluded from the planned
+        //    set — sidecars ride along with their note, never planned independently.
+        let local = self.local_fingerprints()?;
+        let mut remote_all = BTreeMap::new();
+        for entry in self.provider.list()? {
+            remote_all.insert(entry.path, entry.revision);
+        }
+        let remote_primary: BTreeMap<String, String> = remote_all
+            .iter()
+            .filter(|(p, _)| !is_sidecar(p) && !is_local_only(p))
+            .map(|(p, r)| (p.clone(), r.clone()))
+            .collect();
+
+        // 3. Apply the plan.
+        for action in plan(&local, &remote_primary, &state, is_note_md) {
+            self.apply(
+                action,
+                &local,
+                &remote_primary,
+                &remote_all,
+                &mut state,
+                &mut report,
+            )?;
+        }
+
+        // 4. Forget state for primary files now absent on both sides (deleted everywhere); sidecar
+        //    state is pruned alongside its note in the delete handlers.
+        let stale: Vec<String> = state
+            .files
+            .keys()
+            .filter(|p| !is_sidecar(p) && !local.contains_key(*p) && !remote_all.contains_key(*p))
+            .cloned()
+            .collect();
+        for path in stale {
+            state.forget(&path);
+        }
+        state.save(&self.book_root)?;
+        Ok(report)
+    }
+
+    fn apply(
+        &self,
+        action: SyncAction,
+        local: &BTreeMap<String, String>,
+        remote_primary: &BTreeMap<String, String>,
+        remote_all: &BTreeMap<String, String>,
+        state: &mut SyncState,
+        report: &mut SyncReport,
+    ) -> CoreResult<()> {
+        match action {
+            SyncAction::Push(path) => {
+                self.push_file(&path, state)?;
+                self.push_sidecar_of(&path, state)?;
+                report.pushed.push(path);
+            }
+            SyncAction::Pull(path) => {
+                let rev = remote_primary.get(&path).cloned().unwrap_or_default();
+                self.pull_file(&path, &rev, state)?;
+                self.pull_sidecar_of(&path, remote_all, state)?;
+                report.pulled.push(path);
+            }
+            SyncAction::Merge(path) => {
+                self.merge_note(&path, remote_all, state)?;
+                report.merged.push(path);
+            }
+            SyncAction::Conflict(path) => {
+                self.resolve_conflict(&path, state)?;
+                report.conflicted.push(path);
+            }
+            SyncAction::DeleteLocal(path) => {
+                let _ = std::fs::remove_file(self.full(&path));
+                self.drop_sidecar(&path, state, true)?;
+                state.forget(&path);
+                report.deleted_local.push(path);
+            }
+            SyncAction::DeleteRemote(path) => {
+                self.provider.delete(&path)?;
+                self.drop_sidecar(&path, state, true)?;
+                state.forget(&path);
+                report.deleted_remote.push(path);
+            }
+            SyncAction::Skip(path) => {
+                // Record state for an as-yet-untracked but already-matching file so future passes
+                // recognize it as quiet.
+                if let (Some(lh), Some(rr)) = (local.get(&path), remote_primary.get(&path)) {
+                    state.mark_synced(&path, lh.clone(), rr.clone());
+                }
+                report.skipped += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// Step 1: ensure every local note has a sidecar whose CRDT text equals its markdown body.
+    fn reconcile_sidecars(&self) -> CoreResult<()> {
+        for rel in self.walk_files()? {
+            if !is_note_md(&rel) {
+                continue;
+            }
+            let note = frontmatter::parse_note(&std::fs::read_to_string(self.full(&rel))?)?;
+            let sidecar_rel = match sidecar_rel_path(&rel) {
+                Some(s) => s,
+                None => continue,
+            };
+            let sidecar_full = self.full(&sidecar_rel);
+            if sidecar_full.exists() {
+                let mut doc = self
+                    .backend
+                    .load_document(&self.actor, &std::fs::read(&sidecar_full)?)?;
+                if doc.text() != note.body {
+                    doc.set_text(&note.body); // captures the local/external edit (idempotent if equal)
+                    self.write_sidecar(&sidecar_full, doc.as_ref())?;
+                }
+            } else {
+                let doc = self.backend.new_document(&self.actor, &note.body);
+                self.write_sidecar(&sidecar_full, doc.as_ref())?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Both sides changed a note: merge the two CRDT sidecars, render the merged body back into the
+    /// markdown, and push both. The body converges; markdown frontmatter takes the local copy (a
+    /// known POC limitation — concurrent *metadata* edits last-writer-win, concurrent *text* edits
+    /// merge).
+    fn merge_note(
+        &self,
+        path: &str,
+        remote_all: &BTreeMap<String, String>,
+        state: &mut SyncState,
+    ) -> CoreResult<()> {
+        let sidecar_rel = sidecar_rel_path(path).expect("merge target is a note");
+        let sidecar_full = self.full(&sidecar_rel);
+        let mut note = frontmatter::parse_note(&std::fs::read_to_string(self.full(path))?)?;
+
+        let mut doc = if sidecar_full.exists() {
+            self.backend
+                .load_document(&self.actor, &std::fs::read(&sidecar_full)?)?
+        } else {
+            self.backend.new_document(&self.actor, &note.body)
+        };
+
+        if remote_all.contains_key(&sidecar_rel) {
+            doc.merge(&self.provider.get(&sidecar_rel)?)?;
+        } else {
+            // Remote changed the note but has no sidecar (edited by a non-CRDT tool): fold its body
+            // in as a local edit so it still participates in convergence.
+            let remote_note =
+                frontmatter::parse_note(&String::from_utf8_lossy(&self.provider.get(path)?))?;
+            doc.set_text(&remote_note.body);
+        }
+
+        note.body = doc.text();
+        self.write_sidecar(&sidecar_full, doc.as_ref())?;
+        let serialized = frontmatter::serialize_note(&note)?;
+        std::fs::write(self.full(path), &serialized)?;
+
+        let note_rev = self.provider.put(path, serialized.as_bytes())?;
+        state.mark_synced(path, content_revision(serialized.as_bytes()), note_rev);
+        self.push_sidecar_of(path, state)?;
+        Ok(())
+    }
+
+    /// Both sides changed a non-mergeable file: pick a deterministic winner (greater content hash),
+    /// keep it live everywhere, and preserve the loser as a `.conflict-{hash}` copy. Because the
+    /// winner is a pure function of the two contents, both devices converge on the same pair.
+    fn resolve_conflict(&self, path: &str, state: &mut SyncState) -> CoreResult<()> {
+        let local_bytes = std::fs::read(self.full(path))?;
+        let remote_bytes = self.provider.get(path)?;
+        let local_hash = content_revision(&local_bytes);
+        let remote_hash = content_revision(&remote_bytes);
+
+        let (winner, loser, loser_hash) = if local_hash >= remote_hash {
+            (local_bytes, remote_bytes, remote_hash)
+        } else {
+            (remote_bytes, local_bytes, local_hash)
+        };
+        let conflict_rel = conflict_path(path, &self.conflict_marker, &loser_hash);
+
+        std::fs::write(self.full(path), &winner)?;
+        self.write_local(&conflict_rel, &loser)?;
+
+        let win_rev = self.provider.put(path, &winner)?;
+        state.mark_synced(path, content_revision(&winner), win_rev);
+        let conflict_rev = self.provider.put(&conflict_rel, &loser)?;
+        state.mark_synced(&conflict_rel, content_revision(&loser), conflict_rev);
+        Ok(())
+    }
+
+    // --- file/sidecar primitives ---------------------------------------------------------------
+
+    fn push_file(&self, rel: &str, state: &mut SyncState) -> CoreResult<()> {
+        let bytes = std::fs::read(self.full(rel))?;
+        let rev = self.provider.put(rel, &bytes)?;
+        state.mark_synced(rel, content_revision(&bytes), rev);
+        Ok(())
+    }
+
+    fn pull_file(&self, rel: &str, remote_rev: &str, state: &mut SyncState) -> CoreResult<()> {
+        let bytes = self.provider.get(rel)?;
+        self.write_local(rel, &bytes)?;
+        state.mark_synced(rel, content_revision(&bytes), remote_rev);
+        Ok(())
+    }
+
+    fn push_sidecar_of(&self, note_path: &str, state: &mut SyncState) -> CoreResult<()> {
+        if let Some(sidecar) = sidecar_rel_path(note_path) {
+            if self.full(&sidecar).exists() {
+                self.push_file(&sidecar, state)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn pull_sidecar_of(
+        &self,
+        note_path: &str,
+        remote_all: &BTreeMap<String, String>,
+        state: &mut SyncState,
+    ) -> CoreResult<()> {
+        if let Some(sidecar) = sidecar_rel_path(note_path) {
+            if let Some(rev) = remote_all.get(&sidecar) {
+                self.pull_file(&sidecar, rev, state)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove a note's sidecar locally and (when `from_remote`) on the remote, forgetting its state.
+    fn drop_sidecar(
+        &self,
+        note_path: &str,
+        state: &mut SyncState,
+        from_remote: bool,
+    ) -> CoreResult<()> {
+        if !is_note_md(note_path) {
+            return Ok(());
+        }
+        if let Some(sidecar) = sidecar_rel_path(note_path) {
+            let _ = std::fs::remove_file(self.full(&sidecar));
+            if from_remote {
+                self.provider.delete(&sidecar)?;
+            }
+            state.forget(&sidecar);
+        }
+        Ok(())
+    }
+
+    fn write_sidecar(&self, full: &Path, doc: &dyn NoteCrdt) -> CoreResult<()> {
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(full, doc.snapshot()?)?;
+        Ok(())
+    }
+
+    fn write_local(&self, rel: &str, bytes: &[u8]) -> CoreResult<()> {
+        let full = self.full(rel);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(full, bytes)?;
+        Ok(())
+    }
+
+    /// All syncable local files: every file under the book except device-local bookkeeping
+    /// (`_sync/`), ephemeral caches (`_derived/`), and the CRDT sidecars (`_crdt/`, handled with
+    /// their notes), each mapped to its content hash.
+    fn local_fingerprints(&self) -> CoreResult<BTreeMap<String, String>> {
+        let mut map = BTreeMap::new();
+        for rel in self.walk_files()? {
+            if is_local_only(&rel) || is_sidecar(&rel) {
+                continue;
+            }
+            map.insert(
+                rel.clone(),
+                content_revision(&std::fs::read(self.full(&rel))?),
+            );
+        }
+        Ok(map)
+    }
+
+    /// Every file under the book root as a book-relative POSIX path.
+    fn walk_files(&self) -> CoreResult<Vec<String>> {
+        let mut out = Vec::new();
+        collect(&self.book_root, &self.book_root, &mut out)?;
+        Ok(out)
+    }
+
+    fn full(&self, rel: &str) -> PathBuf {
+        let mut path = self.book_root.clone();
+        for segment in rel.split('/').filter(|s| !s.is_empty()) {
+            path.push(segment);
+        }
+        path
+    }
+}
+
+/// Build the conflict-copy path for `path`: `{stem}.{marker}-{hash8}.{ext}` next to the original.
+/// The hash makes the name deterministic across devices, so both write the identical copy.
+fn conflict_path(path: &str, marker: &str, loser_hash: &str) -> String {
+    let short = &loser_hash[..loser_hash.len().min(8)];
+    let p = Path::new(path);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let name = match p.extension().and_then(|e| e.to_str()) {
+        Some(ext) => format!("{stem}.{marker}-{short}.{ext}"),
+        None => format!("{stem}.{marker}-{short}"),
+    };
+    match p
+        .parent()
+        .and_then(|parent| parent.to_str())
+        .filter(|s| !s.is_empty())
+    {
+        Some(parent) => format!("{parent}/{name}"),
+        None => name,
+    }
+}
+
+fn collect(dir: &Path, root: &Path, out: &mut Vec<String>) -> CoreResult<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect(&path, root, out)?;
+        } else if let Ok(rel) = path.strip_prefix(root) {
+            out.push(
+                rel.components()
+                    .filter_map(|c| c.as_os_str().to_str())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::ObjectType;
+    use crate::storage::{Book, NoteStore};
+    use crate::sync::{actor_id_for, LocalFolderSync};
+
+    /// One device: a book dir plus a freshly-built engine sharing the given remote folder.
+    struct Device {
+        book: Book,
+        remote: PathBuf,
+        cfg: SyncConfig,
+    }
+
+    impl Device {
+        fn engine(&self) -> SyncEngine {
+            let provider = Box::new(LocalFolderSync::open(&self.remote).unwrap());
+            let actor = actor_id_for(self.book.root.as_path()).unwrap();
+            SyncEngine::new(self.book.root.clone(), provider, actor, &self.cfg)
+        }
+        fn sync(&self) -> SyncReport {
+            self.engine().sync().unwrap()
+        }
+    }
+
+    fn two_devices() -> (tempfile::TempDir, Device, Device) {
+        two_devices_with(SyncConfig::default())
+    }
+
+    fn two_devices_with(cfg: SyncConfig) -> (tempfile::TempDir, Device, Device) {
+        let tmp = tempfile::tempdir().unwrap();
+        let remote = tmp.path().join("remote");
+        let a = Book::create(tmp.path().join("device-a"), "Shared").unwrap();
+        let b = Book::create(tmp.path().join("device-b"), "Shared").unwrap();
+        (
+            tmp,
+            Device {
+                book: a,
+                remote: remote.clone(),
+                cfg: cfg.clone(),
+            },
+            Device {
+                book: b,
+                remote,
+                cfg,
+            },
+        )
+    }
+
+    fn body_of(book: &Book, id: &crate::id::NoteId) -> String {
+        book.store.read_note(id).unwrap().body
+    }
+
+    #[test]
+    fn note_created_on_one_device_pulls_to_the_other() {
+        let (_tmp, a, b) = two_devices();
+        let note = a.book.new_note(ObjectType::Note, "kitchen").unwrap();
+        a.book
+            .save_note(&{
+                let mut n = note.clone();
+                n.body = "breaker panel notes".into();
+                n
+            })
+            .unwrap();
+
+        let push = a.sync();
+        assert!(push.pushed.iter().any(|p| p.ends_with(".md")));
+
+        let pull = b.sync();
+        assert!(pull.pulled.iter().any(|p| p.ends_with(".md")));
+        // The note (and its sidecar) arrived on device B.
+        b.book.store.refresh().unwrap();
+        assert_eq!(body_of(&b.book, &note.id), "breaker panel notes");
+        assert!(
+            crate::storage::layout::crdt_sidecar_path(b.book.root.as_path(), &note.id).exists()
+        );
+    }
+
+    #[test]
+    fn second_sync_with_no_changes_is_a_noop() {
+        // The core loop-prevention guarantee.
+        let (_tmp, a, b) = two_devices();
+        let note = a.book.new_note(ObjectType::Note, "n").unwrap();
+        let mut n = note.clone();
+        n.body = "content".into();
+        a.book.save_note(&n).unwrap();
+
+        a.sync();
+        b.sync();
+        // Everything is now in sync; a second pass on each side must touch nothing.
+        assert!(a.sync().is_noop(), "device A re-sync should be a no-op");
+        assert!(b.sync().is_noop(), "device B re-sync should be a no-op");
+    }
+
+    #[test]
+    fn concurrent_note_edits_converge() {
+        let (_tmp, a, b) = two_devices();
+        let note = a.book.new_note(ObjectType::Note, "shared").unwrap();
+        let mut base = note.clone();
+        base.body = "base".into();
+        a.book.save_note(&base).unwrap();
+        a.sync();
+        b.sync();
+        b.book.store.refresh().unwrap();
+
+        // Both devices edit the same note's body before the next sync.
+        let mut ea = a.book.store.read_note(&note.id).unwrap();
+        ea.body = "edit from A".into();
+        a.book.save_note(&ea).unwrap();
+        let mut eb = b.book.store.read_note(&note.id).unwrap();
+        eb.body = "edit from B".into();
+        b.book.save_note(&eb).unwrap();
+
+        // Sync both ways until quiescent; replicas must converge to the same body.
+        for _ in 0..3 {
+            a.sync();
+            b.sync();
+        }
+        a.book.store.refresh().unwrap();
+        b.book.store.refresh().unwrap();
+        let final_a = body_of(&a.book, &note.id);
+        let final_b = body_of(&b.book, &note.id);
+        assert_eq!(final_a, final_b, "replicas must converge");
+        assert!(
+            final_a == "edit from A" || final_a == "edit from B",
+            "LWW keeps one of the two concurrent edits, got {final_a:?}"
+        );
+        assert!(a.sync().is_noop() && b.sync().is_noop(), "must settle");
+    }
+
+    #[test]
+    fn concurrent_category_edits_produce_a_conflict_copy() {
+        let (_tmp, a, b) = two_devices();
+        // A non-note file (a category) edited on both devices is not CRDT-mergeable.
+        crate::app::commands::create_category(&a.book, crate::model::Category::new("electrical"))
+            .unwrap();
+        a.sync();
+        b.sync();
+
+        let mut cat_a = crate::model::Category::new("electrical");
+        cat_a.long_name = "From A".into();
+        crate::app::commands::create_category(&a.book, cat_a).unwrap();
+        let mut cat_b = crate::model::Category::new("electrical");
+        cat_b.long_name = "From B".into();
+        crate::app::commands::create_category(&b.book, cat_b).unwrap();
+
+        for _ in 0..3 {
+            a.sync();
+            b.sync();
+        }
+        // A deterministic conflict copy of the category exists on both devices and they converge.
+        let has_conflict = |root: &Path| {
+            std::fs::read_dir(root.join("_categories"))
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .any(|e| e.file_name().to_string_lossy().contains("conflict"))
+        };
+        assert!(has_conflict(a.book.root.as_path()));
+        assert!(has_conflict(b.book.root.as_path()));
+        assert!(a.sync().is_noop() && b.sync().is_noop());
+    }
+
+    #[cfg(feature = "loro")]
+    #[test]
+    fn loro_backend_merges_both_concurrent_edits_through_the_engine() {
+        // With the fine-grained backend, the engine should keep *both* devices' edits — the
+        // advantage over the LWW default, verified end-to-end through the sync pipeline.
+        let cfg = SyncConfig {
+            crdt_backend: crate::crdt::LORO_BACKEND.to_string(),
+            ..SyncConfig::default()
+        };
+        let (_tmp, a, b) = two_devices_with(cfg);
+        let note = a.book.new_note(ObjectType::Note, "shared").unwrap();
+        let mut base = note.clone();
+        base.body = "base.".into();
+        a.book.save_note(&base).unwrap();
+        a.sync();
+        b.sync();
+        b.book.store.refresh().unwrap();
+
+        let mut ea = a.book.store.read_note(&note.id).unwrap();
+        ea.body = "base. APPEND-A".into();
+        a.book.save_note(&ea).unwrap();
+        let mut eb = b.book.store.read_note(&note.id).unwrap();
+        eb.body = "PREPEND-B base.".into();
+        b.book.save_note(&eb).unwrap();
+
+        for _ in 0..4 {
+            a.sync();
+            b.sync();
+        }
+        a.book.store.refresh().unwrap();
+        b.book.store.refresh().unwrap();
+        let final_a = body_of(&a.book, &note.id);
+        assert_eq!(final_a, body_of(&b.book, &note.id), "replicas converge");
+        assert!(final_a.contains("APPEND-A"), "kept A's edit: {final_a:?}");
+        assert!(final_a.contains("PREPEND-B"), "kept B's edit: {final_a:?}");
+    }
+
+    #[test]
+    fn external_markdown_edit_is_ingested_into_the_sidecar() {
+        let (_tmp, a, _b) = two_devices();
+        let note = a.book.new_note(ObjectType::Note, "ext").unwrap();
+        let mut n = note.clone();
+        n.body = "original".into();
+        a.book.save_note(&n).unwrap();
+        a.sync();
+
+        // Edit the markdown file directly (as an external tool would), then sync.
+        let note_path = a
+            .book
+            .root
+            .join(crate::storage::layout::note_filename(&note.id));
+        let raw = std::fs::read_to_string(&note_path).unwrap();
+        std::fs::write(&note_path, raw.replace("original", "edited externally")).unwrap();
+        a.book.store.refresh().unwrap();
+        a.sync();
+
+        // The sidecar now reflects the external edit (reconcile folded markdown → CRDT).
+        let sidecar = crate::storage::layout::crdt_sidecar_path(a.book.root.as_path(), &note.id);
+        let backend = crate::crdt::select_crdt_backend(&SyncConfig::default());
+        let actor = actor_id_for(a.book.root.as_path()).unwrap();
+        let doc = backend
+            .load_document(&actor, &std::fs::read(&sidecar).unwrap())
+            .unwrap();
+        assert_eq!(doc.text(), "edited externally");
+    }
+}

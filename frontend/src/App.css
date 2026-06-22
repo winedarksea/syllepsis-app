@@ -1,0 +1,89 @@
+/* Book-picker (first-launch) */
+.picker-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background: var(--color-bg);
+}
+
+.picker-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-8);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 340px;
+}
+
+.picker-logo {
+  font-size: 40px;
+  color: var(--color-accent);
+}
+
+.picker-title {
+  font-size: var(--font-size-2xl);
+  font-weight: 800;
+  color: var(--color-heading);
+  letter-spacing: -0.5px;
+}
+
+.picker-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-top: -var(--sp-2);
+}
+
+.picker-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  width: 100%;
+  margin-top: var(--sp-3);
+}
+
+.picker-btn {
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  transition: background var(--transition-base);
+  border: 1px solid transparent;
+}
+
+.picker-btn-primary {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+.picker-btn-primary:hover {
+  background: var(--color-accent-hover);
+}
+
+.picker-btn-secondary {
+  background: transparent;
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+.picker-btn-secondary:hover {
+  background: var(--color-surface-raised);
+}
+
+/* Main workspace layout */
+.workspace {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.workspace-main {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+}
