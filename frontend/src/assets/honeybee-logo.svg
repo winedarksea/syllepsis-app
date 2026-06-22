@@ -8,7 +8,11 @@
     field:     fill #fffaf1
     rim:       fill none, stroke #11100e, stroke-width 14
     inner-rim: fill none, stroke #fb8604, stroke-width 5
-    bee-shape: fill #000000, stroke none
+    bee-shape: fill url(#bee-bronze), stroke none
+      (the bronze metallic look is a linearGradient in the defs, which resvg
+      DOES support and which lives outside the stripped style block, so the
+      bee renders bronze in both the SVG and the exported PNGs. The bee is the
+      same bronze in light and dark mode; it is theme-independent.)
 
   Script (run from repo root):
 
@@ -25,10 +29,16 @@
       'field':     'fill="#fffaf1"',
       'rim':       'fill="none" stroke="#11100e" stroke-width="14"',
       'inner-rim': 'fill="none" stroke="#fb8604" stroke-width="5"',
-      'bee-shape': 'fill="#000000" stroke="none"',
+      'bee-shape': 'fill="url(#bee-bronze)" stroke="none"',
     };
     for (const [cls, attrs] of Object.entries(classMap))
       svg = svg.replace(new RegExp('class="' + cls + '"', 'g'), attrs);
+    // Strip XML comments FIRST. This big comment block documents the style
+    // strip below and therefore contains the text "style", which would
+    // otherwise make the style-strip regex match the wrong span and corrupt
+    // the document. The comment regex is built from fragments so this very
+    // file does not contain a literal comment-close sequence in its body.
+    svg = svg.replace(new RegExp('<' + '!--[\\s\\S]*?--' + '>', 'g'), '');
     svg = svg.replace(/<style>[\s\S]*?<\/style>/g, '');
     const dir = 'crates/syllepsis-tauri/icons';
     for (const [name, w] of [['32x32.png',32],['128x128.png',128],['128x128@2x.png',256],['icon.png',512]])
@@ -44,7 +54,6 @@
         color-scheme: light dark;
         --field: #fffaf1;
         --ink: #11100e;
-        --bee: #000000;
         --gold: #fb8604;
       }
 
@@ -52,7 +61,6 @@
         :root {
           --field: #11100e;
           --ink: #fffaf1;
-          --bee: #fffaf1;
           --gold: #ff9a18;
         }
       }
@@ -74,10 +82,27 @@
       }
 
       .bee-shape {
-        fill: var(--bee);
+        fill: url(#bee-bronze);
         stroke: none;
       }
     </style>
+
+    <!--
+      Bronze metallic fill for the bee. Defined as an SVG gradient (not CSS) so
+      it survives PNG export and is identical in light and dark mode. The light
+      band near 40% plus the secondary sheen near 78% read as a polished metal
+      highlight; dark edges give the high tonal range a real metal needs.
+    -->
+    <linearGradient id="bee-bronze" x1="0%" y1="0%" x2="82%" y2="100%">
+      <stop offset="0%"   stop-color="#3a2410"/>
+      <stop offset="14%"  stop-color="#7a4d24"/>
+      <stop offset="30%"  stop-color="#bd8a4c"/>
+      <stop offset="40%"  stop-color="#dcb87b"/>
+      <stop offset="50%"  stop-color="#ab6f33"/>
+      <stop offset="64%"  stop-color="#8a5527"/>
+      <stop offset="78%"  stop-color="#ca975a"/>
+      <stop offset="100%" stop-color="#3a2410"/>
+    </linearGradient>
 
     <clipPath id="round-badge-clip">
       <circle cx="256" cy="256" r="219"/>
