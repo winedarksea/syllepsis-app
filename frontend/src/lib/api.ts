@@ -29,7 +29,7 @@ export const api = {
     }),
   createBookInParent: (parentPath: string, name: string, language?: string, location?: string) =>
     invoke<BookInfo>('create_book_in_parent', {
-      parent_path: parentPath,
+      parentPath,
       name,
       language: language ?? null,
       location: location ?? null,
@@ -40,20 +40,24 @@ export const api = {
   getNote: (id: string) => invoke<NoteDto>('get_note', { id }),
   listNotes: () => invoke<NoteDto[]>('list_notes'),
   createNote: (objectType: ObjectType, title: string, inheritFrom?: string) =>
-    invoke<NoteDto>('create_note', { object_type: objectType, title, inherit_from: inheritFrom ?? null }),
+    invoke<NoteDto>('create_note', { objectType, title, inheritFrom: inheritFrom ?? null }),
   updateNote: (note: NoteDto) => invoke<NoteDto>('update_note', { note }),
   setPrior: (id: string, prior: PriorEdge | null) =>
     invoke<NoteDto>('set_prior', { id, prior }),
   forkNote: (id: string) => invoke<NoteDto>('fork_note', { id }),
   deleteNote: (id: string) => invoke<void>('delete_note', { id }),
   exportMarkdown: () => invoke<string>('export_markdown'),
+  importAsset: (sourcePath: string) => invoke<string>('import_asset', { sourcePath }),
+  readTableData: (noteId: string) => invoke<string[][]>('read_table_data', { noteId }),
+  saveTableData: (noteId: string, rows: string[][]) =>
+    invoke<void>('save_table_data', { noteId, rows }),
 
   allCategories: () => invoke<Category[]>('all_categories'),
   createCategory: (category: Category) => invoke<void>('create_category', { category }),
 
   // Search & embeddings
   search: (query: string, categoryFilter: string[] = []) =>
-    invoke<SearchResults>('search', { query, category_filter: categoryFilter }),
+    invoke<SearchResults>('search', { query, categoryFilter }),
   relatedNotes: (id: string) => invoke<RelatedNote[]>('related_notes', { id }),
   embeddingDiagnostics: () => invoke<EmbeddingDiagnostics>('embedding_diagnostics'),
 
@@ -70,42 +74,42 @@ export const api = {
     invoke<CloudLlmProviderStatus>('clear_cloud_llm_provider_settings', { provider }),
   generateCloudProposal: (noteId: string, task: LlmTask, modelOverride?: ModelRef) =>
     invoke<Proposal>('generate_cloud_proposal', {
-      note_id: noteId,
+      noteId,
       task,
-      model_override: modelOverride ?? null,
+      modelOverride: modelOverride ?? null,
     }),
   generateProposal: (noteId: string, task: LlmTask, modelOverride?: ModelRef) =>
     invoke<Proposal>('generate_proposal', {
-      note_id: noteId,
+      noteId,
       task,
-      model_override: modelOverride ?? null,
+      modelOverride: modelOverride ?? null,
     }),
   prepareCloudPrompt: (noteId: string, task: LlmTask, modelOverride?: ModelRef) =>
     invoke<CloudLlmPrompt>('prepare_cloud_prompt', {
-      note_id: noteId,
+      noteId,
       task,
-      model_override: modelOverride ?? null,
+      modelOverride: modelOverride ?? null,
     }),
   proposalFromCloudCompletion: (completion: CloudLlmCompletion) =>
     invoke<Proposal>('proposal_from_cloud_completion', { completion }),
   acceptProposal: (proposal: Proposal, storeOldAsCommentary = false, factCheckPassed = false) =>
     invoke<NoteDto>('accept_proposal', {
       proposal,
-      store_old_as_commentary: storeOldAsCommentary,
-      fact_check_passed: factCheckPassed,
+      storeOldAsCommentary,
+      factCheckPassed,
     }),
   builtinModelManifests: () => invoke<ModelManifest[]>('builtin_model_manifests'),
   builtinModelCacheStatuses: (verifyHashes = false) =>
-    invoke<ModelCacheStatus[]>('builtin_model_cache_statuses', { verify_hashes: verifyHashes }),
+    invoke<ModelCacheStatus[]>('builtin_model_cache_statuses', { verifyHashes }),
   downloadBuiltinModel: (modelId: string) =>
-    invoke<ModelDownloadReport>('download_builtin_model', { model_id: modelId }),
+    invoke<ModelDownloadReport>('download_builtin_model', { modelId }),
 
   // Spatial worlds & overlays (Phase 5)
   listWorlds: () => invoke<World[]>('list_worlds'),
   createWorld: (world: World) => invoke<void>('create_world', { world }),
   deleteWorld: (id: string) => invoke<void>('delete_world', { id }),
-  worldOverlay: (worldId: string) => invoke<Overlay>('world_overlay', { world_id: worldId }),
-  worldBackdrop: (worldId: string) => invoke<string | null>('world_backdrop', { world_id: worldId }),
+  worldOverlay: (worldId: string) => invoke<Overlay>('world_overlay', { worldId }),
+  worldBackdrop: (worldId: string) => invoke<string | null>('world_backdrop', { worldId }),
   locationLookup: () => invoke<LookupEntry[]>('location_lookup'),
   setLocationLookupEntry: (entry: LookupEntry) =>
     invoke<void>('set_location_lookup_entry', { entry }),
@@ -133,12 +137,12 @@ export const api = {
     invoke<ImportReport>('import_pack', { path, options }),
   importPackAsBook: (packPath: string, parentPath: string, bookName: string) =>
     invoke<BookInfo>('import_pack_as_book', {
-      pack_path: packPath,
-      parent_path: parentPath,
-      book_name: bookName,
+      packPath,
+      parentPath,
+      bookName,
     }),
 
   // Publishing & serving (Phase 6)
-  publishSite: (outDir: string) => invoke<PublishReport>('publish_site', { out_dir: outDir }),
+  publishSite: (outDir: string) => invoke<PublishReport>('publish_site', { outDir }),
   refreshPrivateGitignore: () => invoke<GitignoreReport>('refresh_private_gitignore'),
 };

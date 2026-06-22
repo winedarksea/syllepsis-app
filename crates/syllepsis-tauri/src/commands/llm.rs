@@ -39,16 +39,7 @@ macro_rules! with_book {
 /// Current LLM provider/config status for the management view.
 #[tauri::command]
 pub fn llm_status(state: State<AppState>) -> Result<LlmStatus, String> {
-    with_book!(state, book, {
-        state.with_llm_service(book, |service| {
-            Ok(LlmStatus {
-                provider: service.provider_name().to_string(),
-                live: service.is_live(),
-                enabled: book.config.llm.enabled,
-                auto_accept: book.config.llm.auto_accept,
-            })
-        })
-    })
+    with_book!(state, book, { Ok(app::llm_status(book)) })
 }
 
 /// Effective provider/model route for every LLM task.

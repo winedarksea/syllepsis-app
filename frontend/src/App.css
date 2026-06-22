@@ -243,6 +243,12 @@
   font-size: var(--font-size-base);
 }
 
+.wizard-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
 .path-picker {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

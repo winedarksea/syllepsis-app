@@ -66,7 +66,11 @@ impl Note {
             markdown_version: dialect_version.into(),
             title,
             summary: String::new(),
-            body: String::new(),
+            body: match object_type {
+                ObjectType::Todo => "- [ ] ".to_string(),
+                ObjectType::Code => "```\n\n```".to_string(),
+                _ => String::new(),
+            },
             categories: Vec::new(),
             prior: None,
             location: None,

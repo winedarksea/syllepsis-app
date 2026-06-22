@@ -11,6 +11,7 @@ interface AppStore {
   // Book
   book: BookInfo | null;
   setBook: (b: BookInfo | null) => void;
+  closeBook: () => void;
 
   // Active view
   view: View;
@@ -45,6 +46,16 @@ interface AppStore {
 export const useStore = create<AppStore>((set) => ({
   book: null,
   setBook: (book) => set({ book }),
+  // Return to the launch screen, clearing any per-book state so the next book opens clean.
+  closeBook: () => set({
+    book: null,
+    view: 'unsorted',
+    editingNoteId: null,
+    activeCategory: null,
+    activeWorld: null,
+    categories: [],
+    unsortedCount: 0,
+  }),
 
   view: 'unsorted',
   setView: (view) => set({ view }),

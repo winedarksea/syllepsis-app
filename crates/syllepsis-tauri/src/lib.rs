@@ -9,8 +9,30 @@ use commands::{
 };
 use state::AppState;
 
+/// Initialize tracing so "fancier" operations (LLM calls, search) log to the console in
+/// `tauri dev`. Defaults to `info` in debug builds and `warn` in release; override with `RUST_LOG`.
+fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+    let default_level = if cfg!(debug_assertions) {
+        "info"
+    } else {
+        "warn"
+    };
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new(format!(
+            "syllepsis_core={default_level},syllepsis_tauri_lib={default_level}"
+        ))
+    });
+    // `try_init` is idempotent-friendly: ignore the error if a subscriber is already set.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .try_init();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    init_tracing();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
@@ -33,6 +55,9 @@ pub fn run() {
             fork_note,
             delete_note,
             export_markdown,
+            import_asset,
+            read_table_data,
+            save_table_data,
             // categories
             all_categories,
             create_category,

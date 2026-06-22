@@ -159,7 +159,6 @@ pub struct Kanban {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Metadata {
-    #[serde(skip_serializing_if = "is_default")]
     pub classification: Classification,
     pub dates: DateMetadata,
     #[serde(skip_serializing_if = "is_default")]
@@ -202,12 +201,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn minimal_note_serializes_only_dates() {
+    fn minimal_note_serializes_dates_and_classification() {
         let meta = Metadata::now();
         let yaml = serde_yaml::to_string(&meta).unwrap();
-        // Default sub-sections are skipped; only the always-present dates remain.
+        // classification is always serialized (ensures it's never undefined on the API boundary);
+        // other optional sub-sections are still skipped when default.
         assert!(yaml.contains("dates:"));
-        assert!(!yaml.contains("classification:"));
+        assert!(yaml.contains("classification:"));
         assert!(!yaml.contains("kanban:"));
         assert!(!yaml.contains("lifecycle:"));
     }

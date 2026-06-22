@@ -97,7 +97,8 @@ pub struct Book {
     pub open_warning: Option<BookOpenWarning>,
     /// Machine-local directory holding downloaded ONNX models, shared across books. Runtime-only
     /// (never serialized — it is device-specific, not synced config); the shell sets it from the
-    /// OS app-data path. `None` ⇒ no local models, so embeddings/LLM use their offline defaults.
+    /// OS app-data path. `None` ⇒ no local models; embeddings can still use hashing, while LLM
+    /// generation reports a setup error.
     models_root: Option<PathBuf>,
     /// Collision backstop; interior-mutable so book operations can take `&self`.
     registry: Mutex<IdRegistry>,
@@ -174,8 +175,8 @@ impl Book {
     }
 
     /// Point this book at the machine-local ONNX model directory (builder style). The shell calls
-    /// this after open/create with the OS app-data models path; tests and the offline default
-    /// leave it unset.
+    /// this after open/create with the OS app-data models path; tests that do not need model
+    /// execution leave it unset.
     pub fn with_models_root(mut self, models_root: impl Into<PathBuf>) -> Book {
         self.models_root = Some(models_root.into());
         self

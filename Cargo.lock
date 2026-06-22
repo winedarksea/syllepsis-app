@@ -4470,6 +4470,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokenizers",
+ "tracing",
  "ulid",
 ]
 
@@ -4487,6 +4488,8 @@ dependencies = [
  "tauri-plugin-dialog",
  "tempfile",
  "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

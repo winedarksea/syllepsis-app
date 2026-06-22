@@ -14,7 +14,7 @@ use crate::markdown::dialect;
 use crate::model::metadata::LockMode;
 use crate::model::{Category, Note, ObjectType, PriorEdge};
 use crate::sort::{self, RenderItem};
-use crate::storage::{Book, NoteStore};
+use crate::storage::{layout, Book, NoteStore};
 
 /// Render all sorted notes as the continuous book view.
 pub fn book_view(book: &Book) -> CoreResult<Vec<RenderItem>> {
@@ -82,6 +82,11 @@ pub fn create_note(
             book.save_note(&note)?;
         }
     }
+    if object_type == ObjectType::Table {
+        let empty: Vec<Vec<String>> = vec![vec![String::new(); 3]; 5];
+        let csv_path = layout::table_companion_csv_path(&book.root, &note.id);
+        std::fs::write(csv_path, encode_csv(&empty))?;
+    }
     Ok(NoteDto::from_note(&note))
 }
 
@@ -94,6 +99,8 @@ pub fn create_note(
 /// re-import will not overwrite the user's change (core-concepts.md).
 pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
     let mut note = dto.into_note(book.config.markdown.dialect_version.clone())?;
+    // Refresh the cosmetic slug so the filename tracks the current title.
+    note.id = note.id.with_regenerated_slug(&note.title);
     if let Ok(stored) = book.store.read_note(&note.id) {
         if stored.metadata.lifecycle.lock != LockMode::None && stored.body != note.body {
             return Err(CoreError::Locked(format!(
@@ -104,11 +111,33 @@ pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
         if !note.metadata.packs.packs.is_empty() && content_changed(&stored, &note) {
             note.metadata.packs.locally_modified = true;
         }
+        // Remove categories that existed only because of a body #tag that has since been deleted.
+        let old_body_cats = dialect::extract_categories(&stored.body);
+        let new_body_cats = dialect::extract_categories(&note.body);
+        let dropped: Vec<String> = old_body_cats
+            .into_iter()
+            .filter(|c| !new_body_cats.contains(c))
+            .collect();
+        note.categories.retain(|c| !dropped.contains(c));
     }
     note.metadata.dates.updated = Utc::now();
     merge_inline_categories(&mut note);
+    ensure_categories_declared(book, &note.categories)?;
     book.save_note(&note)?;
     Ok(NoteDto::from_note(&note))
+}
+
+/// Declare a category file for any category referenced by a note that does not yet have one.
+/// Without this, a `#tag` added to a note only lives in the note's frontmatter and never appears
+/// in the sidebar (which lists declared categories). Existing category files are left untouched so
+/// user customizations (icon, long name, privacy) survive.
+fn ensure_categories_declared(book: &Book, categories: &[String]) -> CoreResult<()> {
+    for name in categories {
+        if book.store.read_category(name).is_err() {
+            book.store.write_category(&Category::new(name.clone()))?;
+        }
+    }
+    Ok(())
 }
 
 /// Whether a user-meaningful field of a note changed (the parts a pack re-import would overwrite).
@@ -147,6 +176,101 @@ pub fn create_category(book: &Book, category: Category) -> CoreResult<()> {
     book.store.write_category(&category)
 }
 
+/// Copy an external file (e.g. an image) into the book's `assets/` directory and return the
+/// book-relative path. Notes reference assets by this relative path (e.g. a markdown
+/// `![](assets/…)` image), so the reference stays valid when the book is moved or synced.
+pub fn import_asset(book: &Book, source_path: &str) -> CoreResult<String> {
+    let source = std::path::Path::new(source_path);
+    let ext = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_else(|| "bin".to_string());
+    let file_name = format!("{}.{}", ulid::Ulid::new(), ext);
+    let assets_dir = book.root.join("assets");
+    std::fs::create_dir_all(&assets_dir)?;
+    std::fs::copy(source, assets_dir.join(&file_name))?;
+    Ok(format!("assets/{file_name}"))
+}
+
+/// Read the CSV companion file for a Table note. Returns an empty 5×3 grid if absent.
+pub fn read_table_data(book: &Book, id: &str) -> CoreResult<Vec<Vec<String>>> {
+    let id = NoteId::parse(id)?;
+    let path = layout::table_companion_csv_path(&book.root, &id);
+    if !path.exists() {
+        return Ok(vec![vec![String::new(); 3]; 5]);
+    }
+    let text = std::fs::read_to_string(&path)?;
+    Ok(decode_csv(&text))
+}
+
+/// Write the CSV companion file for a Table note.
+pub fn save_table_data(book: &Book, id: &str, rows: Vec<Vec<String>>) -> CoreResult<()> {
+    let id = NoteId::parse(id)?;
+    let path = layout::table_companion_csv_path(&book.root, &id);
+    std::fs::write(path, encode_csv(&rows))?;
+    Ok(())
+}
+
+/// Encode a 2-D string grid as RFC-4180 CSV.
+fn encode_csv(rows: &[Vec<String>]) -> String {
+    rows.iter()
+        .map(|row| {
+            row.iter()
+                .map(|cell| {
+                    if cell.contains(',') || cell.contains('"') || cell.contains('\n') {
+                        format!("\"{}\"", cell.replace('"', "\"\""))
+                    } else {
+                        cell.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Decode RFC-4180 CSV into a 2-D string grid.
+fn decode_csv(text: &str) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut cell = String::new();
+    let mut chars = text.chars().peekable();
+    let mut in_quotes = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if in_quotes => {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    cell.push('"');
+                } else {
+                    in_quotes = false;
+                }
+            }
+            '"' => in_quotes = true,
+            ',' if !in_quotes => {
+                row.push(cell.clone());
+                cell.clear();
+            }
+            '\n' if !in_quotes => {
+                row.push(cell.clone());
+                cell.clear();
+                rows.push(row.clone());
+                row.clear();
+            }
+            '\r' => {}
+            c => cell.push(c),
+        }
+    }
+    row.push(cell);
+    if !row.iter().all(|c| c.is_empty()) || !rows.is_empty() {
+        rows.push(row);
+    }
+    rows
+}
+
 /// Fold inline `#tags` from the body into the note's category array (deduplicated).
 fn merge_inline_categories(note: &mut Note) {
     for tag in dialect::extract_categories(&note.body) {
@@ -183,6 +307,42 @@ mod tests {
         assert!(matches!(view[0], RenderItem::Heading { .. }));
         let md = export_markdown(&book).unwrap();
         assert!(md.contains("Opening line."));
+    }
+
+    #[test]
+    fn editing_a_note_declares_its_inline_categories() {
+        let (_dir, book) = book();
+        // No categories declared yet.
+        assert!(all_categories(&book).unwrap().is_empty());
+
+        let mut note = create_note(&book, ObjectType::Note, "first", None).unwrap();
+        note.body = "An idea worth keeping. #research".into();
+        update_note(&book, note).unwrap();
+
+        // The inline #research tag should now be a declared category visible in the sidebar.
+        let declared: Vec<String> = all_categories(&book)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert!(declared.contains(&"research".to_string()));
+    }
+
+    #[test]
+    fn auto_declaring_categories_preserves_existing_customizations() {
+        let (_dir, book) = book();
+        let mut custom = Category::new("research");
+        custom.long_name = "Deep Research".into();
+        custom.icon = Some("🔬".into());
+        create_category(&book, custom).unwrap();
+
+        let mut note = create_note(&book, ObjectType::Note, "first", None).unwrap();
+        note.body = "More. #research".into();
+        update_note(&book, note).unwrap();
+
+        let stored = book.store.read_category("research").unwrap();
+        assert_eq!(stored.long_name, "Deep Research");
+        assert_eq!(stored.icon.as_deref(), Some("🔬"));
     }
 
     #[test]

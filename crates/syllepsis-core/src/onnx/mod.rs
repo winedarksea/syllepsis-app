@@ -15,8 +15,8 @@
 //! always compiled (and unit-tested with no network and no model bytes). The actual `ort`
 //! session, the Hugging Face tokenizer, and the HTTP fetcher pull heavy native dependencies and
 //! live behind the `onnx` cargo feature, so the default build and test suite stay fast and
-//! offline — exactly as the offline [`HashingEmbedder`](crate::embeddings::HashingEmbedder) and
-//! [`OfflineLlmProvider`](crate::llm::OfflineLlmProvider) remain the always-available defaults.
+//! offline. Embeddings still have an offline hashing implementation; LLM generation requires a
+//! real local or cloud/server model.
 
 pub mod cache;
 pub mod download;

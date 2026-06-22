@@ -1,10 +1,8 @@
 //! The [`LlmProvider`] seam: anything that can answer a prompt.
 //!
 //! Exactly like [`crate::embeddings::EmbeddingProvider`], this is the one boundary the rest of
-//! the app talks to. The built-in [`OfflineLlmProvider`](super::offline::OfflineLlmProvider)
-//! implements it with deterministic, no-network heuristics so every LLM *flow* works and is
-//! testable offline; a real provider (an Anthropic/Claude HTTP client, or a local model) is a
-//! second `impl LlmProvider` added later — the router, prompts, service, and UI never change.
+//! the app talks to. Implementations must perform real model-backed inference; setup failures are
+//! surfaced as errors instead of synthetic heuristic output.
 
 use serde::{Deserialize, Serialize};
 
@@ -33,11 +31,10 @@ pub struct LlmResponse {
 /// Answers prompts. Implementations must not panic on bad input — return [`CoreError::Llm`]
 /// instead so the UI can surface a message and the note is never left half-modified.
 pub trait LlmProvider: Send {
-    /// Short identifier shown in diagnostics / the management UI (e.g. `offline`, `anthropic`).
+    /// Short identifier shown in diagnostics / the management UI (e.g. `local`, `anthropic`).
     fn name(&self) -> &str;
 
-    /// Whether this provider performs real model inference (vs. the offline heuristic). The UI
-    /// uses it to label generated content honestly.
+    /// Whether this provider performs real model inference.
     fn is_live(&self) -> bool {
         true
     }

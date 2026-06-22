@@ -25,7 +25,7 @@ use crate::storage::{Book, NoteStore};
 /// A snapshot of the LLM configuration for the management UI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmStatus {
-    /// Active provider name (e.g. `offline`).
+    /// Active top-level provider name (e.g. `local`).
     pub provider: String,
     /// Whether the active provider performs real inference.
     pub live: bool,
@@ -45,8 +45,8 @@ pub enum LlmExecutionMode {
     Local,
     /// Use shell-owned cloud/local-server execution.
     Cloud,
-    /// Use deterministic offline heuristics because no live provider is available.
-    OfflineFallback,
+    /// No configured model-backed route is currently runnable.
+    Unavailable,
 }
 
 /// Effective route for one LLM task, including local model cache availability.
@@ -82,26 +82,30 @@ pub struct CloudLlmCompletion {
     pub content: String,
 }
 
-/// Build the LLM service for this book, selecting the ONNX local model when it is configured and
-/// cached, otherwise falling through to the offline heuristic provider.
-fn service_for(book: &Book) -> LlmService {
-    let provider = select_llm_provider(book.models_root(), &book.config.llm);
-    LlmService::new(provider, book.config.llm.routing.clone())
+/// Build the LLM service for this book, selecting the configured ONNX local model.
+fn service_for(book: &Book) -> CoreResult<LlmService> {
+    let provider = select_llm_provider(book.models_root(), &book.config.llm)?;
+    Ok(LlmService::new(provider, book.config.llm.routing.clone()))
 }
 
 /// Report the current LLM status.
 pub fn llm_status(book: &Book) -> LlmStatus {
-    let service = service_for(book);
     LlmStatus {
-        provider: service.provider_name().to_string(),
-        live: service.is_live(),
+        provider: if book.config.llm.enabled {
+            book.config.llm.provider.clone()
+        } else {
+            "disabled".to_string()
+        },
+        live: book.config.llm.enabled
+            && book.config.llm.provider == crate::llm::selection::LOCAL_PROVIDER
+            && local_model_is_cached(book, &book.config.llm.local_model),
         enabled: book.config.llm.enabled,
         auto_accept: book.config.llm.auto_accept,
     }
 }
 
 /// Report the effective route for every supported task. This keeps the UI from guessing whether
-/// an action should call local generation, cloud prompt handoff, or show the offline fallback.
+/// an action should call local generation, cloud prompt handoff, or show a setup error.
 pub fn llm_route_statuses(book: &Book) -> Vec<LlmRouteStatus> {
     LLM_TASKS
         .iter()
@@ -122,12 +126,12 @@ pub fn llm_route_statuses(book: &Book) -> Vec<LlmRouteStatus> {
 
 /// Generate a proposal for `note_id` and `task`. Does not modify the note.
 pub fn generate_proposal(book: &Book, note_id: &str, task: LlmTask) -> CoreResult<Proposal> {
-    let service = service_for(book);
+    let service = service_for(book)?;
     generate_proposal_with_service(book, &service, note_id, task, None)
 }
 
-/// Prepare a routed prompt for a shell-owned cloud/local-server call. Local/offline routes should use
-/// [`generate_proposal`] so the built-in model and offline fallback remain centralized.
+/// Prepare a routed prompt for a shell-owned cloud/local-server call. Local routes should use
+/// [`generate_proposal`] so the built-in model stays centralized.
 pub fn prepare_cloud_prompt(
     book: &Book,
     note_id: &str,
@@ -205,13 +209,17 @@ fn known_categories(book: &Book) -> CoreResult<Vec<String>> {
 }
 
 fn reject_non_cloud_route(task: LlmTask, model_ref: &ModelRef) -> CoreResult<()> {
-    if model_ref.provider == crate::llm::selection::LOCAL_PROVIDER
-        || model_ref.provider == "offline"
-    {
+    if model_ref.provider == crate::llm::selection::LOCAL_PROVIDER {
         return Err(CoreError::Llm(format!(
             "task {} routes to provider {}, not a cloud provider",
             task.as_str(),
             model_ref.provider
+        )));
+    }
+    if model_ref.provider == "offline" {
+        return Err(CoreError::Llm(format!(
+            "task {} routes to unsupported provider offline; configure local or cloud/server LLM routing",
+            task.as_str()
         )));
     }
     Ok(())
@@ -234,10 +242,10 @@ fn route_execution_mode(book: &Book, model_ref: &ModelRef) -> (LlmExecutionMode,
         if local_model_is_cached(book, &model_ref.model) {
             (LlmExecutionMode::Local, true)
         } else {
-            (LlmExecutionMode::OfflineFallback, true)
+            (LlmExecutionMode::Unavailable, false)
         }
     } else if model_ref.provider == "offline" {
-        (LlmExecutionMode::OfflineFallback, true)
+        (LlmExecutionMode::Unavailable, false)
     } else {
         (LlmExecutionMode::Cloud, true)
     }
@@ -349,17 +357,30 @@ mod tests {
         update_note(book, n).unwrap()
     }
 
+    fn proposal(note: &NoteDto, task: LlmTask, content: &str) -> Proposal {
+        Proposal::new(
+            NoteId::parse(&note.id).unwrap(),
+            task,
+            ModelRef::new(
+                crate::llm::selection::LOCAL_PROVIDER,
+                crate::onnx::manifest::BUNDLED_LLM_ID,
+            ),
+            content.to_string(),
+            true,
+        )
+    }
+
     #[test]
-    fn status_reports_local_default_with_offline_fallback_when_model_absent() {
+    fn status_reports_local_default_as_not_live_when_model_absent() {
         let (_d, book) = book();
         let status = llm_status(&book);
-        assert_eq!(status.provider, "offline");
+        assert_eq!(status.provider, crate::llm::selection::LOCAL_PROVIDER);
         assert!(!status.live);
         assert!(status.enabled);
     }
 
     #[test]
-    fn route_status_reports_offline_fallback_when_local_model_is_missing() {
+    fn route_status_reports_unavailable_when_local_model_is_missing() {
         let (_d, book) = book();
         let routes = llm_route_statuses(&book);
         let summarize = routes
@@ -368,8 +389,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(summarize.provider, crate::llm::selection::LOCAL_PROVIDER);
-        assert_eq!(summarize.execution_mode, LlmExecutionMode::OfflineFallback);
-        assert!(summarize.available);
+        assert_eq!(summarize.execution_mode, LlmExecutionMode::Unavailable);
+        assert!(!summarize.available);
+    }
+
+    #[test]
+    fn generate_proposal_errors_when_local_model_is_missing() {
+        let (_d, book) = book();
+        let note = seed(&book, "Turn the breaker off first.");
+
+        let err = generate_proposal(&book, &note.id, LlmTask::Summarize).unwrap_err();
+
+        assert!(err.to_string().contains("local LLM model"));
     }
 
     #[test]
@@ -406,7 +437,7 @@ mod tests {
     fn accept_summary_sets_the_summary_field() {
         let (_d, book) = book();
         let note = seed(&book, "Turn the breaker off first. Then test.");
-        let proposal = generate_proposal(&book, &note.id, LlmTask::Summarize).unwrap();
+        let proposal = proposal(&note, LlmTask::Summarize, "Turn off the breaker first.");
         let updated = accept_proposal(&book, &proposal, false, false).unwrap();
         assert!(!updated.summary.is_empty());
         assert_eq!(updated.summary, proposal.content);
@@ -416,7 +447,7 @@ mod tests {
     fn accept_category_suggest_merges_tags() {
         let (_d, book) = book();
         let note = seed(&book, "breaker breaker electrical panel kitchen breaker");
-        let proposal = generate_proposal(&book, &note.id, LlmTask::CategorySuggest).unwrap();
+        let proposal = proposal(&note, LlmTask::CategorySuggest, "breaker, electrical-panel");
         let updated = accept_proposal(&book, &proposal, false, false).unwrap();
         assert!(updated.categories.contains(&"breaker".to_string()));
     }
@@ -426,7 +457,11 @@ mod tests {
         let (_d, book) = book();
         let note = seed(&book, "Solar pays back in two years guaranteed.");
         let before = book.store.read_all_notes().unwrap().len();
-        let proposal = generate_proposal(&book, &note.id, LlmTask::FactCheck).unwrap();
+        let proposal = proposal(
+            &note,
+            LlmTask::FactCheck,
+            "The guaranteed two-year payback claim needs support.",
+        );
         accept_proposal(&book, &proposal, false, false).unwrap();
 
         let notes = book.store.read_all_notes().unwrap();
@@ -450,9 +485,7 @@ mod tests {
     fn accept_rewrite_can_archive_the_old_body() {
         let (_d, book) = book();
         let note = seed(&book, "original body kept as history");
-        let mut proposal = generate_proposal(&book, &note.id, LlmTask::Rewrite).unwrap();
-        // Simulate a live rewrite result (offline would be a no-op).
-        proposal.content = "a cleaner rewritten body".into();
+        let proposal = proposal(&note, LlmTask::Rewrite, "a cleaner rewritten body");
         let updated = accept_proposal(&book, &proposal, true, false).unwrap();
 
         assert_eq!(updated.body, "a cleaner rewritten body");
@@ -475,8 +508,7 @@ mod tests {
         let note = seed(&book, "carefully written notes worth protecting");
         crate::app::lifecycle::set_note_lock(&book, &note.id, LockMode::UnlockDelay).unwrap();
 
-        let mut proposal = generate_proposal(&book, &note.id, LlmTask::Rewrite).unwrap();
-        proposal.content = "an impulsive late-night rewrite".into();
+        let mut proposal = proposal(&note, LlmTask::Rewrite, "an impulsive late-night rewrite");
         // A freshly-created proposal is inside the delay window → blocked.
         let err = accept_proposal(&book, &proposal, false, false).unwrap_err();
         assert!(matches!(err, CoreError::Locked(_)));
@@ -499,8 +531,7 @@ mod tests {
         let note = seed(&book, "a claim that must be verified before rewriting");
         crate::app::lifecycle::set_note_lock(&book, &note.id, LockMode::FactCheckGate).unwrap();
 
-        let mut proposal = generate_proposal(&book, &note.id, LlmTask::Rewrite).unwrap();
-        proposal.content = "a revised claim".into();
+        let proposal = proposal(&note, LlmTask::Rewrite, "a revised claim");
         assert!(matches!(
             accept_proposal(&book, &proposal, false, false).unwrap_err(),
             CoreError::Locked(_)
@@ -517,7 +548,7 @@ mod tests {
         let note = seed(&book, "Turn the breaker off first. Then test.");
         crate::app::lifecycle::set_note_lock(&book, &note.id, LockMode::UnlockDelay).unwrap();
         // Summaries never touch the protected body, so the lock does not block them.
-        let proposal = generate_proposal(&book, &note.id, LlmTask::Summarize).unwrap();
+        let proposal = proposal(&note, LlmTask::Summarize, "Turn off the breaker first.");
         assert!(accept_proposal(&book, &proposal, false, false).is_ok());
     }
 

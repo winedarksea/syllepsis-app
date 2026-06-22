@@ -31,10 +31,19 @@ fn engine_for(book: &Book) -> CoreResult<SearchEngine> {
 
 /// Full search: exact + BM25 + vector fused with RRF, optionally narrowed to `category_filter`.
 pub fn search(book: &Book, query: &str, category_filter: &[String]) -> CoreResult<SearchResults> {
+    let started = std::time::Instant::now();
     let engine = engine_for(book)?;
     let mut index = SqliteSearchIndex::open(&layout::derived_dir(&book.root))?;
     index.rebuild_from_engine(&engine)?;
-    index.search(&engine, query, category_filter)
+    let results = index.search(&engine, query, category_filter)?;
+    tracing::info!(
+        query = query,
+        filters = category_filter.len(),
+        hits = results.hits.len(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "search: query complete"
+    );
+    Ok(results)
 }
 
 /// Notes related to `id` for the related carousel (vector neighbors, category-upweighted).

@@ -73,9 +73,29 @@ pub fn download_missing(
     std::fs::create_dir_all(cache.model_dir(manifest))?;
     remove_mismatched_cached_files(cache, manifest)?;
     let plan = plan_download(cache, manifest);
+    if plan.is_empty() {
+        tracing::info!(
+            model = %manifest.id,
+            cache_root = %cache.root().display(),
+            "model cache already complete; skipping download"
+        );
+        return Ok(Vec::new());
+    }
+    tracing::info!(
+        model = %manifest.id,
+        cache_root = %cache.root().display(),
+        files = plan.len(),
+        "downloading missing model files"
+    );
 
     let mut report = Vec::with_capacity(plan.len());
     for item in &plan {
+        let name = item.dest.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        tracing::info!(
+            model = %manifest.id,
+            file = name,
+            "downloading model file"
+        );
         fetcher.fetch(item)?;
         verify_downloaded_size(item)?;
         let integrity = verify_file(&item.dest, item.sha256.as_deref())?;
@@ -87,13 +107,7 @@ pub fn download_missing(
                 item.dest.display()
             )));
         }
-        let name = item
-            .dest
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_string();
-        report.push((name, integrity));
+        report.push((name.to_string(), integrity));
     }
     Ok(report)
 }

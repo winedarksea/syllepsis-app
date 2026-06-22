@@ -100,6 +100,11 @@ pub fn note_filename(id: &NoteId) -> String {
     format!("{}.md", id.as_str())
 }
 
+/// CSV companion path for a Table note: `{id}.csv`, lives beside the `.md` file.
+pub fn table_companion_csv_path(root: &Path, id: &NoteId) -> PathBuf {
+    root.join(format!("{}.csv", id.as_str()))
+}
+
 /// Filename for a category file inside `_categories/`.
 pub fn category_filename(name: &str) -> String {
     format!("{name}.md")

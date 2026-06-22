@@ -288,7 +288,7 @@ export interface LlmStatus {
   auto_accept: boolean;
 }
 
-export type LlmExecutionMode = 'disabled' | 'local' | 'cloud' | 'offline_fallback';
+export type LlmExecutionMode = 'disabled' | 'local' | 'cloud' | 'unavailable';
 
 export interface LlmRouteStatus {
   task: LlmTask;

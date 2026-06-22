@@ -170,16 +170,15 @@ impl Default for SearchConfig {
     }
 }
 
-/// LLM features. The default is no-config local inference: use the bundled ONNX model when it is
-/// cached and the desktop build includes ONNX, otherwise fall back to the deterministic offline
-/// provider so the proposal flow still works.
+/// LLM features. The default is local inference through the bundled ONNX model. If the model is
+/// not cached or loadable, generation returns a clear setup error.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
-    /// Master switch for cloud/local LLM calls. When false, the offline provider is used.
+    /// Master switch for cloud/local LLM calls.
     pub enabled: bool,
-    /// Identifier of the configured provider: `offline` (built-in heuristic), `local` (the
-    /// bundled ONNX model, feature `onnx`), or a cloud provider (e.g. `anthropic`).
+    /// Identifier of the configured provider: `local` (the bundled ONNX model, feature `onnx`) or
+    /// a cloud/server provider (e.g. `anthropic`, `openai_compatible`).
     pub provider: String,
     /// Manifest id of the bundled local model used when `provider = "local"`.
     pub local_model: String,

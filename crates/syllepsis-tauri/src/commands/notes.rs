@@ -107,3 +107,34 @@ pub fn export_markdown(state: State<AppState>) -> Result<String, String> {
         app::export_markdown(book).map_err(|e| e.to_string())
     })
 }
+
+/// Copy an external file into the book's `assets/` folder; returns the book-relative path.
+#[tauri::command]
+pub fn import_asset(state: State<AppState>, source_path: String) -> Result<String, String> {
+    with_book!(state, book, {
+        app::import_asset(book, &source_path).map_err(|e| e.to_string())
+    })
+}
+
+/// Read the CSV companion file for a Table note. Returns an empty 5×3 grid if absent.
+#[tauri::command]
+pub fn read_table_data(
+    state: State<AppState>,
+    note_id: String,
+) -> Result<Vec<Vec<String>>, String> {
+    with_book!(state, book, {
+        app::read_table_data(book, &note_id).map_err(|e| e.to_string())
+    })
+}
+
+/// Write the CSV companion file for a Table note.
+#[tauri::command]
+pub fn save_table_data(
+    state: State<AppState>,
+    note_id: String,
+    rows: Vec<Vec<String>>,
+) -> Result<(), String> {
+    with_book!(state, book, {
+        app::save_table_data(book, &note_id, rows).map_err(|e| e.to_string())
+    })
+}

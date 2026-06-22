@@ -14,7 +14,7 @@ import { PrivacyView } from './views/PrivacyView';
 import { PacksView } from './views/PacksView';
 import { Diagnostics } from './views/Diagnostics';
 import { Editor } from './editor/Editor';
-import type { BookInfo, TrackedBookInfo } from './types';
+import type { BookInfo, TrackedBookInfo, ObjectType } from './types';
 import './App.css';
 
 const PACK_FILTER = [{ name: 'Syllepsis pack', extensions: ['synpack.json', 'json'] }];
@@ -216,8 +216,15 @@ function CreateBookWizard({ onCancel, onCreated, onError }: BookWizardProps) {
           <input value={language} onChange={(event) => setLanguage(event.target.value)} />
         </label>
         <label className="wizard-field">
-          <span>Location</span>
-          <input value={location} onChange={(event) => setLocation(event.target.value)} />
+          <span>Default location (optional)</span>
+          <input
+            value={location}
+            onChange={(event) => setLocation(event.target.value)}
+            placeholder={'e.g. "London" or "51.5,-0.13"'}
+          />
+          <span className="wizard-hint">
+            A place name or coordinates used to pin notes on a map — not where the book is saved.
+          </span>
         </label>
         <label className="wizard-field">
           <span>Parent folder</span>
@@ -354,8 +361,8 @@ function Workspace() {
     api.unsortedNotes().then((ns) => setUnsortedCount(ns.length)).catch(console.error);
   }, [view, setCategories, setUnsortedCount]);
 
-  const handleNewNote = useCallback(async () => {
-    const note = await api.createNote('note', 'New Note');
+  const handleNewNote = useCallback(async (type: ObjectType = 'note') => {
+    const note = await api.createNote(type, 'New Note');
     openEditor(note.id);
   }, [openEditor]);
 

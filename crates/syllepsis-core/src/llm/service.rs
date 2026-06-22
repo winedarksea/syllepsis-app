@@ -20,7 +20,7 @@ impl LlmService {
         LlmService { provider, routing }
     }
 
-    /// Name of the active provider (e.g. `offline`, `anthropic`).
+    /// Name of the active provider (e.g. `local`).
     pub fn provider_name(&self) -> &str {
         self.provider.name()
     }
@@ -31,8 +31,7 @@ impl LlmService {
     }
 
     /// Run `task` over `note` and return the resulting proposal. `known_categories` is only used
-    /// by [`LlmTask::CategorySuggest`]. For body-replacing tasks an offline provider yields a
-    /// no-op proposal (content = the unchanged body) so it can never degrade a note.
+    /// by [`LlmTask::CategorySuggest`].
     pub fn generate(
         &self,
         task: LlmTask,
@@ -56,8 +55,14 @@ impl LlmService {
         note: &Note,
         known_categories: &[String],
     ) -> CoreResult<Proposal> {
+        if !self.provider.is_live() {
+            return Err(CoreError::Llm(format!(
+                "provider {} is not a model-backed LLM",
+                self.provider.name()
+            )));
+        }
         let (system, user) = prompts::build(task, note, known_categories);
-        if self.provider.is_live() && self.provider.name() != model_ref.provider {
+        if self.provider.name() != model_ref.provider {
             return Err(CoreError::Llm(format!(
                 "task {} targets provider {}, but active provider is {}",
                 task.as_str(),
@@ -71,26 +76,30 @@ impl LlmService {
             system,
             user,
         };
+        tracing::info!(
+            task = task.as_str(),
+            provider = self.provider.name(),
+            model = %model_ref.model,
+            live = self.provider.is_live(),
+            note = %note.id,
+            "llm: generating proposal"
+        );
+        let started = std::time::Instant::now();
         let response = self.provider.complete(&request)?;
-
-        let content = if task.replaces_body() && !self.provider.is_live() {
-            note.body.clone()
-        } else {
-            response.text
-        };
-
-        let proposal_model_ref = if self.provider.is_live() {
-            model_ref
-        } else {
-            crate::config::ModelRef::new(self.provider.name(), self.provider.name())
-        };
+        tracing::info!(
+            task = task.as_str(),
+            provider = self.provider.name(),
+            elapsed_ms = started.elapsed().as_millis(),
+            chars = response.text.len(),
+            "llm: proposal ready"
+        );
 
         Ok(Proposal::new(
             note.id.clone(),
             task,
-            proposal_model_ref,
-            content,
-            self.provider.is_live(),
+            model_ref,
+            response.text,
+            true,
         ))
     }
 
@@ -134,12 +143,24 @@ pub fn parse_category_list(text: &str) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::config::ModelRef;
-    use crate::llm::offline::OfflineLlmProvider;
     use crate::llm::provider::LlmResponse;
     use crate::model::ObjectType;
 
     fn service() -> LlmService {
-        LlmService::new(Box::new(OfflineLlmProvider::new()), LlmRouting::default())
+        LlmService::new(Box::new(LiveProvider), LlmRouting::default())
+    }
+
+    struct LiveProvider;
+    impl LlmProvider for LiveProvider {
+        fn name(&self) -> &str {
+            "local"
+        }
+
+        fn complete(&self, request: &LlmRequest) -> CoreResult<LlmResponse> {
+            Ok(LlmResponse {
+                text: format!("{}:ok", request.model_ref.model),
+            })
+        }
     }
 
     fn note(body: &str) -> Note {
@@ -155,25 +176,8 @@ mod tests {
         let p = svc.generate(LlmTask::Summarize, &n, &[]).unwrap();
         assert_eq!(p.task, LlmTask::Summarize);
         assert_eq!(p.target, n.id);
-        assert!(!p.live);
+        assert!(p.live);
         assert!(!p.content.is_empty());
-    }
-
-    #[test]
-    fn offline_rewrite_is_a_noop_on_the_body() {
-        let svc = service();
-        let n = note("the original body text stays exactly the same");
-        let p = svc.generate(LlmTask::Rewrite, &n, &[]).unwrap();
-        assert_eq!(p.content, n.body, "offline must not alter the body");
-    }
-
-    #[test]
-    fn suggest_categories_parses_into_clean_tags() {
-        let svc = service();
-        let n = note("breaker breaker electrical panel kitchen wiring breaker");
-        let cats = svc.suggest_categories(&n, &[]).unwrap();
-        assert!(cats.contains(&"breaker".to_string()));
-        assert!(cats.iter().all(|c| !c.contains(' ') && !c.starts_with('#')));
     }
 
     #[test]
@@ -181,9 +185,9 @@ mod tests {
         let svc = service();
         let n = note("Always switch off the breaker first.");
         let proposal = svc.generate(LlmTask::Summarize, &n, &[]).unwrap();
-        assert_eq!(proposal.provider, "offline");
-        assert_eq!(proposal.model, "offline");
-        assert!(!proposal.live);
+        assert_eq!(proposal.provider, "local");
+        assert_eq!(proposal.model, crate::onnx::manifest::BUNDLED_LLM_ID);
+        assert!(proposal.live);
     }
 
     #[test]
@@ -212,19 +216,6 @@ mod tests {
 
     #[test]
     fn live_provider_allows_matching_per_action_override() {
-        struct LiveProvider;
-        impl LlmProvider for LiveProvider {
-            fn name(&self) -> &str {
-                "local"
-            }
-
-            fn complete(&self, request: &LlmRequest) -> CoreResult<LlmResponse> {
-                Ok(LlmResponse {
-                    text: format!("{}:ok", request.model_ref.model),
-                })
-            }
-        }
-
         let svc = LlmService::new(Box::new(LiveProvider), LlmRouting::default());
         let proposal = svc
             .generate_with_model_ref(

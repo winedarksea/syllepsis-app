@@ -32,12 +32,12 @@ pub struct Proposal {
     pub id: String,
     pub target: NoteId,
     pub task: LlmTask,
-    /// Provider that produced it (`local`, `offline`, `anthropic`, etc.).
+    /// Provider that produced it (`local`, `anthropic`, etc.).
     #[serde(default)]
     pub provider: String,
-    /// The model that produced it (or `offline`), shown so generated content is labeled.
+    /// The model that produced it, shown so generated content is labeled.
     pub model: String,
-    /// Whether the model actually ran inference (false = offline heuristic).
+    /// Whether the model actually ran inference.
     pub live: bool,
     pub content: String,
     pub status: ProposalStatus,

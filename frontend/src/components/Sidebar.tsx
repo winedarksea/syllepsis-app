@@ -1,12 +1,24 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useStore } from '../lib/store';
-import type { Category } from '../types';
+import type { Category, ObjectType } from '../types';
 import { Icon } from './Icon';
 import './Sidebar.css';
 
 interface Props {
-  onNewNote: () => void;
+  onNewNote: (type?: ObjectType) => void;
 }
+
+// Object types a user can create directly from the New menu. (Picture/Drawing need asset
+// authoring that isn't built yet; Commentary is produced by the AI tools, not created by hand.)
+const NEW_TYPES: { type: ObjectType; label: string }[] = [
+  { type: 'note', label: 'Note' },
+  { type: 'quote', label: 'Quote' },
+  { type: 'reference', label: 'Reference' },
+  { type: 'todo', label: 'To-do' },
+  { type: 'qa', label: 'Q & A' },
+  { type: 'table', label: 'Table' },
+  { type: 'code', label: 'Code' },
+];
 
 const NAV: { view: string; icon: string; label: string }[] = [
   { view: 'book', icon: 'menu_book', label: 'Book View' },
@@ -20,24 +32,39 @@ const NAV: { view: string; icon: string; label: string }[] = [
 ];
 
 export function Sidebar({ onNewNote }: Props) {
-  const { view, setView, categories, unsortedCount, activeCategory, setActiveCategory, theme, toggleTheme } = useStore();
+  const { view, setView, categories, unsortedCount, activeCategory, setActiveCategory, theme, toggleTheme, closeBook } = useStore();
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
 
   const handleCategory = useCallback((cat: Category) => {
     setActiveCategory(cat.name);
     setView('category');
   }, [setActiveCategory, setView]);
 
+  const createType = useCallback((type: ObjectType) => {
+    setNewMenuOpen(false);
+    onNewNote(type);
+  }, [onNewNote]);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
         <span className="sidebar-app-name">Syllepsis</span>
-        <button
-          className="sidebar-theme-btn"
-          onClick={toggleTheme}
-          title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
-        >
-          <Icon name={theme === 'light' ? 'dark_mode' : 'light_mode'} size={18} />
-        </button>
+        <div className="sidebar-header-actions">
+          <button
+            className="sidebar-theme-btn"
+            onClick={closeBook}
+            title="Close book — back to launch screen"
+          >
+            <Icon name="logout" size={18} />
+          </button>
+          <button
+            className="sidebar-theme-btn"
+            onClick={toggleTheme}
+            title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+          >
+            <Icon name={theme === 'light' ? 'dark_mode' : 'light_mode'} size={18} />
+          </button>
+        </div>
       </div>
 
       <nav className="sidebar-nav">
@@ -76,10 +103,29 @@ export function Sidebar({ onNewNote }: Props) {
       </nav>
 
       <div className="sidebar-footer">
-        <button className="sidebar-new-note" onClick={onNewNote}>
-          <Icon name="add" size={18} />
-          <span>New Note</span>
-        </button>
+        <div className="sidebar-new-group">
+          <button className="sidebar-new-note" onClick={() => onNewNote('note')}>
+            <Icon name="add" size={18} />
+            <span>New Note</span>
+          </button>
+          <button
+            className="sidebar-new-caret"
+            onClick={() => setNewMenuOpen((v) => !v)}
+            title="Create another type"
+            aria-label="Create another type"
+          >
+            <Icon name="expand_more" size={18} />
+          </button>
+          {newMenuOpen && (
+            <div className="sidebar-new-menu">
+              {NEW_TYPES.map((t) => (
+                <button key={t.type} className="sidebar-new-menu-item" onClick={() => createType(t.type)}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {/* Sync status placeholder — Phase 4 */}
         <Icon name="cloud_off" className="sidebar-sync-status" size={18} title="Sync: local only" />
       </div>

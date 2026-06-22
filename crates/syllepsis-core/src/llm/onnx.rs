@@ -1,8 +1,7 @@
 //! The bundled local LLM: Gemma 4 E2B on ONNX Runtime (feature `onnx`) — Phase 3.
 //!
-//! This is the live counterpart to the [`OfflineLlmProvider`](super::OfflineLlmProvider), behind
-//! the same [`LlmProvider`] seam, so enabling it changes nothing above the provider. It runs the
-//! split decoder ONNX export used by Gemma 4: token ids pass through `embed_tokens`, then the
+//! This is the in-process implementation behind the [`LlmProvider`] seam. It runs the split
+//! decoder ONNX export used by Gemma 4: token ids pass through `embed_tokens`, then the
 //! autoregressive loop feeds embeddings into `decoder_model_merged`, threading the model's
 //! key/value cache (`present.*` outputs → `past_key_values.*` inputs). The prompt is shaped by the
 //! pure [`chat`](super::chat) helpers (Gemma turn format); architecture dimensions are read from
@@ -604,8 +603,16 @@ impl LlmProvider for OnnxLlmProvider {
         let prompt = build_prompt(&request.system, &request.user);
         // ChatML carries its own role sentinels as text; don't let the tokenizer add more.
         let prompt_ids = self.tokenizer.encode(&prompt, false)?;
+        tracing::debug!(model = %self.name, prompt_tokens = prompt_ids.len(), "onnx llm: decoding");
+        let started = std::time::Instant::now();
         let generated = self.generate(prompt_ids)?;
         let raw = self.tokenizer.decode(&generated, true)?;
+        tracing::debug!(
+            model = %self.name,
+            generated_tokens = generated.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "onnx llm: decode complete"
+        );
         Ok(LlmResponse {
             text: strip_thinking(&raw),
         })
