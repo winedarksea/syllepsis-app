@@ -132,6 +132,11 @@
   letter-spacing: 0.6px;
 }
 
+.uq-card-star {
+  color: #f5a623;
+  flex-shrink: 0;
+}
+
 .uq-card-summary {
   font-style: italic;
   font-size: var(--font-size-sm);

@@ -78,6 +78,39 @@ function csvToRows(text: string): string[][] {
 
 const defaultTableRows = (): string[][] => Array(5).fill(null).map(() => Array(3).fill(''));
 
+function tsvToRows(text: string): string[][] {
+  const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length === 0) return defaultTableRows();
+  const parsed = lines.map((l) => l.split('\t'));
+  const maxCols = Math.max(...parsed.map((r) => r.length));
+  return parsed.map((r) => [...r, ...Array(maxCols - r.length).fill('')]);
+}
+
+function markdownTableToRows(text: string): string[][] | null {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return null;
+  // separator line looks like |---|---| or :---:|
+  const isSeparator = (l: string) => /^\s*\|?[\s|:-]+\|?\s*$/.test(l) && l.includes('-');
+  const tableLines = lines.filter((l) => !isSeparator(l));
+  if (tableLines.length === 0) return null;
+  const parsed = tableLines.map((l) => {
+    const trimmed = l.trim().replace(/^\|/, '').replace(/\|$/, '');
+    return trimmed.split('|').map((c) => c.trim());
+  });
+  const maxCols = Math.max(...parsed.map((r) => r.length));
+  return parsed.map((r) => [...r, ...Array(maxCols - r.length).fill('')]);
+}
+
+function parsePastedTable(text: string): string[][] | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const mdResult = markdownTableToRows(trimmed);
+  if (mdResult) return mdResult;
+  if (trimmed.includes('\t')) return tsvToRows(trimmed);
+  if (trimmed.includes('\n')) return csvToRows(trimmed);
+  return null;
+}
+
 // ── Lexical plugins ────────────────────────────────────────────────────────────
 
 function InitBodyPlugin({ body }: { body: string }) {
@@ -233,6 +266,11 @@ export function Editor({ noteId }: Props) {
     };
   }, []);
 
+  const handleBack = useCallback(async () => {
+    if (dirtyRef.current) await saveRef.current();
+    closeEditor();
+  }, [closeEditor]);
+
   const handleDelete = useCallback(async () => {
     if (!window.confirm('Delete this note? This cannot be undone.')) return;
     try {
@@ -318,6 +356,15 @@ export function Editor({ noteId }: Props) {
     document.querySelector<HTMLInputElement>(`[data-cell="${tr}-${tc}"]`)?.focus();
   }, []);
 
+  const handleTablePaste = useCallback((e: React.ClipboardEvent) => {
+    const text = e.clipboardData.getData('text');
+    const parsed = parsePastedTable(text);
+    if (!parsed) return;
+    e.preventDefault();
+    setRows(parsed);
+    markDirty();
+  }, [markDirty]);
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   if (!note) {
@@ -353,7 +400,7 @@ export function Editor({ noteId }: Props) {
     <div className="editor-container selectable">
       {/* ── Top toolbar ── */}
       <div className="editor-toolbar">
-        <button className="editor-back" onClick={closeEditor}>
+        <button className="editor-back" onClick={handleBack}>
           <Icon name="arrow_back" size={16} />
           <span>Back</span>
         </button>
@@ -414,7 +461,7 @@ export function Editor({ noteId }: Props) {
             <button className="table-ctrl-btn" onClick={addCol}>+ Col</button>
             <button className="table-ctrl-btn" onClick={removeCol} disabled={colCount <= 1}>− Col</button>
           </div>
-          <div className="table-editor-scroll">
+          <div className="table-editor-scroll" onPaste={handleTablePaste}>
             <table className="table-grid">
               <tbody>
                 {rows.map((row, r) => (

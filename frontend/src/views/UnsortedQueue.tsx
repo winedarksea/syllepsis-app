@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
+import { Icon } from '../components/Icon';
 import type { NoteDto } from '../types';
 import './UnsortedQueue.css';
 
@@ -106,6 +107,9 @@ export function UnsortedQueue() {
             >
               <div className="uq-card-header">
                 <span className="uq-card-title">{note.title || '(untitled)'}</span>
+                {note.metadata.classification.starred && (
+                  <Icon name="star" size={14} fill className="uq-card-star" title="Starred" />
+                )}
                 <span className="uq-card-type">{note.type}</span>
               </div>
               {note.summary && (

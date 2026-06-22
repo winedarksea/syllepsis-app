@@ -145,7 +145,7 @@ export function LlmToolsMenu({ noteId, onApplied }: Props) {
         title="AI writing tools"
       >
         <Icon name="auto_awesome" size={16} />
-        <span>{busyLabel ? `${busyLabel}…` : 'AI Tools'}</span>
+        <span>{busyLabel ? `${busyLabel}…` : 'Tools'}</span>
       </button>
 
       {open && (
