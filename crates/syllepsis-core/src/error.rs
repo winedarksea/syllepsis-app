@@ -27,6 +27,10 @@ pub enum CoreError {
     #[error("invalid sort relationship: {0}")]
     InvalidSort(String),
 
+    /// A book directory operation would target an invalid or unsafe location.
+    #[error("invalid book: {0}")]
+    InvalidBook(String),
+
     /// Underlying filesystem failure from the storage layer.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

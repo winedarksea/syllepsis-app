@@ -18,7 +18,20 @@ export const api = {
   getVersion: () => invoke<string>('get_version'),
 
   openBook: (path: string) => invoke<BookInfo>('open_book', { path }),
-  createBook: (path: string, name: string) => invoke<BookInfo>('create_book', { path, name }),
+  createBook: (path: string, name: string, language?: string, location?: string) =>
+    invoke<BookInfo>('create_book', {
+      path,
+      name,
+      language: language ?? null,
+      location: location ?? null,
+    }),
+  createBookInParent: (parentPath: string, name: string, language?: string, location?: string) =>
+    invoke<BookInfo>('create_book_in_parent', {
+      parent_path: parentPath,
+      name,
+      language: language ?? null,
+      location: location ?? null,
+    }),
 
   bookView: () => invoke<RenderItem[]>('book_view'),
   unsortedNotes: () => invoke<NoteDto[]>('unsorted_notes'),

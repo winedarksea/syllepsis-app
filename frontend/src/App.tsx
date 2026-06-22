@@ -13,7 +13,36 @@ import { PrivacyView } from './views/PrivacyView';
 import { PacksView } from './views/PacksView';
 import { Diagnostics } from './views/Diagnostics';
 import { Editor } from './editor/Editor';
+import type { BookInfo } from './types';
 import './App.css';
+
+interface BookCreationDetails {
+  name: string;
+  language?: string;
+  location?: string;
+}
+
+function missingBookFilesMessage(info: BookInfo): string {
+  const missingFiles = info.open_warning?.missing_reserved_files.join(', ') ?? '';
+  return `This folder is missing ${missingFiles}, so it may not be a Syllepsis book.`;
+}
+
+function promptForBookCreationDetails(defaultName = ''): BookCreationDetails | null {
+  const name = prompt('Book name:', defaultName);
+  if (!name?.trim()) return null;
+
+  const language = prompt('Primary language:', 'en');
+  if (language === null) return null;
+
+  const location = prompt('Location (optional):', '');
+  if (location === null) return null;
+
+  return {
+    name: name.trim(),
+    language: language.trim() || undefined,
+    location: location.trim() || undefined,
+  };
+}
 
 // ──────────────────────────────────────────────
 // First-launch screen: open or create a book
@@ -21,21 +50,55 @@ import './App.css';
 function BookPicker() {
   const { setBook, setCategories } = useStore();
 
-  const handleOpen = useCallback(async () => {
-    const selected = await openDialog({ directory: true, multiple: false, title: 'Open Syllepsis Book' });
-    if (!selected || typeof selected !== 'string') return;
-    const info = await api.openBook(selected);
+  const finishOpeningBook = useCallback(async (info: BookInfo) => {
     setBook(info);
     const cats = await api.allCategories();
     setCategories(cats);
   }, [setBook, setCategories]);
 
+  const handleOpen = useCallback(async () => {
+    const selected = await openDialog({ directory: true, multiple: false, title: 'Open Syllepsis Book' });
+    if (!selected || typeof selected !== 'string') return;
+    let info = await api.openBook(selected);
+    const warning = info.open_warning;
+
+    if (warning?.should_offer_create_here) {
+      const shouldCreate = confirm(
+        `${missingBookFilesMessage(info)}\n\nCreate Syllepsis book files here? Cancel opens with in-memory defaults.`
+      );
+      if (shouldCreate) {
+        const details = promptForBookCreationDetails(info.name);
+        if (details) {
+          try {
+            info = await api.createBook(selected, details.name, details.language, details.location);
+          } catch (error) {
+            alert(`Could not create book files here: ${String(error)}`);
+          }
+        }
+      }
+    } else if (warning) {
+      alert(`${missingBookFilesMessage(info)}\n\nOpening with in-memory defaults.`);
+    }
+
+    await finishOpeningBook(info);
+  }, [finishOpeningBook]);
+
   const handleCreate = useCallback(async () => {
-    const dir = await openDialog({ directory: true, multiple: false, title: 'Choose folder for new book' });
-    if (!dir || typeof dir !== 'string') return;
-    const name = prompt('Book name:');
-    if (!name?.trim()) return;
-    const info = await api.createBook(dir, name.trim());
+    const parentDir = await openDialog({
+      directory: true,
+      multiple: false,
+      title: 'Choose where to create the new book folder',
+    });
+    if (!parentDir || typeof parentDir !== 'string') return;
+    const details = promptForBookCreationDetails();
+    if (!details) return;
+    let info: BookInfo;
+    try {
+      info = await api.createBookInParent(parentDir, details.name, details.language, details.location);
+    } catch (error) {
+      alert(`Could not create book: ${String(error)}`);
+      return;
+    }
     setBook(info);
     setCategories([]);
   }, [setBook, setCategories]);

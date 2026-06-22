@@ -9,7 +9,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::markdown::frontmatter::split_frontmatter;
 use crate::model::metadata::ForkInfo;
@@ -17,6 +17,42 @@ use crate::model::{Note, ObjectType};
 use crate::storage::layout;
 use crate::storage::registry::IdRegistry;
 use crate::storage::store::{FsNoteStore, NoteStore};
+
+/// Non-fatal diagnostics from opening a book directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BookOpenWarning {
+    /// Reserved top-level files absent at open time. Existing files are not compared against
+    /// defaults, so normal config/schema drift across app versions does not trigger this warning.
+    pub missing_reserved_files: Vec<String>,
+}
+
+impl BookOpenWarning {
+    pub fn for_root(root: &Path) -> Option<BookOpenWarning> {
+        let missing_reserved_files = [
+            (layout::BOOK_META_FILE, layout::book_meta_path(root)),
+            (layout::CONFIG_FILE, layout::config_path(root)),
+        ]
+        .into_iter()
+        .filter_map(|(name, path)| (!path.exists()).then(|| name.to_string()))
+        .collect::<Vec<_>>();
+
+        (!missing_reserved_files.is_empty()).then_some(BookOpenWarning {
+            missing_reserved_files,
+        })
+    }
+
+    pub fn should_offer_create_here(&self) -> bool {
+        self.missing_reserved_files.len() == 2
+            && self
+                .missing_reserved_files
+                .iter()
+                .any(|file| file == layout::BOOK_META_FILE)
+            && self
+                .missing_reserved_files
+                .iter()
+                .any(|file| file == layout::CONFIG_FILE)
+    }
+}
 
 /// Book-level metadata stored in `_book.md` (object-types.md "Book-Level Metadata").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +93,8 @@ pub struct Book {
     pub metadata: BookMetadata,
     pub config: Config,
     pub store: FsNoteStore,
+    /// Non-fatal open diagnostics the shell can surface before treating the folder as intentional.
+    pub open_warning: Option<BookOpenWarning>,
     /// Machine-local directory holding downloaded ONNX models, shared across books. Runtime-only
     /// (never serialized — it is device-specific, not synced config); the shell sets it from the
     /// OS app-data path. `None` ⇒ no local models, so embeddings/LLM use their offline defaults.
@@ -68,7 +106,16 @@ pub struct Book {
 impl Book {
     /// Create a new, empty book directory with its reserved layout and metadata files.
     pub fn create(root: impl Into<PathBuf>, name: impl Into<String>) -> CoreResult<Book> {
+        Self::create_with_metadata(root, BookMetadata::new(name))
+    }
+
+    /// Create a new, empty book directory with caller-supplied metadata.
+    pub fn create_with_metadata(
+        root: impl Into<PathBuf>,
+        metadata: BookMetadata,
+    ) -> CoreResult<Book> {
         let root = root.into();
+        ensure_new_book_root_available(&root)?;
         std::fs::create_dir_all(&root)?;
         std::fs::create_dir_all(layout::categories_dir(&root))?;
         std::fs::create_dir_all(layout::commentary_dir(&root))?;
@@ -77,7 +124,6 @@ impl Book {
         std::fs::create_dir_all(layout::crdt_dir(&root))?;
         std::fs::create_dir_all(layout::sync_dir(&root))?;
 
-        let metadata = BookMetadata::new(name);
         let config = Config::default();
         write_book_meta(&root, &metadata)?;
         write_config(&root, &config)?;
@@ -100,6 +146,7 @@ impl Book {
             metadata,
             config,
             store,
+            open_warning: None,
             models_root: None,
             registry: Mutex::new(IdRegistry::default()),
         })
@@ -109,6 +156,7 @@ impl Book {
     /// the id registry from the notes already on disk.
     pub fn open(root: impl Into<PathBuf>) -> CoreResult<Book> {
         let root = root.into();
+        let open_warning = BookOpenWarning::for_root(&root);
         let metadata =
             read_book_meta(&root)?.unwrap_or_else(|| BookMetadata::new(default_book_name(&root)));
         let config = read_config(&root)?.unwrap_or_default();
@@ -119,6 +167,7 @@ impl Book {
             metadata,
             config,
             store,
+            open_warning,
             models_root: None,
             registry: Mutex::new(registry),
         })
@@ -209,6 +258,25 @@ fn default_book_name(root: &Path) -> String {
         .to_string()
 }
 
+fn ensure_new_book_root_available(root: &Path) -> CoreResult<()> {
+    if !root.exists() {
+        return Ok(());
+    }
+    if !root.is_dir() {
+        return Err(CoreError::InvalidBook(format!(
+            "book path exists and is not a folder: {}",
+            root.display()
+        )));
+    }
+    if std::fs::read_dir(root)?.next().is_some() {
+        return Err(CoreError::InvalidBook(format!(
+            "refusing to create a book in a non-empty folder: {}",
+            root.display()
+        )));
+    }
+    Ok(())
+}
+
 fn write_book_meta(root: &Path, metadata: &BookMetadata) -> CoreResult<()> {
     let yaml = serde_yaml::to_string(metadata)?;
     std::fs::write(layout::book_meta_path(root), format!("---\n{yaml}---\n"))?;
@@ -255,6 +323,69 @@ mod tests {
         let reopened = Book::open(&path).unwrap();
         assert_eq!(reopened.metadata.name, "My Book");
         assert_eq!(reopened.config.markdown.dialect_version, "syllepsis_001");
+        assert_eq!(reopened.open_warning, None);
+    }
+
+    #[test]
+    fn create_refuses_non_empty_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("existing.txt"), "not a book").unwrap();
+
+        let err = match Book::create(dir.path(), "Downloads") {
+            Ok(_) => panic!("non-empty directory should not be initialized"),
+            Err(err) => err,
+        };
+        assert!(err
+            .to_string()
+            .contains("refusing to create a book in a non-empty folder"));
+    }
+
+    #[test]
+    fn create_with_metadata_persists_book_details() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut metadata = BookMetadata::new("Field Notes");
+        metadata.language = "es".to_string();
+        metadata.location = Some("Chicago".to_string());
+
+        Book::create_with_metadata(dir.path().join("field-notes"), metadata).unwrap();
+
+        let opened = Book::open(dir.path().join("field-notes")).unwrap();
+        assert_eq!(opened.metadata.name, "Field Notes");
+        assert_eq!(opened.metadata.language, "es");
+        assert_eq!(opened.metadata.location.as_deref(), Some("Chicago"));
+    }
+
+    #[test]
+    fn open_warns_when_book_marker_files_are_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let opened = Book::open(dir.path()).unwrap();
+        let warning = opened
+            .open_warning
+            .expect("missing marker files should warn");
+        assert_eq!(
+            warning.missing_reserved_files,
+            vec![layout::BOOK_META_FILE, layout::CONFIG_FILE]
+        );
+        assert!(warning.should_offer_create_here());
+        assert_eq!(
+            opened.metadata.name,
+            dir.path().file_name().unwrap().to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn open_warns_only_about_absent_marker_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            layout::book_meta_path(dir.path()),
+            "---\nname: Existing\n---\n",
+        )
+        .unwrap();
+
+        let opened = Book::open(dir.path()).unwrap();
+        let warning = opened.open_warning.expect("missing config should warn");
+        assert_eq!(warning.missing_reserved_files, vec![layout::CONFIG_FILE]);
+        assert!(!warning.should_offer_create_here());
     }
 
     #[test]

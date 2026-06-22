@@ -19,6 +19,7 @@ pub fn run() {
             get_version,
             open_book,
             create_book,
+            create_book_in_parent,
             // notes
             book_view,
             unsorted_notes,

@@ -200,6 +200,12 @@ export type RenderItem =
 export interface BookInfo {
   name: string;
   path: string;
+  open_warning: BookOpenWarningInfo | null;
+}
+
+export interface BookOpenWarningInfo {
+  missing_reserved_files: string[];
+  should_offer_create_here: boolean;
 }
 
 // ── Search & embeddings (mirrors syllepsis_core::search::results) ──

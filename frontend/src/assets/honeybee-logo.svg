@@ -1,3 +1,40 @@
+<!--
+  REGENERATING TAURI PNG ICONS
+  Use @resvg/resvg-js (npm). resvg ignores CSS class selectors and custom
+  properties, so preprocess the SVG first: replace each class attribute with
+  inline presentation attributes, then strip the style block.
+
+  Light-mode colour values (from the CSS variables in the style block below):
+    field:     fill #fffaf1
+    rim:       fill none, stroke #11100e, stroke-width 14
+    inner-rim: fill none, stroke #fb8604, stroke-width 5
+    bee-shape: fill #000000, stroke none
+
+  Script (run from repo root):
+
+    npm init -y and npm install -D @resvg/resvg-js
+    node generate-icons.js
+    rm package.json package-lock.json and rm -rf node_modules
+
+  generate-icons.js contents:
+
+    const { Resvg } = require('@resvg/resvg-js');
+    const fs = require('fs'), path = require('path');
+    let svg = fs.readFileSync('frontend/src/assets/honeybee-logo.svg', 'utf8');
+    const classMap = {
+      'field':     'fill="#fffaf1"',
+      'rim':       'fill="none" stroke="#11100e" stroke-width="14"',
+      'inner-rim': 'fill="none" stroke="#fb8604" stroke-width="5"',
+      'bee-shape': 'fill="#000000" stroke="none"',
+    };
+    for (const [cls, attrs] of Object.entries(classMap))
+      svg = svg.replace(new RegExp('class="' + cls + '"', 'g'), attrs);
+    svg = svg.replace(/<style>[\s\S]*?<\/style>/g, '');
+    const dir = 'crates/syllepsis-tauri/icons';
+    for (const [name, w] of [['32x32.png',32],['128x128.png',128],['128x128@2x.png',256],['icon.png',512]])
+      fs.writeFileSync(path.join(dir, name),
+        new Resvg(svg, { fitTo: { mode: 'width', value: w } }).render().asPng());
+-->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">Syllepsis Honeybee Logo</title>
   <desc id="desc">A round logo using the biologically detailed honeybee silhouette from honeybee-vector.svg.</desc>
@@ -375,6 +412,7 @@
       m 116.98 50.73 z"/>
     </g>
   </g>
+  <!-- Regenerate PNGs from this SVG with resvg-js-cli, using the fit-width flag -->
 
   <circle class="rim" cx="256" cy="256" r="238"/>
 </svg>
