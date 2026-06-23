@@ -110,6 +110,50 @@
   gap: var(--sp-2);
 }
 
+.sv-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.sv-checklist,
+.sv-activity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.sv-checkrow,
+.sv-activity-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.sv-checkrow code,
+.sv-activity-row code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-pill {
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+.sv-pill.ok {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
 .sv-subhead {
   font-size: var(--font-size-sm);
   font-weight: 600;

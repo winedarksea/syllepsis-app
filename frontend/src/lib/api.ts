@@ -9,6 +9,9 @@ import type {
   CloudLlmProviderDescriptor, CloudLlmProviderSettings, CloudLlmProviderStatus,
   ModelManifest, ModelCacheStatus, ModelDownloadReport,
   BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig,
+  GitStatusDto, GitCommandReport, SyncActivityEvent,
+  CloudSyncProviderDescriptor, CloudSyncProviderStatus, CloudSyncConnectStart, CloudBookSummary,
+  ManagedCloudReport,
   World, Overlay, LookupEntry, ResolvedLocation,
   LockMode, PolicyOverview,
   ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
@@ -172,6 +175,34 @@ export const api = {
   // Publishing & serving (Phase 6)
   publishSite: (outDir: string) => invoke<PublishReport>('publish_site', { outDir }),
   refreshPrivateGitignore: () => invoke<GitignoreReport>('refresh_private_gitignore'),
+
+  // Sync, git, file-watch, managed cloud
+  gitStatus: () => invoke<GitStatusDto>('git_status'),
+  gitStageCommit: (selectedPaths: string[], message: string) =>
+    invoke<GitCommandReport>('git_stage_commit', { selectedPaths, message }),
+  gitPush: () => invoke<GitCommandReport>('git_push'),
+  gitPull: () => invoke<GitCommandReport>('git_pull'),
+  startFileWatch: () => invoke<void>('start_file_watch'),
+  stopFileWatch: () => invoke<void>('stop_file_watch'),
+  syncActivity: () => invoke<SyncActivityEvent[]>('sync_activity'),
+  cloudSyncProviderDescriptors: () =>
+    invoke<CloudSyncProviderDescriptor[]>('cloud_sync_provider_descriptors'),
+  cloudSyncProviderStatuses: () =>
+    invoke<CloudSyncProviderStatus[]>('cloud_sync_provider_statuses'),
+  connectCloudSyncProvider: (provider: string) =>
+    invoke<CloudSyncConnectStart>('connect_cloud_sync_provider', { provider }),
+  handleCloudSyncOauthCallback: (callbackUrl: string) =>
+    invoke<CloudSyncProviderStatus>('handle_cloud_sync_oauth_callback', { callbackUrl }),
+  disconnectCloudSyncProvider: (provider: string) =>
+    invoke<CloudSyncProviderStatus>('disconnect_cloud_sync_provider', { provider }),
+  listCloudBooks: (provider: string) =>
+    invoke<CloudBookSummary[]>('list_cloud_books', { provider }),
+  uploadBookToCloud: (provider: string) =>
+    invoke<ManagedCloudReport>('upload_book_to_cloud', { provider }),
+  syncManagedCloudNow: (provider: string) =>
+    invoke<ManagedCloudReport>('sync_managed_cloud_now', { provider }),
+  openCloudBook: (provider: string, bookId: string, parentPath: string) =>
+    invoke<void>('open_cloud_book', { provider, bookId, parentPath }),
 
   // Style cards
   listStyleCards: () => invoke<StyleCard[]>('list_style_cards'),

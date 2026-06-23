@@ -13,16 +13,23 @@
 //! UUID sidecars rather than CRDT'd; and conflicts on non-mergeable files become explicit
 //! `.conflict-*` copies the user resolves.
 
+mod activity;
 mod assets;
 mod engine;
 mod local_folder;
+mod managed;
 mod plan;
 mod provider;
 mod state;
 
+pub use activity::{append_activity, list_activity, prune_activity, SyncActivityEvent};
 pub use assets::{assign as assign_asset_uuid, AssetRegistry, AssetSidecar};
 pub use engine::{SyncEngine, SyncReport};
 pub use local_folder::{content_revision, LocalFolderSync};
+pub use managed::{
+    BookManifest, ManagedCloudReport, ManagedCloudSyncEngine, ManagedCloudSyncState,
+    ManagedObjectEntry, ManagedObjectStore, MemoryManagedObjectStore,
+};
 pub use plan::{plan, SyncAction};
 pub use provider::{
     provider_descriptors, RemoteEntry, RemoteRevision, SyncProvider, SyncProviderDescriptor,

@@ -13,7 +13,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use loro::{ExportMode, LoroDoc, UpdateOptions};
+use loro::{ExportMode, LoroDoc, UpdateOptions, VersionVector};
 
 use crate::crdt::{ActorId, CrdtBackend, NoteCrdt};
 use crate::error::{CoreError, CoreResult};
@@ -81,6 +81,29 @@ impl NoteCrdt for LoroDocument {
         self.doc
             .import(snapshot)
             .map_err(|e| CoreError::Sync(format!("loro merge sidecar: {e}")))?;
+        self.doc.commit();
+        Ok(())
+    }
+
+    fn version_vector_json(&self) -> CoreResult<String> {
+        serde_json::to_string(&self.doc.oplog_vv()).map_err(Into::into)
+    }
+
+    fn updates_since_json(&self, version_vector_json: &str) -> CoreResult<Vec<u8>> {
+        let from: VersionVector = if version_vector_json.trim().is_empty() {
+            VersionVector::default()
+        } else {
+            serde_json::from_str(version_vector_json)?
+        };
+        self.doc
+            .export(ExportMode::updates(&from))
+            .map_err(|e| CoreError::Sync(format!("loro export updates: {e}")))
+    }
+
+    fn import_updates(&mut self, updates: &[u8]) -> CoreResult<()> {
+        self.doc
+            .import(updates)
+            .map_err(|e| CoreError::Sync(format!("loro import updates: {e}")))?;
         self.doc.commit();
         Ok(())
     }

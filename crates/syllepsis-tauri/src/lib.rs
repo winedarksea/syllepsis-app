@@ -34,6 +34,7 @@ fn init_tracing() {
 pub fn run() {
     init_tracing();
     tauri::Builder::default()
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
@@ -96,6 +97,22 @@ pub fn run() {
             sync_to_folder,
             sync_status,
             sync_provider_descriptors,
+            git_status,
+            git_stage_commit,
+            git_push,
+            git_pull,
+            start_file_watch,
+            stop_file_watch,
+            sync_activity,
+            cloud_sync_provider_descriptors,
+            cloud_sync_provider_statuses,
+            connect_cloud_sync_provider,
+            handle_cloud_sync_oauth_callback,
+            disconnect_cloud_sync_provider,
+            list_cloud_books,
+            upload_book_to_cloud,
+            open_cloud_book,
+            sync_managed_cloud_now,
             // spatial worlds (Phase 5)
             list_worlds,
             create_world,

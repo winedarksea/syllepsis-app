@@ -15,6 +15,8 @@ export interface ThemeStyle {
   divider?:   'rule' | 'knot' | 'dotdash';
   grid?:      'survey' | 'dots' | 'contour' | 'none';
   iconSet?:   string;
+  // Flavor language for evocative UI sub-text (e.g. settings section subtitles).
+  flavorLang?: 'icelandic' | 'latin';
 }
 
 // Safe per-slot SVG override: only path-data + viewBox, rendered as controlled <svg><path>.
@@ -73,7 +75,7 @@ const NORDIC: Theme = {
   id: 'nordic',
   name: 'Nordic / Icelandic',
   builtin: true,
-  style: { graphEdge: 'weave', graphNode: 'hex', divider: 'knot', grid: 'survey', iconSet: 'nordic' },
+  style: { graphEdge: 'weave', graphNode: 'hex', divider: 'knot', grid: 'survey', iconSet: 'nordic', flavorLang: 'icelandic' },
   light: {
     '--color-bg': '#e8e5de', '--color-surface': '#f3f0e8', '--color-surface-raised': '#dde4e6',
     '--color-border': '#9a9992', '--color-border-focus': '#2f7fa3',
@@ -111,7 +113,7 @@ const NAVIGATORS_ARCHIVE: Theme = {
   id: 'navigators-archive',
   name: "Navigator's Archive",
   builtin: true,
-  style: { graphEdge: 'glow', graphNode: 'star', divider: 'dotdash', grid: 'contour', iconSet: 'archive' },
+  style: { graphEdge: 'glow', graphNode: 'star', divider: 'dotdash', grid: 'contour', iconSet: 'archive', flavorLang: 'latin' },
   // Light "The Logbook": warm parchment surfaces, brass/gold accents, ink/indigo secondary.
   light: {
     '--color-bg': '#f1e7d0', '--color-surface': '#f7efdd', '--color-surface-raised': '#e9dcc0',
@@ -179,6 +181,7 @@ export function resolveThemeStyle(id: string, custom: Theme[]): Required<ThemeSt
     divider:   theme.style?.divider   ?? 'dotdash',
     grid:      theme.style?.grid      ?? 'survey',
     iconSet:   theme.style?.iconSet   ?? 'material',
+    flavorLang: theme.style?.flavorLang ?? 'icelandic',
   };
 }
 

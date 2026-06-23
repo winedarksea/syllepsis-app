@@ -399,6 +399,70 @@ export interface SyncConfig {
   external_edit_skew_secs: number;
 }
 
+export interface GitChangedFile {
+  path: string;
+  status: string;
+  stage_by_default: boolean;
+}
+
+export interface GitStatusDto {
+  available: boolean;
+  version?: string;
+  is_repository: boolean;
+  branch?: string;
+  changed_files: GitChangedFile[];
+  error?: string;
+}
+
+export interface GitCommandReport {
+  command: string;
+  stdout: string;
+  stderr: string;
+  hint?: string;
+}
+
+export interface SyncActivityEvent {
+  happened_at: string;
+  source: string;
+  kind: string;
+  path?: string;
+  detail: string;
+}
+
+export interface CloudSyncProviderDescriptor {
+  provider: string;
+  display_name: string;
+  auth_url_base: string;
+}
+
+export interface CloudSyncProviderStatus {
+  provider: string;
+  display_name: string;
+  connected: boolean;
+  requires_loro: boolean;
+}
+
+export interface CloudSyncConnectStart {
+  provider: string;
+  auth_url: string;
+  redirect_uri: string;
+  state: string;
+}
+
+export interface CloudBookSummary {
+  book_id: string;
+  name: string;
+  updated_at: string;
+}
+
+export interface ManagedCloudReport {
+  uploaded_patches: string[];
+  downloaded_patches: string[];
+  uploaded_snapshots: string[];
+  reconstructed_notes: string[];
+  skipped_notes: number;
+}
+
 export interface BookConfig {
   markdown: MarkdownConfig;
   summary: SummaryConfig;

@@ -230,7 +230,7 @@ impl Default for SyncConfig {
     fn default() -> Self {
         SyncConfig {
             enabled: true,
-            crdt_backend: crate::crdt::LWW_BACKEND.to_string(),
+            crdt_backend: crate::crdt::LORO_BACKEND.to_string(),
             conflict_marker: "conflict".to_string(),
             external_edit_skew_secs: 2,
         }

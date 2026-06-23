@@ -73,7 +73,7 @@ mod tests {
         let book = book_at(dir.path().join("b"));
         let status = sync_status(&book).unwrap();
         assert!(status.enabled);
-        assert_eq!(status.crdt_backend, crate::crdt::LWW_BACKEND);
+        assert_eq!(status.crdt_backend, crate::crdt::LORO_BACKEND);
         assert!(!status.actor_id.is_empty());
         assert!(status.providers.iter().any(|p| p.implemented));
     }

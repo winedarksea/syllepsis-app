@@ -3,6 +3,7 @@
 
 pub mod commands;
 pub mod dto;
+pub mod git;
 pub mod lifecycle;
 pub mod llm;
 pub mod pack;

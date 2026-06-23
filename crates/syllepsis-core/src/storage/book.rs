@@ -57,6 +57,9 @@ impl BookOpenWarning {
 /// Book-level metadata stored in `_book.md` (object-types.md "Book-Level Metadata").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BookMetadata {
+    /// Stable identity used by managed cloud sync to discover the same book across devices.
+    #[serde(default = "new_book_id")]
+    pub book_id: String,
     pub name: String,
     /// Preferred language (BCP-47-ish); guides LLM features and spell-check.
     #[serde(default = "default_language")]
@@ -76,9 +79,14 @@ fn default_language() -> String {
     "en".to_string()
 }
 
+fn new_book_id() -> String {
+    ulid::Ulid::new().to_string()
+}
+
 impl BookMetadata {
     pub fn new(name: impl Into<String>) -> BookMetadata {
         BookMetadata {
+            book_id: new_book_id(),
             name: name.into(),
             language: default_language(),
             location: None,
@@ -158,8 +166,11 @@ impl Book {
     pub fn open(root: impl Into<PathBuf>) -> CoreResult<Book> {
         let root = root.into();
         let open_warning = BookOpenWarning::for_root(&root);
-        let metadata =
-            read_book_meta(&root)?.unwrap_or_else(|| BookMetadata::new(default_book_name(&root)));
+        let (metadata, should_persist_metadata) = read_book_meta(&root)?
+            .unwrap_or_else(|| (BookMetadata::new(default_book_name(&root)), false));
+        if should_persist_metadata && layout::book_meta_path(&root).exists() {
+            write_book_meta(&root, &metadata)?;
+        }
         let config = read_config(&root)?.unwrap_or_default();
         let store = FsNoteStore::open(&root)?;
         let registry = IdRegistry::from_ids(store.note_ids()?.iter());
@@ -284,14 +295,15 @@ fn write_book_meta(root: &Path, metadata: &BookMetadata) -> CoreResult<()> {
     Ok(())
 }
 
-fn read_book_meta(root: &Path) -> CoreResult<Option<BookMetadata>> {
+fn read_book_meta(root: &Path) -> CoreResult<Option<(BookMetadata, bool)>> {
     let path = layout::book_meta_path(root);
     if !path.exists() {
         return Ok(None);
     }
     let content = std::fs::read_to_string(path)?;
     let (frontmatter, _body) = split_frontmatter(&content).unwrap_or((content, String::new()));
-    Ok(Some(serde_yaml::from_str(&frontmatter)?))
+    let had_book_id = frontmatter.contains("book_id:");
+    Ok(Some((serde_yaml::from_str(&frontmatter)?, !had_book_id)))
 }
 
 fn write_config(root: &Path, config: &Config) -> CoreResult<()> {

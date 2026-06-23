@@ -18,6 +18,7 @@ struct CachedLlmService {
 pub struct AppState {
     pub book: Mutex<Option<Book>>,
     llm_service: Mutex<Option<CachedLlmService>>,
+    pub file_watcher: Mutex<Option<notify::RecommendedWatcher>>,
 }
 
 impl AppState {
@@ -25,6 +26,7 @@ impl AppState {
         AppState {
             book: Mutex::new(None),
             llm_service: Mutex::new(None),
+            file_watcher: Mutex::new(None),
         }
     }
 

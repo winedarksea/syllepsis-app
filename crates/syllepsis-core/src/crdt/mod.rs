@@ -77,6 +77,31 @@ pub trait NoteCrdt: Send {
 
     /// Merge another replica's snapshot into this document.
     fn merge(&mut self, snapshot: &[u8]) -> CoreResult<()>;
+
+    /// Serialize the document's current version vector as JSON. Backends that cannot produce
+    /// incremental updates return a clear sync error.
+    fn version_vector_json(&self) -> CoreResult<String> {
+        Err(crate::error::CoreError::Sync(format!(
+            "{} does not support incremental sync",
+            self.backend()
+        )))
+    }
+
+    /// Export updates since the provided JSON version vector.
+    fn updates_since_json(&self, _version_vector_json: &str) -> CoreResult<Vec<u8>> {
+        Err(crate::error::CoreError::Sync(format!(
+            "{} does not support incremental sync",
+            self.backend()
+        )))
+    }
+
+    /// Import an incremental update payload.
+    fn import_updates(&mut self, _updates: &[u8]) -> CoreResult<()> {
+        Err(crate::error::CoreError::Sync(format!(
+            "{} does not support incremental sync",
+            self.backend()
+        )))
+    }
 }
 
 /// Constructs [`NoteCrdt`] documents for one backend. The sync engine selects one of these once
@@ -111,14 +136,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_backend_is_lww_and_round_trips() {
-        let backend = select_crdt_backend(&SyncConfig::default());
+    fn configured_lww_backend_round_trips() {
+        let cfg = SyncConfig {
+            crdt_backend: LWW_BACKEND.to_string(),
+            ..SyncConfig::default()
+        };
+        let backend = select_crdt_backend(&cfg);
         assert_eq!(backend.name(), LWW_BACKEND);
         let actor = ActorId::new("device-a");
         let doc = backend.new_document(&actor, "hello");
         let snap = doc.snapshot().unwrap();
         let reloaded = backend.load_document(&actor, &snap).unwrap();
         assert_eq!(reloaded.text(), "hello");
+    }
+
+    #[test]
+    #[cfg(feature = "loro")]
+    fn default_backend_is_loro_when_feature_is_enabled() {
+        let backend = select_crdt_backend(&SyncConfig::default());
+        assert_eq!(backend.name(), LORO_BACKEND);
+        let actor = ActorId::new("device-a");
+        let doc = backend.new_document(&actor, "hello");
+        let snap = doc.snapshot().unwrap();
+        let reloaded = backend.load_document(&actor, &snap).unwrap();
+        assert_eq!(reloaded.text(), "hello");
+    }
+
+    #[test]
+    #[cfg(not(feature = "loro"))]
+    fn default_backend_falls_back_to_lww_without_loro_feature() {
+        assert_eq!(
+            select_crdt_backend(&SyncConfig::default()).name(),
+            LWW_BACKEND
+        );
     }
 
     #[test]

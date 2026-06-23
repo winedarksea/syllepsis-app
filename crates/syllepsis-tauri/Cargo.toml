@@ -16,15 +16,18 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-syllepsis-core = { path = "../syllepsis-core", features = ["onnx"] }
+syllepsis-core = { path = "../syllepsis-core", features = ["onnx", "loro"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-deep-link = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 ulid = { workspace = true }
 thiserror = { workspace = true }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
+notify = "8"
+opendal = { version = "0.57", features = ["blocking", "services-gdrive", "services-dropbox", "services-onedrive"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

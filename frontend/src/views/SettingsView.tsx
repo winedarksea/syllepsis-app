@@ -13,14 +13,28 @@ import type { ThemePref } from '../lib/store';
 import type {
   BuildInfo, BookConfig, CloudLlmProviderDescriptor, CloudLlmProviderStatus,
   PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, ModelRef,
+  GitStatusDto, SyncActivityEvent, CloudSyncProviderDescriptor, CloudSyncProviderStatus,
 } from '../types';
 import {
   allThemes, themeById, themeSwatches, themeToJson, normalizeImportedTheme, BUILTIN_THEMES,
   resolveThemeStyle, type Theme,
 } from '../theme/themes';
 import { getIconSet } from '../theme/icons/sets';
-import { Icon } from '../components/Icon';
+import { Icon, useThemeStyle } from '../components/Icon';
 import './SettingsView.css';
+
+// Evocative section sub-text, varying by the active theme's flavor language.
+const SUBTITLES = {
+  settings:   { icelandic: 'Stillingar',      latin: 'Ordinatio' },
+  appearance: { icelandic: 'Útlit',           latin: 'Aspectus' },
+  ai:         { icelandic: 'Vélmenni',        latin: 'Machina' },
+  privacy:    { icelandic: 'Vernd',           latin: 'Seclusio' },
+  sync:       { icelandic: 'Samstilling',     latin: 'Concordia' },
+  advanced:   { icelandic: 'Djúpstillingar',  latin: 'Profunda' },
+  book:       { icelandic: 'Bókarstillingar', latin: 'Codex' },
+  plugins:    { icelandic: 'Viðbætur',        latin: 'Additamenta' },
+  about:      { icelandic: 'Um Syllepsis',    latin: 'De Syllepsi' },
+} as const;
 
 const THEME_OPTIONS: { value: ThemePref; icon: string; label: string }[] = [
   { value: 'light', icon: 'light_mode', label: 'Light' },
@@ -38,6 +52,7 @@ interface Props {
 
 export function SettingsView({ launchMode = false }: Props) {
   const { book, themePref, setThemePref } = useStore();
+  const { flavorLang } = useThemeStyle();
   const [build, setBuild] = useState<BuildInfo | null>(null);
   const [config, setConfig] = useState<BookConfig | null>(null);
   const [descriptors, setDescriptors] = useState<CloudLlmProviderDescriptor[]>([]);
@@ -75,7 +90,7 @@ export function SettingsView({ launchMode = false }: Props) {
       {!launchMode && (
         <div className="sv-header">
           <h2 className="sv-title">Settings</h2>
-          <span className="sv-subtitle">Stillingar</span>
+          <span className="sv-subtitle">{SUBTITLES.settings[flavorLang]}</span>
         </div>
       )}
 
@@ -84,7 +99,7 @@ export function SettingsView({ launchMode = false }: Props) {
 
       <div className="sv-scroll">
         {/* ── Appearance ── */}
-        <Section title="Appearance" subtitle="Útlit">
+        <Section title="Appearance" subtitle={SUBTITLES.appearance[flavorLang]}>
           <Field label="Mode" hint="Follows the system color scheme when set to System.">
             <div className="sv-segmented" role="radiogroup" aria-label="Theme mode">
               {THEME_OPTIONS.map((opt) => (
@@ -105,7 +120,7 @@ export function SettingsView({ launchMode = false }: Props) {
         </Section>
 
         {/* ── AI & LLM ── */}
-        <Section title="AI & Language Models" subtitle="Vélmenni">
+        <Section title="AI & Language Models" subtitle={SUBTITLES.ai[flavorLang]}>
           <CloudProvidersPanel
             descriptors={descriptors}
             statuses={statuses}
@@ -130,7 +145,7 @@ export function SettingsView({ launchMode = false }: Props) {
         {book ? (
           config && (
             <>
-              <Section title="Privacy & Security" subtitle="Vernd">
+              <Section title="Privacy & Security" subtitle={SUBTITLES.privacy[flavorLang]}>
                 <PrivacyPanel
                   value={config.privacy}
                   onSaved={(privacy) => { setConfig((p) => p && { ...p, privacy }); flash('Privacy saved.'); }}
@@ -138,7 +153,7 @@ export function SettingsView({ launchMode = false }: Props) {
                 />
               </Section>
 
-              <Section title="Sync & Backup" subtitle="Samstilling">
+              <Section title="Sync & Backup" subtitle={SUBTITLES.sync[flavorLang]}>
                 <SyncPanel
                   value={config.sync}
                   onSaved={(sync) => { setConfig((p) => p && { ...p, sync }); flash('Sync saved.'); }}
@@ -154,7 +169,7 @@ export function SettingsView({ launchMode = false }: Props) {
                 >
                   <Icon name={advancedOpen ? 'expand_more' : 'chevron_right'} size={18} />
                   <span className="sv-section-title">Advanced</span>
-                  <span className="sv-section-subtitle">Djúpstillingar</span>
+                  <span className="sv-section-subtitle">{SUBTITLES.advanced[flavorLang]}</span>
                 </button>
                 {advancedOpen && (
                   <div className="sv-section-body">
@@ -175,13 +190,13 @@ export function SettingsView({ launchMode = false }: Props) {
             </>
           )
         ) : (
-          <Section title="Book Settings" subtitle="Bókarstillingar">
+          <Section title="Book Settings" subtitle={SUBTITLES.book[flavorLang]}>
             <p className="sv-locked">Privacy, sync, and advanced tuning are stored per book. Open a book to configure them.</p>
           </Section>
         )}
 
         {/* ── Plugins (placeholder) ── */}
-        <Section title="Plugins" subtitle="Viðbætur">
+        <Section title="Plugins" subtitle={SUBTITLES.plugins[flavorLang]}>
           <div className="sv-plugins">
             <Icon name="extension" size={22} className="sv-plugins-icon" />
             <div>
@@ -192,7 +207,7 @@ export function SettingsView({ launchMode = false }: Props) {
         </Section>
 
         {/* ── About ── */}
-        <Section title="About" subtitle="Um Syllepsis">
+        <Section title="About" subtitle={SUBTITLES.about[flavorLang]}>
           <div className="sv-about">
             <div className="sv-about-mark">S</div>
             <div className="sv-about-text">
@@ -612,11 +627,107 @@ function PrivacyPanel({ value, onSaved, onError }: {
 function SyncPanel({ value, onSaved, onError }: {
   value: SyncConfig; onSaved: (v: SyncConfig) => void; onError: (m: string) => void;
 }) {
+  const [git, setGit] = useState<GitStatusDto | null>(null);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [commitMessage, setCommitMessage] = useState('');
+  const [watching, setWatching] = useState(false);
+  const [activity, setActivity] = useState<SyncActivityEvent[]>([]);
+  const [cloudProviders, setCloudProviders] = useState<CloudSyncProviderDescriptor[]>([]);
+  const [cloudStatuses, setCloudStatuses] = useState<CloudSyncProviderStatus[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
   const { draft, setDraft, dirty, saving, commit } = useSectionDraft(
     value,
     async (d) => { const updated = await api.updateSyncConfig(d); onSaved(updated.sync); },
     onError,
   );
+
+  const loadGit = useCallback(async () => {
+    const status = await api.gitStatus();
+    setGit(status);
+    setSelected(Object.fromEntries(status.changed_files.map((file) => [file.path, file.stage_by_default])));
+  }, []);
+
+  const loadActivity = useCallback(async () => {
+    setActivity(await api.syncActivity());
+  }, []);
+
+  const loadCloud = useCallback(async () => {
+    const [descriptors, statuses] = await Promise.all([
+      api.cloudSyncProviderDescriptors(),
+      api.cloudSyncProviderStatuses(),
+    ]);
+    setCloudProviders(descriptors);
+    setCloudStatuses(statuses);
+  }, []);
+
+  useEffect(() => {
+    loadGit().catch((e) => onError(String(e)));
+    loadActivity().catch((e) => onError(String(e)));
+    loadCloud().catch((e) => onError(String(e)));
+  }, [loadActivity, loadCloud, loadGit, onError]);
+
+  const selectedPaths = Object.entries(selected).filter(([, v]) => v).map(([path]) => path);
+  const cloudStatus = (provider: string) => cloudStatuses.find((status) => status.provider === provider);
+
+  const runGit = useCallback(async (action: 'commit' | 'push' | 'pull') => {
+    setBusy(`git-${action}`);
+    try {
+      if (action === 'commit') {
+        await api.gitStageCommit(selectedPaths, commitMessage);
+        setCommitMessage('');
+      } else if (action === 'push') {
+        await api.gitPush();
+      } else {
+        await api.gitPull();
+      }
+      await loadGit();
+    } catch (e) { onError(String(e)); }
+    finally { setBusy(null); }
+  }, [commitMessage, loadGit, onError, selectedPaths]);
+
+  const toggleWatch = useCallback(async () => {
+    setBusy('watch');
+    try {
+      if (watching) {
+        await api.stopFileWatch();
+        setWatching(false);
+      } else {
+        await api.startFileWatch();
+        setWatching(true);
+      }
+      await loadActivity();
+    } catch (e) { onError(String(e)); }
+    finally { setBusy(null); }
+  }, [loadActivity, onError, watching]);
+
+  const connectCloud = useCallback(async (provider: string) => {
+    setBusy(provider);
+    try {
+      const start = await api.connectCloudSyncProvider(provider);
+      window.open(start.auth_url, '_blank', 'noopener,noreferrer');
+    } catch (e) { onError(String(e)); }
+    finally { setBusy(null); }
+  }, [onError]);
+
+  const syncCloud = useCallback(async (provider: string) => {
+    setBusy(provider);
+    try {
+      await api.syncManagedCloudNow(provider);
+      await Promise.all([loadCloud(), loadActivity()]);
+    } catch (e) { onError(String(e)); }
+    finally { setBusy(null); }
+  }, [loadActivity, loadCloud, onError]);
+
+  const disconnectCloud = useCallback(async (provider: string) => {
+    setBusy(provider);
+    try {
+      await api.disconnectCloudSyncProvider(provider);
+      await loadCloud();
+    } catch (e) { onError(String(e)); }
+    finally { setBusy(null); }
+  }, [loadCloud, onError]);
+
   return (
     <div className="sv-subpanel">
       <Field label="Sync enabled" hint="When off, edits stay local and no CRDT sidecars are written.">
@@ -634,7 +745,85 @@ function SyncPanel({ value, onSaved, onError }: {
       <Field label="External-edit skew (seconds)" hint="Clock-skew guard for detecting edits made outside the app.">
         <NumberInput value={draft.external_edit_skew_secs} onChange={(n) => setDraft({ ...draft, external_edit_skew_secs: n })} />
       </Field>
+      {draft.crdt_backend !== 'loro' && (
+        <p className="sv-error">Managed cloud sync requires Loro. Git and mounted-folder sync can still be used.</p>
+      )}
       <SaveBar saving={saving} dirty={dirty} onSave={commit} />
+
+      <div className="sv-subhead">Git</div>
+      <div className="sv-provider">
+        <div className="sv-provider-head">
+          <span className="sv-provider-name">{git?.branch ? `Branch: ${git.branch}` : 'Git status'}</span>
+          <button className="sv-btn" onClick={() => loadGit().catch((e) => onError(String(e)))}>Refresh</button>
+        </div>
+        {git?.error && <p className="sv-hint">{git.error}</p>}
+        {git?.available && git.is_repository && (
+          <>
+            <div className="sv-checklist">
+              {git.changed_files.length === 0 && <p className="sv-hint">No changed files.</p>}
+              {git.changed_files.map((file) => (
+                <label key={file.path} className="sv-checkrow">
+                  <input
+                    type="checkbox"
+                    checked={!!selected[file.path]}
+                    onChange={(e) => setSelected((s) => ({ ...s, [file.path]: e.target.checked }))}
+                  />
+                  <span>{file.status || 'changed'}</span>
+                  <code>{file.path}</code>
+                </label>
+              ))}
+            </div>
+            <input
+              className="sv-input"
+              placeholder="Commit message"
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+            />
+            <div className="sv-actions">
+              <button className="sv-btn sv-btn-primary" disabled={busy === 'git-commit' || selectedPaths.length === 0 || !commitMessage.trim()} onClick={() => runGit('commit')}>Commit</button>
+              <button className="sv-btn" disabled={busy === 'git-pull'} onClick={() => runGit('pull')}>Pull</button>
+              <button className="sv-btn" disabled={busy === 'git-push'} onClick={() => runGit('push')}>Push</button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="sv-subhead">File Watch</div>
+      <div className="sv-provider">
+        <div className="sv-provider-head">
+          <span className="sv-provider-name">{watching ? 'Watching local folder' : 'Watcher stopped'}</span>
+          <button className="sv-btn" disabled={busy === 'watch'} onClick={toggleWatch}>{watching ? 'Stop' : 'Start'}</button>
+        </div>
+        <button className="sv-btn" onClick={() => loadActivity().catch((e) => onError(String(e)))}>Refresh activity</button>
+        <div className="sv-activity">
+          {activity.slice(0, 8).map((event) => (
+            <div key={`${event.happened_at}-${event.kind}-${event.path ?? ''}`} className="sv-activity-row">
+              <span>{event.kind}</span>
+              <code>{event.path ?? event.source}</code>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="sv-subhead">Managed Cloud</div>
+      <div className="sv-providers">
+        {cloudProviders.map((provider) => {
+          const status = cloudStatus(provider.provider);
+          return (
+            <div key={provider.provider} className="sv-provider">
+              <div className="sv-provider-head">
+                <span className="sv-provider-name">{provider.display_name}</span>
+                <span className={`sv-pill ${status?.connected ? 'ok' : ''}`}>{status?.connected ? 'Connected' : 'Not connected'}</span>
+              </div>
+              <div className="sv-actions">
+                <button className="sv-btn" disabled={busy === provider.provider} onClick={() => connectCloud(provider.provider)}>Connect</button>
+                <button className="sv-btn sv-btn-primary" disabled={busy === provider.provider || !status?.connected || draft.crdt_backend !== 'loro'} onClick={() => syncCloud(provider.provider)}>Sync now</button>
+                <button className="sv-btn" disabled={busy === provider.provider || !status?.connected} onClick={() => disconnectCloud(provider.provider)}>Disconnect</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

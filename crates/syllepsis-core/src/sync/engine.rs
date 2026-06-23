@@ -452,14 +452,19 @@ mod tests {
     }
 
     fn two_devices() -> (tempfile::TempDir, Device, Device) {
-        two_devices_with(SyncConfig::default())
+        two_devices_with(SyncConfig {
+            crdt_backend: crate::crdt::LWW_BACKEND.to_string(),
+            ..SyncConfig::default()
+        })
     }
 
     fn two_devices_with(cfg: SyncConfig) -> (tempfile::TempDir, Device, Device) {
         let tmp = tempfile::tempdir().unwrap();
         let remote = tmp.path().join("remote");
         let a = Book::create(tmp.path().join("device-a"), "Shared").unwrap();
-        let b = Book::create(tmp.path().join("device-b"), "Shared").unwrap();
+        let mut b = Book::create(tmp.path().join("device-b"), "Shared").unwrap();
+        b.metadata.book_id = a.metadata.book_id.clone();
+        b.save_metadata().unwrap();
         (
             tmp,
             Device {
@@ -646,7 +651,7 @@ mod tests {
 
         // The sidecar now reflects the external edit (reconcile folded markdown → CRDT).
         let sidecar = crate::storage::layout::crdt_sidecar_path(a.book.root.as_path(), &note.id);
-        let backend = crate::crdt::select_crdt_backend(&SyncConfig::default());
+        let backend = crate::crdt::select_crdt_backend(&a.cfg);
         let actor = actor_id_for(a.book.root.as_path()).unwrap();
         let doc = backend
             .load_document(&actor, &std::fs::read(&sidecar).unwrap())

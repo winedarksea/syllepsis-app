@@ -8,11 +8,13 @@
 
 ## Cloud Storage Providers
 
-Initial support: **Google Drive** and **GitHub**. Both can be active simultaneously. Users may in the future have other cloud storage and other git (say GitLab) options, but only ever one cloud drive, one git cloud. If both are present, git is treated as the lower priority target (not tracking every edit).
+There are three main ways to do cloud sync here: git, file watching (no active management), and managed cloud sync.
+Users could use both git and either file watching or a cloud drive for sync at the same time (or just one of the two, or neither). Generally the idea is git is used for public publishing (with gitignore to hide private notes) or for more formal "version" release cadences, while a cloud drive sync is for more real time sync, shared between devices.
 
 Example configuration:
 - **Google Drive**: full backup; anyone with Drive permissions can access (aimed at 1–2 people, some read-only).
 - **GitHub**: public-facing publish of non-private notes (private notes excluded via gitignore). The GitHub repo is the public version of the book.
+- **File Watching with File Sync and Share**: Users can chose to create a book in a folder that is already cloud managed (ie by Google Drive Desktop App, Apple Cloud, etc). In this case, we don't push or pull anything from the app, however we track with notify updates to the local folder, and use Loro to manage the conflicts, automatically cleaning them up. We will still have a UI view here that should track and show external updates and conflicts, so users can be aware of what is happening here.
 
 Notes marked as **private** are excluded from the GitHub publish but included in the Google Drive backup.
 
