@@ -462,3 +462,36 @@ select.sv-input { min-width: 180px; cursor: pointer; }
   background: var(--surface-2, #f0f0f0);
   color: var(--text-2, #555);
 }
+
+/* ── Delete notebook (danger zone) ─────────────────────────────────────────── */
+.sv-delete-book {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.sv-delete-book-warning {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-error) 8%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-error) 35%, var(--color-border));
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+}
+
+.sv-delete-book-input {
+  min-width: 260px;
+}
+
+.sv-btn-danger {
+  color: var(--color-text-inverse);
+  background: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.sv-btn-danger:hover:not(:disabled) {
+  color: var(--color-text-inverse);
+  filter: brightness(0.94);
+  border-color: var(--color-error);
+}

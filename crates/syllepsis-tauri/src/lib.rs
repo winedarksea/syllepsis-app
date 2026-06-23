@@ -124,6 +124,7 @@ pub fn run() {
             upload_book_to_cloud,
             open_cloud_book,
             sync_managed_cloud_now,
+            delete_current_book,
             // spatial worlds (Phase 5)
             list_worlds,
             create_world,

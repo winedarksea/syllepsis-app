@@ -11,7 +11,7 @@ import type {
   BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig,
   GitStatusDto, GitCommandReport, SyncActivityEvent, OperationalActivitySummary, NoteSyncActivity,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, CloudSyncConnectStart, CloudBookSummary,
-  ManagedCloudReport,
+  ManagedCloudReport, DeleteCurrentBookReport,
   World, Overlay, LookupEntry, ResolvedLocation,
   LockMode, PolicyOverview,
   ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
@@ -214,6 +214,8 @@ export const api = {
     invoke<ManagedCloudReport>('sync_managed_cloud_now', { provider }),
   openCloudBook: (provider: string, bookId: string, parentPath: string) =>
     invoke<void>('open_cloud_book', { provider, bookId, parentPath }),
+  deleteCurrentBook: (expectedBookName: string) =>
+    invoke<DeleteCurrentBookReport>('delete_current_book', { expectedBookName }),
 
   // Style cards
   listStyleCards: () => invoke<StyleCard[]>('list_style_cards'),

@@ -2,6 +2,7 @@
 //! patch-log sync.
 
 use std::collections::HashMap;
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -12,7 +13,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, State};
+use tauri::{AppHandle, Emitter, State};
 
 use syllepsis_core::app::git as git_app;
 use syllepsis_core::app::sync as app;
@@ -37,6 +38,8 @@ const OAUTH_CALLBACK_PATH: &str = "/oauth-callback";
 const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 const ACTIVITY_RETENTION_DAYS: i64 = 90;
 const WATCH_ACTIVITY_DEBOUNCE: Duration = Duration::from_millis(750);
+const MANAGED_CLOUD_STATE_FILE_PREFIX: &str = "managed-cloud-";
+const MANAGED_CLOUD_STATE_FILE_SUFFIX: &str = ".json";
 
 macro_rules! with_book {
     ($state:expr, $book:ident, $body:expr) => {{
@@ -357,6 +360,22 @@ pub struct CloudBookSummary {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteBookCloudCleanupOutcome {
+    pub provider: String,
+    pub attempted: bool,
+    pub connected: bool,
+    pub deleted_object_count: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteCurrentBookReport {
+    pub book_name: String,
+    pub book_path: String,
+    pub cloud_cleanup: Vec<DeleteBookCloudCleanupOutcome>,
+}
+
 #[tauri::command]
 pub fn cloud_sync_provider_descriptors() -> Vec<CloudSyncProviderDescriptor> {
     cloud_descriptors()
@@ -545,6 +564,45 @@ pub fn sync_managed_cloud_now(
 }
 
 #[tauri::command]
+pub fn delete_current_book(
+    app: AppHandle,
+    state: State<AppState>,
+    expected_book_name: String,
+) -> Result<DeleteCurrentBookReport, String> {
+    let (book_name, book_path, book_id, book_root) = {
+        let guard = state.book.lock().unwrap();
+        let book = guard
+            .as_ref()
+            .ok_or_else(|| "no book is open".to_string())?;
+        (
+            book.metadata.name.clone(),
+            book.root.display().to_string(),
+            book.metadata.book_id.clone(),
+            book.root.clone(),
+        )
+    };
+
+    if expected_book_name != book_name {
+        return Err("confirmation did not match the current notebook name".to_string());
+    }
+
+    let cloud_cleanup = delete_managed_cloud_data_for_connected_providers(&book_root, &book_id);
+
+    *state.file_watcher.lock().unwrap() = None;
+    crate::commands::book::forget_tracked_book(app, book_path.clone())?;
+    fs::remove_dir_all(&book_root)
+        .map_err(|error| format!("delete notebook folder from disk: {error}"))?;
+    *state.book.lock().unwrap() = None;
+    state.invalidate_llm_service();
+
+    Ok(DeleteCurrentBookReport {
+        book_name,
+        book_path,
+        cloud_cleanup,
+    })
+}
+
+#[tauri::command]
 pub fn open_cloud_book(
     state: State<AppState>,
     provider: String,
@@ -673,6 +731,98 @@ fn opendal_store_for(provider: &str) -> Result<OpenDalManagedObjectStore, String
     opendal::blocking::Operator::new(op)
         .map(|op| OpenDalManagedObjectStore { op })
         .map_err(|e| format!("create blocking OpenDAL operator: {e}"))
+}
+
+fn delete_managed_cloud_data_for_connected_providers(
+    book_root: &Path,
+    book_id: &str,
+) -> Vec<DeleteBookCloudCleanupOutcome> {
+    let providers = managed_cloud_state_providers_for_book(book_root);
+    let store = KeyringSyncCredentialStore;
+    providers
+        .into_iter()
+        .map(|provider| {
+            let connected = match token_for(&store, &provider) {
+                Ok(token) => token.is_some(),
+                Err(error) => {
+                    return DeleteBookCloudCleanupOutcome {
+                        provider,
+                        attempted: false,
+                        connected: false,
+                        deleted_object_count: 0,
+                        error: Some(error),
+                    }
+                }
+            };
+            if !connected {
+                return DeleteBookCloudCleanupOutcome {
+                    provider,
+                    attempted: false,
+                    connected: false,
+                    deleted_object_count: 0,
+                    error: None,
+                };
+            }
+            match delete_cloud_book_prefix(&provider, book_id) {
+                Ok(deleted_object_count) => DeleteBookCloudCleanupOutcome {
+                    provider,
+                    attempted: true,
+                    connected: true,
+                    deleted_object_count,
+                    error: None,
+                },
+                Err(error) => DeleteBookCloudCleanupOutcome {
+                    provider,
+                    attempted: true,
+                    connected: true,
+                    deleted_object_count: 0,
+                    error: Some(error),
+                },
+            }
+        })
+        .collect()
+}
+
+fn managed_cloud_state_providers_for_book(book_root: &Path) -> Vec<String> {
+    let mut providers = fs::read_dir(layout::sync_dir(book_root))
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(Result::ok))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter_map(|name| {
+            if !name.starts_with(MANAGED_CLOUD_STATE_FILE_PREFIX)
+                || !name.ends_with(MANAGED_CLOUD_STATE_FILE_SUFFIX)
+            {
+                return None;
+            }
+            let provider = name
+                .trim_start_matches(MANAGED_CLOUD_STATE_FILE_PREFIX)
+                .trim_end_matches(MANAGED_CLOUD_STATE_FILE_SUFFIX)
+                .trim();
+            if provider.is_empty() {
+                None
+            } else {
+                Some(provider.to_string())
+            }
+        })
+        .collect::<Vec<_>>();
+    providers.sort();
+    providers.dedup();
+    providers
+}
+
+fn delete_cloud_book_prefix(provider: &str, book_id: &str) -> Result<usize, String> {
+    let mut store = opendal_store_for(provider)?;
+    let prefix = format!("syllepsis-sync/books/{book_id}/");
+    let entries = store.list(&prefix).map_err(|error| error.to_string())?;
+    let mut deleted = 0_usize;
+    for entry in entries {
+        store
+            .delete(&entry.path)
+            .map_err(|error| format!("delete managed cloud object {}: {error}", entry.path))?;
+        deleted += 1;
+    }
+    Ok(deleted)
 }
 
 struct CloudCredentials {
@@ -1114,6 +1264,8 @@ fn safe_folder_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::{create_dir_all, write};
+    use tempfile::tempdir;
 
     #[test]
     fn watch_filter_ignores_local_sidecar_and_scratch_paths() {
@@ -1202,5 +1354,58 @@ mod tests {
         assert_ne!(ports[0], ports[1]);
         assert_ne!(ports[0], ports[2]);
         assert_ne!(ports[1], ports[2]);
+    }
+
+    #[test]
+    fn managed_cloud_provider_discovery_reads_state_files() {
+        let temp = tempdir().unwrap();
+        let sync_dir = layout::sync_dir(temp.path());
+        create_dir_all(&sync_dir).unwrap();
+        write(sync_dir.join("managed-cloud-google_drive.json"), b"{}").unwrap();
+        write(sync_dir.join("managed-cloud-dropbox.json"), b"{}").unwrap();
+        write(sync_dir.join("managed-cloud-dropbox.json.bak"), b"{}").unwrap();
+        write(sync_dir.join("activity.jsonl"), b"{}").unwrap();
+
+        let providers = managed_cloud_state_providers_for_book(temp.path());
+
+        assert_eq!(providers, vec!["dropbox", "google_drive"]);
+    }
+
+    #[test]
+    fn delete_cloud_book_prefix_cleans_all_matching_objects() {
+        let mut store = syllepsis_core::sync::MemoryManagedObjectStore::default();
+        store
+            .put("syllepsis-sync/books/book-1/manifest.json", b"{}")
+            .unwrap();
+        store
+            .put(
+                "syllepsis-sync/books/book-1/notes/note-a/patches/1.loro_patch",
+                b"x",
+            )
+            .unwrap();
+        store
+            .put(
+                "syllepsis-sync/books/book-2/notes/note-b/patches/1.loro_patch",
+                b"y",
+            )
+            .unwrap();
+
+        let prefix = "syllepsis-sync/books/book-1/";
+        let entries = store.list(prefix).unwrap();
+        for entry in entries {
+            store.delete(&entry.path).unwrap();
+        }
+
+        assert!(store
+            .list("syllepsis-sync/books/book-1/")
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .list("syllepsis-sync/books/book-2/")
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }

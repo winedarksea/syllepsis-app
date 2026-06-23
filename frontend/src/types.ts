@@ -513,6 +513,20 @@ export interface ManagedCloudReport {
   skipped_notes: number;
 }
 
+export interface DeleteBookCloudCleanupOutcome {
+  provider: string;
+  attempted: boolean;
+  connected: boolean;
+  deleted_object_count: number;
+  error?: string;
+}
+
+export interface DeleteCurrentBookReport {
+  book_name: string;
+  book_path: string;
+  cloud_cleanup: DeleteBookCloudCleanupOutcome[];
+}
+
 export interface BookConfig {
   markdown: MarkdownConfig;
   summary: SummaryConfig;

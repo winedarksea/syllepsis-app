@@ -16,6 +16,7 @@ import type {
   BuildInfo, BookConfig, CloudLlmProviderDescriptor, CloudLlmProviderStatus,
   PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, ModelRef,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, PluginDescriptor,
+  DeleteCurrentBookReport,
 } from '../types';
 import {
   allThemes, themeById, themeSwatches, themeToJson, normalizeImportedTheme, BUILTIN_THEMES,
@@ -36,6 +37,7 @@ const SUBTITLES = {
   book:       { icelandic: 'Bókarstillingar', latin: 'Codex' },
   plugins:    { icelandic: 'Viðbætur',        latin: 'Additamenta' },
   about:      { icelandic: 'Um Syllepsis',    latin: 'De Syllepsi' },
+  delete:     { icelandic: 'Eyða bók',        latin: 'Delere' },
 } as const;
 
 const THEME_OPTIONS: { value: ThemePref; icon: string; label: string }[] = [
@@ -53,7 +55,7 @@ interface Props {
 }
 
 export function SettingsView({ launchMode = false }: Props) {
-  const { book, themePref, setThemePref } = useStore();
+  const { book, themePref, setThemePref, closeBook } = useStore();
   const { flavorLang } = useThemeStyle();
   const [build, setBuild] = useState<BuildInfo | null>(null);
   const [config, setConfig] = useState<BookConfig | null>(null);
@@ -248,6 +250,32 @@ export function SettingsView({ launchMode = false }: Props) {
             </div>
           </div>
         </Section>
+
+        {book && (
+          <Section title="Delete Book" subtitle={SUBTITLES.delete[flavorLang]}>
+            <DeleteBookPanel
+              bookName={book.name}
+              onDeleted={(report) => {
+                closeBook();
+                const failures = report.cloud_cleanup.filter((outcome) => outcome.error);
+                if (failures.length === 0) {
+                  const successful = report.cloud_cleanup.filter((outcome) => outcome.attempted).length;
+                  if (successful > 0) {
+                    flash(`Deleted "${report.book_name}". Cloud cleanup completed for ${successful} provider${successful === 1 ? '' : 's'}.`);
+                  } else {
+                    flash(`Deleted "${report.book_name}".`);
+                  }
+                  return;
+                }
+                const failureText = failures
+                  .map((failure) => `${failure.provider}: ${failure.error}`)
+                  .join(' | ');
+                setError(`Deleted "${report.book_name}" locally. Cloud cleanup failed for ${failures.length} provider${failures.length === 1 ? '' : 's'}: ${failureText}`);
+              }}
+              onError={setError}
+            />
+          </Section>
+        )}
       </div>
     </div>
   );
@@ -841,5 +869,64 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (b: boolean
     >
       <span className="sv-toggle-knob" />
     </button>
+  );
+}
+
+function DeleteBookPanel({
+  bookName,
+  onDeleted,
+  onError,
+}: {
+  bookName: string;
+  onDeleted: (report: DeleteCurrentBookReport) => void;
+  onError: (message: string) => void;
+}) {
+  const [confirmation, setConfirmation] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const canDelete = confirmation === bookName;
+
+  const deleteBook = useCallback(async () => {
+    if (!canDelete) return;
+    setDeleting(true);
+    try {
+      const report = await api.deleteCurrentBook(bookName);
+      onDeleted(report);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setDeleting(false);
+    }
+  }, [bookName, canDelete, onDeleted, onError]);
+
+  return (
+    <div className="sv-delete-book">
+      <p className="sv-delete-book-warning">
+        This permanently deletes the notebook folder from disk and removes it from the launcher.
+        Managed cloud data is cleaned up for connected providers associated with this notebook.
+      </p>
+      <Field
+        label="Type notebook name to confirm"
+        hint={`Type exactly: ${bookName}`}
+      >
+        <input
+          className="sv-input sv-delete-book-input"
+          value={confirmation}
+          onChange={(event) => setConfirmation(event.target.value)}
+          placeholder={bookName}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+        />
+      </Field>
+      <div className="sv-savebar">
+        <button
+          className="sv-btn sv-btn-danger"
+          onClick={deleteBook}
+          disabled={!canDelete || deleting}
+        >
+          {deleting ? 'Deleting…' : 'Delete notebook'}
+        </button>
+      </div>
+    </div>
   );
 }
