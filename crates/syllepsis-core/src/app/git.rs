@@ -49,6 +49,10 @@ pub fn git_stage_commit(
     git_stage_commit_with_bin(book, "git", selected_paths, message)
 }
 
+pub fn git_init(book: &Book) -> CoreResult<GitCommandReport> {
+    run_git_report(&book.root, "git", &["init"])
+}
+
 pub fn git_push(book: &Book) -> CoreResult<GitCommandReport> {
     run_git_report(&book.root, "git", &["push"])
 }

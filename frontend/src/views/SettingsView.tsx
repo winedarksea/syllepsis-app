@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { listen } from '@tauri-apps/api/event';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import type { ThemePref } from '../lib/store';
@@ -667,10 +668,31 @@ function SyncPanel({ value, onSaved, onError }: {
     loadCloud().catch((e) => onError(String(e)));
   }, [loadActivity, loadCloud, loadGit, onError]);
 
+  // Listen for the OS deep-link redirect after the user authorizes in their browser.
+  // The tauri-plugin-deep-link fires "deep-link://new-url" with an array of URL strings.
+  // Keep the Sync panel open while authorizing so this listener is active.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<string[]>('deep-link://new-url', async (event) => {
+      for (const url of event.payload) {
+        if (!url.startsWith('syllepsis://oauth-callback')) continue;
+        try {
+          const status = await api.handleCloudSyncOauthCallback(url);
+          setCloudStatuses((prev) =>
+            prev.map((s) => (s.provider === status.provider ? status : s))
+          );
+        } catch (e) {
+          onError(String(e));
+        }
+      }
+    }).then((u) => { unlisten = u; });
+    return () => { unlisten?.(); };
+  }, [onError]);
+
   const selectedPaths = Object.entries(selected).filter(([, v]) => v).map(([path]) => path);
   const cloudStatus = (provider: string) => cloudStatuses.find((status) => status.provider === provider);
 
-  const runGit = useCallback(async (action: 'commit' | 'push' | 'pull') => {
+  const runGit = useCallback(async (action: 'commit' | 'push' | 'pull' | 'init') => {
     setBusy(`git-${action}`);
     try {
       if (action === 'commit') {
@@ -678,8 +700,10 @@ function SyncPanel({ value, onSaved, onError }: {
         setCommitMessage('');
       } else if (action === 'push') {
         await api.gitPush();
-      } else {
+      } else if (action === 'pull') {
         await api.gitPull();
+      } else {
+        await api.gitInit();
       }
       await loadGit();
     } catch (e) { onError(String(e)); }
@@ -757,6 +781,11 @@ function SyncPanel({ value, onSaved, onError }: {
           <button className="sv-btn" onClick={() => loadGit().catch((e) => onError(String(e)))}>Refresh</button>
         </div>
         {git?.error && <p className="sv-hint">{git.error}</p>}
+        {git?.available && !git.is_repository && (
+          <div className="sv-actions">
+            <button className="sv-btn sv-btn-primary" disabled={busy === 'git-init'} onClick={() => runGit('init')}>Initialize repository</button>
+          </div>
+        )}
         {git?.available && git.is_repository && (
           <>
             <div className="sv-checklist">
@@ -806,6 +835,7 @@ function SyncPanel({ value, onSaved, onError }: {
       </div>
 
       <div className="sv-subhead">Managed Cloud</div>
+      <p className="sv-hint">After clicking Connect, authorize in your browser then return here — keep this panel open so the callback is received.</p>
       <div className="sv-providers">
         {cloudProviders.map((provider) => {
           const status = cloudStatus(provider.provider);

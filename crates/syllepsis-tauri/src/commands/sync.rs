@@ -22,6 +22,7 @@ const SYNC_KEYCHAIN_SERVICE: &str = "syllepsis.sync";
 const ACCESS_TOKEN_FIELD: &str = "access-token";
 const REFRESH_TOKEN_FIELD: &str = "refresh-token";
 const OAUTH_STATE_FIELD: &str = "oauth-state";
+const CODE_VERIFIER_FIELD: &str = "code-verifier";
 const OAUTH_REDIRECT_URI: &str = "syllepsis://oauth-callback";
 const ACTIVITY_RETENTION_DAYS: i64 = 90;
 
@@ -61,6 +62,13 @@ pub fn sync_provider_descriptors() -> Vec<SyncProviderDescriptor> {
 pub fn git_status(state: State<AppState>) -> Result<git_app::GitStatusDto, String> {
     with_book!(state, book, {
         git_app::git_status(book).map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
+pub fn git_init(state: State<AppState>) -> Result<git_app::GitCommandReport, String> {
+    with_book!(state, book, {
+        git_app::git_init(book).map_err(|e| e.to_string())
     })
 }
 
@@ -216,10 +224,13 @@ pub fn cloud_sync_provider_statuses() -> Result<Vec<CloudSyncProviderStatus>, St
 pub fn connect_cloud_sync_provider(provider: String) -> Result<CloudSyncConnectStart, String> {
     descriptor_for(&provider)?;
     let state = ulid::Ulid::new().to_string();
+    let verifier = pkce_verifier();
+    let challenge = pkce_challenge(&verifier);
     let mut store = KeyringSyncCredentialStore;
     store.set(&account(&provider, OAUTH_STATE_FIELD), &state)?;
+    store.set(&account(&provider, CODE_VERIFIER_FIELD), &verifier)?;
     Ok(CloudSyncConnectStart {
-        auth_url: oauth_url(&provider, &state)?,
+        auth_url: oauth_url(&provider, &state, &challenge)?,
         redirect_uri: OAUTH_REDIRECT_URI.to_string(),
         provider,
         state,
@@ -237,25 +248,38 @@ pub fn handle_cloud_sync_oauth_callback(
         .unwrap_or_else(|| "google_drive".to_string());
     let descriptor = descriptor_for(&provider)?;
     let mut store = KeyringSyncCredentialStore;
+
     let expected_state = store
         .get(&account(&provider, OAUTH_STATE_FIELD))?
         .ok_or_else(|| "no pending OAuth request for this provider".to_string())?;
-    let state = params
+    let callback_state = params
         .get("state")
         .ok_or_else(|| "OAuth callback did not include state".to_string())?;
-    if state != &expected_state {
+    if callback_state != &expected_state {
         return Err("OAuth callback state did not match the pending request".to_string());
     }
+    store.delete(&account(&provider, OAUTH_STATE_FIELD))?;
+
     if let Some(token) = params.get("refresh_token").or_else(|| params.get("token")) {
+        // Some providers (or manual testing) may deliver a token directly.
         store.set(&account(&provider, REFRESH_TOKEN_FIELD), token)?;
     } else if let Some(code) = params.get("code") {
-        return Err(format!(
-            "received OAuth code {code}; token exchange is not configured because this build has no provider client secret"
-        ));
+        // Standard authorization-code + PKCE flow: exchange the code for tokens.
+        let verifier = store
+            .get(&account(&provider, CODE_VERIFIER_FIELD))?
+            .ok_or_else(|| "no PKCE code verifier found; restart the connect flow".to_string())?;
+        store.delete(&account(&provider, CODE_VERIFIER_FIELD))?;
+        let credentials = exchange_code_for_tokens(&provider, code, &verifier)?;
+        if let Some(access) = credentials.access_token {
+            store.set(&account(&provider, ACCESS_TOKEN_FIELD), &access)?;
+        }
+        if let Some(refresh) = credentials.refresh_token {
+            store.set(&account(&provider, REFRESH_TOKEN_FIELD), &refresh)?;
+        }
     } else {
         return Err("OAuth callback did not include a token or code".to_string());
     }
-    store.delete(&account(&provider, OAUTH_STATE_FIELD))?;
+
     Ok(CloudSyncProviderStatus {
         provider: descriptor.provider,
         display_name: descriptor.display_name,
@@ -557,7 +581,7 @@ fn descriptor_for(provider: &str) -> Result<CloudSyncProviderDescriptor, String>
         .ok_or_else(|| format!("unknown cloud sync provider: {provider}"))
 }
 
-fn oauth_url(provider: &str, state: &str) -> Result<String, String> {
+fn oauth_url(provider: &str, state: &str, pkce_challenge: &str) -> Result<String, String> {
     let descriptor = descriptor_for(provider)?;
     let client_id_env = match provider {
         "google_drive" => "SYLLEPSIS_GOOGLE_DRIVE_CLIENT_ID",
@@ -573,14 +597,106 @@ fn oauth_url(provider: &str, state: &str) -> Result<String, String> {
         "onedrive" => "Files.ReadWrite offline_access",
         _ => "",
     };
+    // Provider-specific extras appended after the shared parameters.
+    let extras = match provider {
+        "google_drive" => "&access_type=offline&prompt=consent",
+        "dropbox" => "&token_access_type=offline",
+        _ => "",
+    };
     Ok(format!(
-        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&access_type=offline&prompt=consent",
+        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256{}",
         descriptor.auth_url_base,
         percent_encode(&client_id),
         percent_encode(OAUTH_REDIRECT_URI),
         percent_encode(scope),
-        percent_encode(state)
+        percent_encode(state),
+        percent_encode(pkce_challenge),
+        extras,
     ))
+}
+
+/// Generate a PKCE code verifier: two concatenated ULIDs give 52 unreserved-alphabet chars,
+/// within the 43-128 range required by RFC 7636.
+fn pkce_verifier() -> String {
+    format!("{}{}", ulid::Ulid::new(), ulid::Ulid::new())
+}
+
+/// Compute the PKCE S256 code challenge: BASE64URL(SHA-256(verifier)), no padding.
+fn pkce_challenge(verifier: &str) -> String {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(verifier.as_bytes());
+    URL_SAFE_NO_PAD.encode(hash)
+}
+
+fn token_endpoint(provider: &str) -> Result<&'static str, String> {
+    match provider {
+        "google_drive" => Ok("https://oauth2.googleapis.com/token"),
+        "dropbox" => Ok("https://api.dropboxapi.com/oauth2/token"),
+        "onedrive" => Ok("https://login.microsoftonline.com/common/oauth2/v2.0/token"),
+        other => Err(format!("unknown cloud sync provider: {other}")),
+    }
+}
+
+/// Exchange an OAuth authorization code for access/refresh tokens using PKCE (no client secret
+/// required for public/desktop app registrations).
+fn exchange_code_for_tokens(
+    provider: &str,
+    code: &str,
+    verifier: &str,
+) -> Result<CloudCredentials, String> {
+    let client_id_env = match provider {
+        "google_drive" => "SYLLEPSIS_GOOGLE_DRIVE_CLIENT_ID",
+        "dropbox" => "SYLLEPSIS_DROPBOX_CLIENT_ID",
+        "onedrive" => "SYLLEPSIS_ONEDRIVE_CLIENT_ID",
+        other => return Err(format!("unknown cloud sync provider: {other}")),
+    };
+    let client_id = std::env::var(client_id_env)
+        .map_err(|_| format!("{client_id_env} is not configured for OAuth"))?;
+    let endpoint = token_endpoint(provider)?;
+
+    // Build an application/x-www-form-urlencoded body without the `form` reqwest feature.
+    let body = format!(
+        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
+        percent_encode(code),
+        percent_encode(OAUTH_REDIRECT_URI),
+        percent_encode(&client_id),
+        percent_encode(verifier),
+    );
+    let response = reqwest::blocking::Client::new()
+        .post(endpoint)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .map_err(|e| format!("token exchange request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("token exchange returned {status}: {body}"));
+    }
+    let json: serde_json::Value = response
+        .json()
+        .map_err(|e| format!("token exchange response parse failed: {e}"))?;
+
+    let access_token = json
+        .get("access_token")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let refresh_token = json
+        .get("refresh_token")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+
+    if access_token.is_none() && refresh_token.is_none() {
+        return Err(format!(
+            "token exchange succeeded but returned no token: {json}"
+        ));
+    }
+    Ok(CloudCredentials {
+        access_token,
+        refresh_token,
+    })
 }
 
 fn parse_query_params(url: &str) -> std::collections::BTreeMap<String, String> {

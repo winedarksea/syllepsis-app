@@ -98,6 +98,7 @@ pub fn run() {
             sync_status,
             sync_provider_descriptors,
             git_status,
+            git_init,
             git_stage_commit,
             git_push,
             git_pull,

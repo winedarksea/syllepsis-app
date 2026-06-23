@@ -149,10 +149,16 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
         let mut report = ManagedCloudReport::default();
         let mut state = ManagedCloudSyncState::load(&self.book.root, &self.provider)?;
 
+        // Reconstruct notes that exist in cloud but not locally, seeding proper Loro history.
         self.reconstruct_remote_only_notes(&actor, &mut state, &mut report)?;
+        // Bring local markdown changes into CRDT sidecars before diffing.
         self.reconcile_local_notes_to_sidecars(&actor)?;
-        self.apply_remote_patches(&actor, &mut state, &mut report)?;
+        // Upload local ops BEFORE downloading remote ones: keeps exported_version_vectors clean
+        // and prevents re-uploading remote ops that were just merged into the local doc.
         self.upload_local_patches(&actor, &mut state, &mut report)?;
+        // Merge remote patches in; the exported VV is advanced to include the remote frontier so
+        // the next upload step only sends genuinely new local ops.
+        self.apply_remote_patches(&actor, &mut state, &mut report)?;
         self.upload_manifest(&state)?;
 
         state.save(&self.book.root)?;
@@ -185,11 +191,16 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
             if !sidecar.exists() {
                 continue;
             }
-            let snapshot_path = snapshot_path(self.book.metadata.book_id.as_str(), &ulid);
+            let snap_path = snapshot_path(self.book.metadata.book_id.as_str(), &ulid);
             let snapshot = std::fs::read(&sidecar)?;
-            self.store.put(&snapshot_path, &snapshot)?;
-            state.latest_snapshots.insert(ulid, snapshot_path.clone());
-            report.uploaded_snapshots.push(snapshot_path);
+            self.store.put(&snap_path, &snapshot)?;
+            state.latest_snapshots.insert(ulid.clone(), snap_path.clone());
+            report.uploaded_snapshots.push(snap_path);
+            // Delete superseded patches so cloud storage doesn't grow unboundedly.
+            for entry in self.patch_entries(&ulid)? {
+                let _ = self.store.delete(&entry.path);
+                state.seen_patches.remove(&entry.path);
+            }
         }
         self.upload_manifest(&state)?;
         state.save(&self.book.root)?;
@@ -226,36 +237,55 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
             if local_ulids.contains(&ulid) {
                 continue;
             }
-            let mut note = record.note.clone();
-            note.body =
-                self.remote_note_text(actor, &ulid, record.latest_snapshot_path.as_deref())?;
-            self.book.save_note(&note)?;
-            report
-                .reconstructed_notes
-                .push(note.id.as_str().to_string());
-            if let Some(snapshot) = record.latest_snapshot_path {
-                state.latest_snapshots.insert(ulid, snapshot);
-            }
+            self.reconstruct_note_from_cloud(actor, &record, &ulid, state, report)?;
         }
         Ok(())
     }
 
-    fn remote_note_text(
+    /// Download a note that exists only in the cloud, saving both the markdown and a proper Loro
+    /// sidecar. Using the cloud Loro history rather than starting a fresh local doc prevents the
+    /// two histories from being treated as concurrent and producing duplicated text on merge.
+    fn reconstruct_note_from_cloud(
         &mut self,
         actor: &ActorId,
+        record: &CloudNoteRecord,
         ulid: &str,
-        snapshot_path: Option<&str>,
-    ) -> CoreResult<String> {
+        state: &mut ManagedCloudSyncState,
+        report: &mut ManagedCloudReport,
+    ) -> CoreResult<()> {
         let backend = select_crdt_backend(&self.book.config.sync);
-        let mut doc = if let Some(path) = snapshot_path {
+        let mut doc = if let Some(path) = &record.latest_snapshot_path {
             backend.load_document(actor, &self.store.get(path)?)?
         } else {
             backend.new_document(actor, "")
         };
-        for entry in self.patch_entries(ulid)? {
+        let patch_entries = self.patch_entries(ulid)?;
+        for entry in &patch_entries {
             doc.import_updates(&self.store.get(&entry.path)?)?;
+            state.seen_patches.insert(entry.path.clone());
         }
-        Ok(doc.text())
+        let mut note = record.note.clone();
+        note.body = doc.text();
+        self.book.save_note(&note)?;
+
+        // Save the Loro sidecar with the cloud history so reconcile sees it as already up-to-date
+        // and upload_local_patches sees no new local ops to emit.
+        let sidecar = layout::crdt_sidecar_path(&self.book.root, &note.id);
+        if let Some(parent) = sidecar.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&sidecar, doc.snapshot()?)?;
+
+        // Mark the cloud VV as already exported: these ops came from the cloud, no need to
+        // re-upload them.
+        if let Ok(vv) = doc.version_vector_json() {
+            state.exported_version_vectors.insert(ulid.to_string(), vv);
+        }
+        if let Some(snapshot) = &record.latest_snapshot_path {
+            state.latest_snapshots.insert(ulid.to_string(), snapshot.clone());
+        }
+        report.reconstructed_notes.push(note.id.as_str().to_string());
+        Ok(())
     }
 
     fn reconcile_local_notes_to_sidecars(&self, actor: &ActorId) -> CoreResult<()> {
@@ -306,7 +336,12 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
             if changed {
                 note.body = doc.text();
                 self.book.save_note(&note)?;
-                std::fs::write(sidecar, doc.snapshot()?)?;
+                std::fs::write(&sidecar, doc.snapshot()?)?;
+                // Advance the exported frontier to include the remote peers' ops so the NEXT
+                // upload pass only emits genuinely new local work.
+                if let Ok(vv) = doc.version_vector_json() {
+                    state.exported_version_vectors.insert(ulid, vv);
+                }
             }
         }
         Ok(())
@@ -332,8 +367,15 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
                 .get(&ulid)
                 .map(String::as_str)
                 .unwrap_or(EMPTY_VERSION_VECTOR_JSON);
-            let updates = doc.updates_since_json(previous_vv)?;
             let current_vv = doc.version_vector_json()?;
+            // Skip when the version vector hasn't advanced — more reliable than hashing the
+            // export bytes, which may be non-empty even for a no-op export.
+            if current_vv == previous_vv {
+                report.skipped_notes += 1;
+                continue;
+            }
+            let updates = doc.updates_since_json(previous_vv)?;
+            // Guard against a truly empty export (e.g. backend quirk) to avoid uploading noise.
             if content_revision(&updates) == content_revision(&[]) {
                 state.exported_version_vectors.insert(ulid, current_vv);
                 report.skipped_notes += 1;
@@ -470,6 +512,7 @@ mod tests {
         remote = ManagedCloudSyncEngine::new(&a, remote, "memory")
             .into_store_after_sync()
             .unwrap();
+        // B reconstructs from A's patch, getting A's Loro history (no spurious local op).
         remote = ManagedCloudSyncEngine::new(&b, remote, "memory")
             .into_store_after_sync()
             .unwrap();
@@ -496,9 +539,9 @@ mod tests {
         b.store.refresh().unwrap();
         let final_a = a.store.read_note(&note.id).unwrap().body;
         let final_b = b.store.read_note(&note.id).unwrap().body;
-        assert_eq!(final_a, final_b);
-        assert!(final_a.contains("from-a"));
-        assert!(final_a.contains("from-b"));
+        assert_eq!(final_a, final_b, "both devices must converge to same text");
+        assert!(final_a.contains("from-a"), "A's edit must survive: {final_a:?}");
+        assert!(final_a.contains("from-b"), "B's edit must survive: {final_a:?}");
     }
 
     #[cfg(feature = "loro")]
@@ -520,8 +563,43 @@ mod tests {
         let mut engine = ManagedCloudSyncEngine::new(&b, remote, "memory");
         let first = engine.sync().unwrap();
         let second = engine.sync().unwrap();
-        assert!(!first.downloaded_patches.is_empty());
-        assert!(second.downloaded_patches.is_empty());
+        // First sync reconstructs the note (downloaded via manifest), second is a no-op.
+        assert!(
+            !first.reconstructed_notes.is_empty() || !first.downloaded_patches.is_empty(),
+            "first sync must bring in the remote note"
+        );
+        assert!(second.downloaded_patches.is_empty(), "second sync must not re-download");
+        assert_eq!(second.skipped_notes, 1, "second sync must skip the up-to-date note");
+    }
+
+    #[cfg(feature = "loro")]
+    #[test]
+    fn compact_removes_patches_and_upload_after_is_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = book_at(tmp.path().join("a"));
+        let mut remote = MemoryManagedObjectStore::default();
+        let mut note = a.new_note(ObjectType::Note, "n").unwrap();
+        note.body = "compactable".into();
+        a.save_note(&note).unwrap();
+        remote = ManagedCloudSyncEngine::new(&a, remote, "memory")
+            .into_store_after_sync()
+            .unwrap();
+
+        let patch_prefix = format!(
+            "syllepsis-sync/books/{}/notes/{}/patches/",
+            a.metadata.book_id,
+            note.id.ulid()
+        );
+        let patches_before = remote.list(&patch_prefix).unwrap().len();
+        assert!(patches_before > 0, "must have patches before compaction");
+
+        let mut engine = ManagedCloudSyncEngine::new(&a, remote, "memory");
+        let report = engine.compact().unwrap();
+        assert!(!report.uploaded_snapshots.is_empty());
+        let remote = engine.into_store();
+
+        let patches_after = remote.list(&patch_prefix).unwrap().len();
+        assert_eq!(patches_after, 0, "compact must delete superseded patches");
     }
 
     #[test]

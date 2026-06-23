@@ -178,6 +178,7 @@ export const api = {
 
   // Sync, git, file-watch, managed cloud
   gitStatus: () => invoke<GitStatusDto>('git_status'),
+  gitInit: () => invoke<GitCommandReport>('git_init'),
   gitStageCommit: (selectedPaths: string[], message: string) =>
     invoke<GitCommandReport>('git_stage_commit', { selectedPaths, message }),
   gitPush: () => invoke<GitCommandReport>('git_push'),
