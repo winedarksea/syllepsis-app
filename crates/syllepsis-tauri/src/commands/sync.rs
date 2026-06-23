@@ -1,8 +1,12 @@
 //! Sync commands: mounted-folder sync, git snapshots, file-watch observability, and managed cloud
 //! patch-log sync.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
+use chrono::Utc;
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -10,10 +14,12 @@ use tauri::State;
 use syllepsis_core::app::git as git_app;
 use syllepsis_core::app::sync as app;
 use syllepsis_core::app::sync::SyncStatusDto;
-use syllepsis_core::storage::Book;
+use syllepsis_core::id::NoteId;
+use syllepsis_core::storage::{layout, Book, NoteStore};
 use syllepsis_core::sync::{
-    list_activity, prune_activity, ManagedCloudReport, ManagedCloudSyncEngine, ManagedObjectEntry,
-    ManagedObjectStore, SyncActivityEvent, SyncProviderDescriptor, SyncReport,
+    latest_note_activity, list_activity, prune_activity, summarize_activity, ManagedCloudReport,
+    ManagedCloudSyncEngine, ManagedObjectEntry, ManagedObjectStore, NoteSyncActivity,
+    SyncActivityEvent, SyncActivitySummary, SyncProviderDescriptor, SyncReport,
 };
 
 use crate::state::AppState;
@@ -25,6 +31,7 @@ const OAUTH_STATE_FIELD: &str = "oauth-state";
 const CODE_VERIFIER_FIELD: &str = "code-verifier";
 const OAUTH_REDIRECT_URI: &str = "syllepsis://oauth-callback";
 const ACTIVITY_RETENTION_DAYS: i64 = 90;
+const WATCH_ACTIVITY_DEBOUNCE: Duration = Duration::from_millis(750);
 
 macro_rules! with_book {
     ($state:expr, $book:ident, $body:expr) => {{
@@ -107,6 +114,7 @@ pub fn start_file_watch(state: State<AppState>) -> Result<(), String> {
             .ok_or_else(|| "no book is open".to_string())?
     };
     let watch_root = root.clone();
+    let recent_watch_activity = Arc::new(Mutex::new(HashMap::<String, Instant>::new()));
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         let event = match event {
             Ok(event) => event,
@@ -124,25 +132,21 @@ pub fn start_file_watch(state: State<AppState>) -> Result<(), String> {
             }
         };
         for path in event.paths {
-            if should_ignore_watch_path(&watch_root, &path) {
+            let Some(rel) = watch_activity_path(&watch_root, &path) else {
+                continue;
+            };
+            if should_debounce_watch_activity(&recent_watch_activity, &rel, Instant::now()) {
                 continue;
             }
-            let rel = path
-                .strip_prefix(&watch_root)
-                .ok()
-                .and_then(|p| p.to_str())
-                .map(|p| p.replace('\\', "/"));
-            let kind = if rel
-                .as_deref()
-                .is_some_and(|p| p.contains("conflict") || p.contains("Conflicted copy"))
-            {
-                "conflict_detected"
+            let kind = watch_activity_kind(&rel);
+            let detail = if kind == "conflict_detected" {
+                "conflict copy detected"
             } else {
-                "external_update"
+                "external save detected"
             };
             let _ = syllepsis_core::sync::append_activity(
                 &watch_root,
-                &SyncActivityEvent::new("file_watch", kind, rel, format!("{:?}", event.kind)),
+                &SyncActivityEvent::new("file_watch", kind, Some(rel), detail),
             );
         }
         let _ = prune_activity(&watch_root, ACTIVITY_RETENTION_DAYS);
@@ -166,6 +170,155 @@ pub fn sync_activity(state: State<AppState>) -> Result<Vec<SyncActivityEvent>, S
     with_book!(state, book, {
         prune_activity(&book.root, ACTIVITY_RETENTION_DAYS).map_err(|e| e.to_string())?;
         list_activity(&book.root).map_err(|e| e.to_string())
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationalGitSummary {
+    pub available: bool,
+    pub is_repository: bool,
+    pub branch: Option<String>,
+    pub changed_file_count: usize,
+    pub commit_safe_note_change_count: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationalCloudSummary {
+    pub provider_count: usize,
+    pub connected_provider_count: usize,
+    pub connected_provider_names: Vec<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationalCrdtSummary {
+    pub backend: String,
+    pub sync_enabled: bool,
+    pub note_count: usize,
+    pub sidecar_count: usize,
+    pub loro_sidecar_coverage_percent: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationalActivitySummary {
+    pub activity: SyncActivitySummary,
+    pub git: OperationalGitSummary,
+    pub cloud: OperationalCloudSummary,
+    pub crdt: OperationalCrdtSummary,
+}
+
+#[tauri::command]
+pub fn operational_activity_summary(
+    state: State<AppState>,
+) -> Result<OperationalActivitySummary, String> {
+    with_book!(state, book, {
+        prune_activity(&book.root, ACTIVITY_RETENTION_DAYS).map_err(|e| e.to_string())?;
+        let events = list_activity(&book.root).map_err(|e| e.to_string())?;
+        let activity = summarize_activity(&events, Utc::now());
+        let git = operational_git_summary(book);
+        let cloud = operational_cloud_summary();
+        let crdt = operational_crdt_summary(book).map_err(|e| e.to_string())?;
+        Ok(OperationalActivitySummary {
+            activity,
+            git,
+            cloud,
+            crdt,
+        })
+    })
+}
+
+#[tauri::command]
+pub fn note_sync_activity(
+    state: State<AppState>,
+    note_id: String,
+) -> Result<Option<NoteSyncActivity>, String> {
+    with_book!(state, book, {
+        let note_id = NoteId::parse(&note_id).map_err(|e| e.to_string())?;
+        prune_activity(&book.root, ACTIVITY_RETENTION_DAYS).map_err(|e| e.to_string())?;
+        let events = list_activity(&book.root).map_err(|e| e.to_string())?;
+        Ok(latest_note_activity(&events, &note_id, Utc::now()))
+    })
+}
+
+fn operational_git_summary(book: &Book) -> OperationalGitSummary {
+    match git_app::git_status(book) {
+        Ok(status) => OperationalGitSummary {
+            available: status.available,
+            is_repository: status.is_repository,
+            branch: status.branch,
+            changed_file_count: status.changed_files.len(),
+            commit_safe_note_change_count: status
+                .changed_files
+                .iter()
+                .filter(|file| file.stage_by_default)
+                .count(),
+            error: status.error,
+        },
+        Err(error) => OperationalGitSummary {
+            available: false,
+            is_repository: false,
+            branch: None,
+            changed_file_count: 0,
+            commit_safe_note_change_count: 0,
+            error: Some(error.to_string()),
+        },
+    }
+}
+
+fn operational_cloud_summary() -> OperationalCloudSummary {
+    match cloud_sync_provider_statuses() {
+        Ok(statuses) => OperationalCloudSummary {
+            provider_count: statuses.len(),
+            connected_provider_count: statuses.iter().filter(|status| status.connected).count(),
+            connected_provider_names: statuses
+                .into_iter()
+                .filter(|status| status.connected)
+                .map(|status| status.display_name)
+                .collect(),
+            error: None,
+        },
+        Err(error) => OperationalCloudSummary {
+            provider_count: cloud_descriptors().len(),
+            connected_provider_count: 0,
+            connected_provider_names: Vec::new(),
+            error: Some(error),
+        },
+    }
+}
+
+fn operational_crdt_summary(
+    book: &Book,
+) -> syllepsis_core::error::CoreResult<OperationalCrdtSummary> {
+    let note_count = book
+        .store
+        .read_all_notes()?
+        .into_iter()
+        .filter(|note| note.metadata.lifecycle.marked_for_deletion_at.is_none())
+        .count();
+    let sidecar_count = std::fs::read_dir(layout::crdt_dir(&book.root))
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(Result::ok))
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .and_then(|extension| extension.to_str())
+                == Some(layout::CRDT_EXTENSION)
+        })
+        .count();
+    let loro_sidecar_coverage_percent = if note_count == 0 {
+        100
+    } else {
+        ((sidecar_count.min(note_count) * 100) / note_count) as u8
+    };
+    Ok(OperationalCrdtSummary {
+        backend: book.config.sync.crdt_backend.clone(),
+        sync_enabled: book.config.sync.enabled,
+        note_count,
+        sidecar_count,
+        loro_sidecar_coverage_percent,
     })
 }
 
@@ -748,12 +901,59 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn should_ignore_watch_path(root: &Path, path: &Path) -> bool {
-    path.strip_prefix(root)
-        .ok()
-        .and_then(|rel| rel.components().next())
-        .and_then(|component| component.as_os_str().to_str())
-        .is_some_and(|first| first == "_sync" || first == "_derived")
+fn watch_activity_path(root: &Path, path: &Path) -> Option<String> {
+    let rel = path.strip_prefix(root).ok()?;
+    let rel = rel.to_str()?.replace('\\', "/");
+    if should_ignore_watch_rel_path(&rel) {
+        None
+    } else {
+        Some(rel)
+    }
+}
+
+fn should_ignore_watch_rel_path(rel: &str) -> bool {
+    let mut components = rel.split('/');
+    let first = components.next().unwrap_or("");
+    if first == "_sync" || first == "_derived" || first == "_crdt" {
+        return true;
+    }
+    rel.split('/').any(is_ignored_watch_file_name)
+}
+
+fn is_ignored_watch_file_name(name: &str) -> bool {
+    name.is_empty()
+        || name.starts_with('.')
+        || name.ends_with('~')
+        || name.ends_with(".tmp")
+        || name.ends_with(".temp")
+        || name.ends_with(".swp")
+        || name.ends_with(".swx")
+        || name.contains(".sb-")
+}
+
+fn should_debounce_watch_activity(
+    recent: &Arc<Mutex<HashMap<String, Instant>>>,
+    rel: &str,
+    now: Instant,
+) -> bool {
+    let mut recent = recent.lock().unwrap();
+    let should_skip = recent
+        .get(rel)
+        .map(|previous| now.duration_since(*previous) < WATCH_ACTIVITY_DEBOUNCE)
+        .unwrap_or(false);
+    recent.insert(rel.to_string(), now);
+    if recent.len() > 256 {
+        recent.retain(|_, previous| now.duration_since(*previous) < WATCH_ACTIVITY_DEBOUNCE);
+    }
+    should_skip
+}
+
+fn watch_activity_kind(rel: &str) -> &'static str {
+    if rel.contains(".conflict-") || rel.contains("Conflicted copy") {
+        "conflict_detected"
+    } else {
+        "external_update"
+    }
 }
 
 fn safe_folder_name(name: &str) -> String {
@@ -768,4 +968,60 @@ fn safe_folder_name(name: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn watch_filter_ignores_local_sidecar_and_scratch_paths() {
+        assert!(should_ignore_watch_rel_path("_sync/activity.jsonl"));
+        assert!(should_ignore_watch_rel_path("_derived/search.db"));
+        assert!(should_ignore_watch_rel_path(
+            "_crdt/01KVR92EBCQZQZ4ENNG2HJQ5KB.crdt"
+        ));
+        assert!(should_ignore_watch_rel_path(
+            "note-tasks-syllepsis-01KVR92EBCQZQZ4ENNG2HJQ5KB.md.sb-1b9b6d00"
+        ));
+        assert!(should_ignore_watch_rel_path(".note.swp"));
+        assert!(should_ignore_watch_rel_path("note.md~"));
+    }
+
+    #[test]
+    fn watch_filter_accepts_visible_note_paths() {
+        assert!(!should_ignore_watch_rel_path(
+            "note-tasks-syllepsis-01KVR92EBCQZQZ4ENNG2HJQ5KB.md"
+        ));
+        assert!(!should_ignore_watch_rel_path("_categories/tasks.md"));
+    }
+
+    #[test]
+    fn watch_kind_detects_real_conflict_copies() {
+        assert_eq!(
+            watch_activity_kind("note-a-01KVR92EBCQZQZ4ENNG2HJQ5KB.conflict-ab12.md"),
+            "conflict_detected"
+        );
+        assert_eq!(
+            watch_activity_kind("note-a-01KVR92EBCQZQZ4ENNG2HJQ5KB.md"),
+            "external_update"
+        );
+    }
+
+    #[test]
+    fn watch_debounce_collapses_repeated_path_events() {
+        let recent = Arc::new(Mutex::new(HashMap::new()));
+        let now = Instant::now();
+        assert!(!should_debounce_watch_activity(&recent, "a.md", now));
+        assert!(should_debounce_watch_activity(
+            &recent,
+            "a.md",
+            now + Duration::from_millis(100)
+        ));
+        assert!(!should_debounce_watch_activity(
+            &recent,
+            "a.md",
+            now + Duration::from_secs(2)
+        ));
+    }
 }

@@ -9,7 +9,7 @@ import type {
   CloudLlmProviderDescriptor, CloudLlmProviderSettings, CloudLlmProviderStatus,
   ModelManifest, ModelCacheStatus, ModelDownloadReport,
   BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig,
-  GitStatusDto, GitCommandReport, SyncActivityEvent,
+  GitStatusDto, GitCommandReport, SyncActivityEvent, OperationalActivitySummary, NoteSyncActivity,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, CloudSyncConnectStart, CloudBookSummary,
   ManagedCloudReport,
   World, Overlay, LookupEntry, ResolvedLocation,
@@ -186,6 +186,10 @@ export const api = {
   startFileWatch: () => invoke<void>('start_file_watch'),
   stopFileWatch: () => invoke<void>('stop_file_watch'),
   syncActivity: () => invoke<SyncActivityEvent[]>('sync_activity'),
+  operationalActivitySummary: () =>
+    invoke<OperationalActivitySummary>('operational_activity_summary'),
+  noteSyncActivity: (noteId: string) =>
+    invoke<NoteSyncActivity | null>('note_sync_activity', { noteId }),
   cloudSyncProviderDescriptors: () =>
     invoke<CloudSyncProviderDescriptor[]>('cloud_sync_provider_descriptors'),
   cloudSyncProviderStatuses: () =>

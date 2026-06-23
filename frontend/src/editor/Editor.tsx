@@ -24,7 +24,7 @@ import { Toolbar } from './Toolbar';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
-import type { NoteDto } from '../types';
+import type { NoteDto, NoteSyncActivity } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import { MetaPanel } from './MetaPanel';
 import { LlmToolsMenu } from './LlmToolsMenu';
@@ -157,6 +157,7 @@ export function Editor({ noteId }: Props) {
   const [revision, setRevision] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [noteActivity, setNoteActivity] = useState<NoteSyncActivity | null>(null);
 
   useEffect(() => {
     setNote(null);
@@ -179,6 +180,11 @@ export function Editor({ noteId }: Props) {
 
   useEffect(() => {
     api.listNotes().then(setAllNotes).catch(() => {});
+  }, [noteId]);
+
+  useEffect(() => {
+    setNoteActivity(null);
+    api.noteSyncActivity(noteId).then(setNoteActivity).catch(() => {});
   }, [noteId]);
 
   const markDirty = useCallback(() => {
@@ -410,6 +416,11 @@ export function Editor({ noteId }: Props) {
         </button>
         <div className="editor-toolbar-center">
           <span className="editor-type-badge">{note.type}</span>
+          {noteActivity && (
+            <span className="editor-activity-chip" title={noteActivity.detail}>
+              {activityLabel(noteActivity.kind)} {formatRelativeTime(noteActivity.happened_at)}
+            </span>
+          )}
         </div>
         <div className="editor-toolbar-actions">
           <LlmToolsMenu noteId={noteId} onApplied={handleProposalApplied} />
@@ -523,4 +534,23 @@ export function Editor({ noteId }: Props) {
       <RelatedCarousel noteId={noteId} />
     </div>
   );
+}
+
+function activityLabel(kind: string) {
+  if (kind === 'external_update') return 'External update';
+  if (kind === 'remote_loro_merge') return 'Remote Loro merge';
+  if (kind === 'conflict_detected') return 'Conflict copy';
+  return kind.replaceAll('_', ' ');
+}
+
+function formatRelativeTime(value: string) {
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return value;
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }

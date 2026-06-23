@@ -76,6 +76,7 @@
   font-weight: 700;
   color: var(--color-heading);
   font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .stats-card-label {
@@ -140,4 +141,36 @@
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   padding-top: var(--sp-1);
+}
+
+.stats-summary-panel {
+  max-width: 760px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.stats-summary-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+}
+
+.stats-summary-row:last-child {
+  border-bottom: none;
+}
+
+.stats-summary-row span {
+  color: var(--color-text-tertiary);
+}
+
+.stats-summary-row strong {
+  min-width: 0;
+  color: var(--color-text);
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }

@@ -285,6 +285,15 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
             state.latest_snapshots.insert(ulid.to_string(), snapshot.clone());
         }
         report.reconstructed_notes.push(note.id.as_str().to_string());
+        append_activity(
+            &self.book.root,
+            &SyncActivityEvent::new(
+                "managed_cloud",
+                "remote_loro_merge",
+                Some(layout::note_filename(&note.id)),
+                "note reconstructed from cloud Loro history",
+            ),
+        )?;
         Ok(())
     }
 
@@ -324,6 +333,7 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
                 backend.new_document(actor, &note.body)
             };
             let mut changed = false;
+            let downloaded_count_before_note = report.downloaded_patches.len();
             for entry in self.patch_entries(&ulid)? {
                 if state.seen_patches.contains(&entry.path) {
                     continue;
@@ -342,6 +352,23 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
                 if let Ok(vv) = doc.version_vector_json() {
                     state.exported_version_vectors.insert(ulid, vv);
                 }
+                append_activity(
+                    &self.book.root,
+                    &SyncActivityEvent::new(
+                        "managed_cloud",
+                        "remote_loro_merge",
+                        Some(layout::note_filename(&note.id)),
+                        format!(
+                            "remote Loro merge applied ({} new patch{})",
+                            report.downloaded_patches.len() - downloaded_count_before_note,
+                            if report.downloaded_patches.len() - downloaded_count_before_note == 1 {
+                                ""
+                            } else {
+                                "es"
+                            }
+                        ),
+                    ),
+                )?;
             }
         }
         Ok(())

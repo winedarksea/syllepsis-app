@@ -22,7 +22,10 @@ mod plan;
 mod provider;
 mod state;
 
-pub use activity::{append_activity, list_activity, prune_activity, SyncActivityEvent};
+pub use activity::{
+    append_activity, latest_note_activity, list_activity, prune_activity, summarize_activity,
+    NoteSyncActivity, SyncActivityEvent, SyncActivitySummary,
+};
 pub use assets::{assign as assign_asset_uuid, AssetRegistry, AssetSidecar};
 pub use engine::{SyncEngine, SyncReport};
 pub use local_folder::{content_revision, LocalFolderSync};

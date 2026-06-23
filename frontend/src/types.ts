@@ -429,6 +429,56 @@ export interface SyncActivityEvent {
   detail: string;
 }
 
+export interface SyncActivitySummary {
+  external_updates_24h: number;
+  external_updates_7d: number;
+  external_note_updates_24h: number;
+  latest_external_update_at?: string;
+  conflict_copies_7d: number;
+  latest_conflict_path?: string;
+  latest_conflict_at?: string;
+  remote_loro_merges_7d: number;
+  latest_remote_loro_merge_note?: string;
+  latest_remote_loro_merge_at?: string;
+}
+
+export interface OperationalGitSummary {
+  available: boolean;
+  is_repository: boolean;
+  branch?: string;
+  changed_file_count: number;
+  commit_safe_note_change_count: number;
+  error?: string;
+}
+
+export interface OperationalCloudSummary {
+  provider_count: number;
+  connected_provider_count: number;
+  connected_provider_names: string[];
+  error?: string;
+}
+
+export interface OperationalCrdtSummary {
+  backend: string;
+  sync_enabled: boolean;
+  note_count: number;
+  sidecar_count: number;
+  loro_sidecar_coverage_percent: number;
+}
+
+export interface OperationalActivitySummary {
+  activity: SyncActivitySummary;
+  git: OperationalGitSummary;
+  cloud: OperationalCloudSummary;
+  crdt: OperationalCrdtSummary;
+}
+
+export interface NoteSyncActivity {
+  kind: string;
+  happened_at: string;
+  detail: string;
+}
+
 export interface CloudSyncProviderDescriptor {
   provider: string;
   display_name: string;

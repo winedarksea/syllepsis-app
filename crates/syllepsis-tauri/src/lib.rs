@@ -105,6 +105,8 @@ pub fn run() {
             start_file_watch,
             stop_file_watch,
             sync_activity,
+            operational_activity_summary,
+            note_sync_activity,
             cloud_sync_provider_descriptors,
             cloud_sync_provider_statuses,
             connect_cloud_sync_provider,

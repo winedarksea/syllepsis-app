@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import type { BookStats } from '../types';
+import type { BookStats, OperationalActivitySummary } from '../types';
 import './StatsView.css';
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -15,8 +15,18 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
   );
 }
 
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stats-summary-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 export function StatsView() {
   const [stats, setStats] = useState<BookStats | null>(null);
+  const [operational, setOperational] = useState<OperationalActivitySummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -24,7 +34,12 @@ export function StatsView() {
     setLoading(true);
     setError(null);
     try {
-      setStats(await api.bookStats());
+      const [bookStats, operationalSummary] = await Promise.all([
+        api.bookStats(),
+        api.operationalActivitySummary(),
+      ]);
+      setStats(bookStats);
+      setOperational(operationalSummary);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -65,6 +80,90 @@ export function StatsView() {
           <StatCard label="With location" value={stats.notes_with_location} />
         </div>
       </section>
+
+      {operational && (
+        <section className="stats-section">
+          <h3 className="stats-section-title">Operational activity</h3>
+          <div className="stats-grid">
+            <StatCard
+              label="External updates"
+              value={operational.activity.external_updates_24h}
+              sub={`${operational.activity.external_updates_7d} unique files in 7 days`}
+            />
+            <StatCard
+              label="Updated notes"
+              value={operational.activity.external_note_updates_24h}
+              sub="external updates in 24 hours"
+            />
+            <StatCard
+              label="Remote Loro merges"
+              value={operational.activity.remote_loro_merges_7d}
+              sub="last 7 days"
+            />
+            <StatCard
+              label="Conflict copies"
+              value={operational.activity.conflict_copies_7d}
+              sub="last 7 days"
+            />
+          </div>
+          <div className="stats-summary-panel">
+            <SummaryRow
+              label="Latest external update"
+              value={formatRelativeTime(operational.activity.latest_external_update_at)}
+            />
+            <SummaryRow
+              label="Latest remote Loro merge"
+              value={formatRelativeTime(operational.activity.latest_remote_loro_merge_at)}
+            />
+            <SummaryRow
+              label="Latest conflict path"
+              value={operational.activity.latest_conflict_path ?? 'None'}
+            />
+          </div>
+        </section>
+      )}
+
+      {operational && (
+        <section className="stats-section">
+          <h3 className="stats-section-title">Repository and sync health</h3>
+          <div className="stats-grid">
+            <StatCard
+              label="Git changes"
+              value={operational.git.changed_file_count}
+              sub={
+                operational.git.is_repository
+                  ? `${operational.git.commit_safe_note_change_count} note files commit-ready`
+                  : 'not a git repository'
+              }
+            />
+            <StatCard
+              label="Git branch"
+              value={operational.git.branch ?? '—'}
+              sub={operational.git.available ? 'repository status' : 'git unavailable'}
+            />
+            <StatCard
+              label="Cloud providers"
+              value={`${operational.cloud.connected_provider_count}/${operational.cloud.provider_count}`}
+              sub={
+                operational.cloud.connected_provider_names.length > 0
+                  ? operational.cloud.connected_provider_names.join(', ')
+                  : 'none connected'
+              }
+            />
+            <StatCard
+              label="CRDT sidecars"
+              value={`${operational.crdt.loro_sidecar_coverage_percent}%`}
+              sub={`${operational.crdt.sidecar_count}/${operational.crdt.note_count} notes, ${operational.crdt.backend}`}
+            />
+          </div>
+          {(operational.git.error || operational.cloud.error) && (
+            <div className="stats-summary-panel">
+              {operational.git.error && <SummaryRow label="Git note" value={operational.git.error} />}
+              {operational.cloud.error && <SummaryRow label="Cloud note" value={operational.cloud.error} />}
+            </div>
+          )}
+        </section>
+      )}
 
       {typeEntries.length > 0 && (
         <section className="stats-section">
@@ -113,4 +212,17 @@ export function StatsView() {
       )}
     </div>
   );
+}
+
+function formatRelativeTime(value?: string) {
+  if (!value) return 'None';
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return value;
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }

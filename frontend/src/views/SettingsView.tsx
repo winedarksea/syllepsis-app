@@ -14,7 +14,7 @@ import type { ThemePref } from '../lib/store';
 import type {
   BuildInfo, BookConfig, CloudLlmProviderDescriptor, CloudLlmProviderStatus,
   PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, ModelRef,
-  GitStatusDto, SyncActivityEvent, CloudSyncProviderDescriptor, CloudSyncProviderStatus,
+  CloudSyncProviderDescriptor, CloudSyncProviderStatus,
 } from '../types';
 import {
   allThemes, themeById, themeSwatches, themeToJson, normalizeImportedTheme, BUILTIN_THEMES,
@@ -216,7 +216,7 @@ export function SettingsView({ launchMode = false }: Props) {
               <div className="sv-about-meta">
                 Version {build?.version ?? '—'} · Built {build?.build_date ?? '—'}
               </div>
-              <p className="sv-about-flavor">A local-first knowledge book — your saga, kept on your own hearth.</p>
+              <p className="sv-about-flavor">A local-first knowledge book</p>
             </div>
           </div>
         </Section>
@@ -628,11 +628,6 @@ function PrivacyPanel({ value, onSaved, onError }: {
 function SyncPanel({ value, onSaved, onError }: {
   value: SyncConfig; onSaved: (v: SyncConfig) => void; onError: (m: string) => void;
 }) {
-  const [git, setGit] = useState<GitStatusDto | null>(null);
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
-  const [commitMessage, setCommitMessage] = useState('');
-  const [watching, setWatching] = useState(false);
-  const [activity, setActivity] = useState<SyncActivityEvent[]>([]);
   const [cloudProviders, setCloudProviders] = useState<CloudSyncProviderDescriptor[]>([]);
   const [cloudStatuses, setCloudStatuses] = useState<CloudSyncProviderStatus[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -642,16 +637,6 @@ function SyncPanel({ value, onSaved, onError }: {
     async (d) => { const updated = await api.updateSyncConfig(d); onSaved(updated.sync); },
     onError,
   );
-
-  const loadGit = useCallback(async () => {
-    const status = await api.gitStatus();
-    setGit(status);
-    setSelected(Object.fromEntries(status.changed_files.map((file) => [file.path, file.stage_by_default])));
-  }, []);
-
-  const loadActivity = useCallback(async () => {
-    setActivity(await api.syncActivity());
-  }, []);
 
   const loadCloud = useCallback(async () => {
     const [descriptors, statuses] = await Promise.all([
@@ -663,10 +648,8 @@ function SyncPanel({ value, onSaved, onError }: {
   }, []);
 
   useEffect(() => {
-    loadGit().catch((e) => onError(String(e)));
-    loadActivity().catch((e) => onError(String(e)));
     loadCloud().catch((e) => onError(String(e)));
-  }, [loadActivity, loadCloud, loadGit, onError]);
+  }, [loadCloud, onError]);
 
   // Listen for the OS deep-link redirect after the user authorizes in their browser.
   // The tauri-plugin-deep-link fires "deep-link://new-url" with an array of URL strings.
@@ -689,41 +672,7 @@ function SyncPanel({ value, onSaved, onError }: {
     return () => { unlisten?.(); };
   }, [onError]);
 
-  const selectedPaths = Object.entries(selected).filter(([, v]) => v).map(([path]) => path);
   const cloudStatus = (provider: string) => cloudStatuses.find((status) => status.provider === provider);
-
-  const runGit = useCallback(async (action: 'commit' | 'push' | 'pull' | 'init') => {
-    setBusy(`git-${action}`);
-    try {
-      if (action === 'commit') {
-        await api.gitStageCommit(selectedPaths, commitMessage);
-        setCommitMessage('');
-      } else if (action === 'push') {
-        await api.gitPush();
-      } else if (action === 'pull') {
-        await api.gitPull();
-      } else {
-        await api.gitInit();
-      }
-      await loadGit();
-    } catch (e) { onError(String(e)); }
-    finally { setBusy(null); }
-  }, [commitMessage, loadGit, onError, selectedPaths]);
-
-  const toggleWatch = useCallback(async () => {
-    setBusy('watch');
-    try {
-      if (watching) {
-        await api.stopFileWatch();
-        setWatching(false);
-      } else {
-        await api.startFileWatch();
-        setWatching(true);
-      }
-      await loadActivity();
-    } catch (e) { onError(String(e)); }
-    finally { setBusy(null); }
-  }, [loadActivity, onError, watching]);
 
   const connectCloud = useCallback(async (provider: string) => {
     setBusy(provider);
@@ -733,15 +682,6 @@ function SyncPanel({ value, onSaved, onError }: {
     } catch (e) { onError(String(e)); }
     finally { setBusy(null); }
   }, [onError]);
-
-  const syncCloud = useCallback(async (provider: string) => {
-    setBusy(provider);
-    try {
-      await api.syncManagedCloudNow(provider);
-      await Promise.all([loadCloud(), loadActivity()]);
-    } catch (e) { onError(String(e)); }
-    finally { setBusy(null); }
-  }, [loadActivity, loadCloud, onError]);
 
   const disconnectCloud = useCallback(async (provider: string) => {
     setBusy(provider);
@@ -774,66 +714,6 @@ function SyncPanel({ value, onSaved, onError }: {
       )}
       <SaveBar saving={saving} dirty={dirty} onSave={commit} />
 
-      <div className="sv-subhead">Git</div>
-      <div className="sv-provider">
-        <div className="sv-provider-head">
-          <span className="sv-provider-name">{git?.branch ? `Branch: ${git.branch}` : 'Git status'}</span>
-          <button className="sv-btn" onClick={() => loadGit().catch((e) => onError(String(e)))}>Refresh</button>
-        </div>
-        {git?.error && <p className="sv-hint">{git.error}</p>}
-        {git?.available && !git.is_repository && (
-          <div className="sv-actions">
-            <button className="sv-btn sv-btn-primary" disabled={busy === 'git-init'} onClick={() => runGit('init')}>Initialize repository</button>
-          </div>
-        )}
-        {git?.available && git.is_repository && (
-          <>
-            <div className="sv-checklist">
-              {git.changed_files.length === 0 && <p className="sv-hint">No changed files.</p>}
-              {git.changed_files.map((file) => (
-                <label key={file.path} className="sv-checkrow">
-                  <input
-                    type="checkbox"
-                    checked={!!selected[file.path]}
-                    onChange={(e) => setSelected((s) => ({ ...s, [file.path]: e.target.checked }))}
-                  />
-                  <span>{file.status || 'changed'}</span>
-                  <code>{file.path}</code>
-                </label>
-              ))}
-            </div>
-            <input
-              className="sv-input"
-              placeholder="Commit message"
-              value={commitMessage}
-              onChange={(e) => setCommitMessage(e.target.value)}
-            />
-            <div className="sv-actions">
-              <button className="sv-btn sv-btn-primary" disabled={busy === 'git-commit' || selectedPaths.length === 0 || !commitMessage.trim()} onClick={() => runGit('commit')}>Commit</button>
-              <button className="sv-btn" disabled={busy === 'git-pull'} onClick={() => runGit('pull')}>Pull</button>
-              <button className="sv-btn" disabled={busy === 'git-push'} onClick={() => runGit('push')}>Push</button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <div className="sv-subhead">File Watch</div>
-      <div className="sv-provider">
-        <div className="sv-provider-head">
-          <span className="sv-provider-name">{watching ? 'Watching local folder' : 'Watcher stopped'}</span>
-          <button className="sv-btn" disabled={busy === 'watch'} onClick={toggleWatch}>{watching ? 'Stop' : 'Start'}</button>
-        </div>
-        <button className="sv-btn" onClick={() => loadActivity().catch((e) => onError(String(e)))}>Refresh activity</button>
-        <div className="sv-activity">
-          {activity.slice(0, 8).map((event) => (
-            <div key={`${event.happened_at}-${event.kind}-${event.path ?? ''}`} className="sv-activity-row">
-              <span>{event.kind}</span>
-              <code>{event.path ?? event.source}</code>
-            </div>
-          ))}
-        </div>
-      </div>
-
       <div className="sv-subhead">Managed Cloud</div>
       <p className="sv-hint">After clicking Connect, authorize in your browser then return here — keep this panel open so the callback is received.</p>
       <div className="sv-providers">
@@ -847,7 +727,6 @@ function SyncPanel({ value, onSaved, onError }: {
               </div>
               <div className="sv-actions">
                 <button className="sv-btn" disabled={busy === provider.provider} onClick={() => connectCloud(provider.provider)}>Connect</button>
-                <button className="sv-btn sv-btn-primary" disabled={busy === provider.provider || !status?.connected || draft.crdt_backend !== 'loro'} onClick={() => syncCloud(provider.provider)}>Sync now</button>
                 <button className="sv-btn" disabled={busy === provider.provider || !status?.connected} onClick={() => disconnectCloud(provider.provider)}>Disconnect</button>
               </div>
             </div>
