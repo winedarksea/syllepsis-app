@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useStore } from '../lib/store';
 import type { Category, ObjectType } from '../types';
+import type { SignatureSlot } from '../theme/themes';
 import { Icon } from './Icon';
 import './Sidebar.css';
 
@@ -20,13 +21,13 @@ const NEW_TYPES: { type: ObjectType; label: string }[] = [
   { type: 'code', label: 'Code' },
 ];
 
-const NAV: { view: string; icon: string; label: string }[] = [
-  { view: 'book', icon: 'menu_book', label: 'Book View' },
-  { view: 'unsorted', icon: 'inbox', label: 'Unsorted' },
-  { view: 'search', icon: 'search', label: 'Search' },
-  { view: 'graph', icon: 'hub', label: 'Graph' },
-  { view: 'worlds', icon: 'map', label: 'Worlds' },
-  { view: 'packs', icon: 'inventory_2', label: 'Packs' },
+const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[] = [
+  { view: 'book', icon: 'menu_book', label: 'Book View', slot: 'book' },
+  { view: 'unsorted', icon: 'inbox', label: 'Unsorted', slot: 'unsorted' },
+  { view: 'search', icon: 'search', label: 'Search', slot: 'search' },
+  { view: 'graph', icon: 'hub', label: 'Graph', slot: 'graph' },
+  { view: 'worlds', icon: 'map', label: 'Worlds', slot: 'worlds' },
+  { view: 'packs', icon: 'inventory_2', label: 'Packs', slot: 'packs' },
   { view: 'text_import', icon: 'upload_file', label: 'Text Import' },
   { view: 'privacy', icon: 'lock', label: 'Privacy' },
   { view: 'stats', icon: 'bar_chart', label: 'Statistics' },
@@ -84,7 +85,7 @@ export function Sidebar({ onNewNote }: Props) {
             className={`sidebar-item ${view === item.view ? 'active' : ''}`}
             onClick={() => setView(item.view as Parameters<typeof setView>[0])}
           >
-            <Icon name={item.icon} className="sidebar-item-icon" size={19} />
+            <Icon name={item.icon} slot={item.slot} className="sidebar-item-icon" size={19} />
             <span>{item.label}</span>
             {item.view === 'unsorted' && unsortedCount > 0 && (
               <span className="sidebar-badge">{unsortedCount}</span>
@@ -115,7 +116,7 @@ export function Sidebar({ onNewNote }: Props) {
       <div className="sidebar-footer">
         <div className="sidebar-new-group">
           <button className="sidebar-new-note" onClick={() => onNewNote('note')}>
-            <Icon name="add" size={18} />
+            <Icon name="add" slot="new" size={18} />
             <span>New Note</span>
           </button>
           <button
@@ -137,7 +138,7 @@ export function Sidebar({ onNewNote }: Props) {
           )}
         </div>
         {/* Sync status placeholder — Phase 4 */}
-        <Icon name="cloud_off" className="sidebar-sync-status" size={18} title="Sync: local only" />
+        <Icon name="cloud_off" slot="sync" className="sidebar-sync-status" size={18} title="Sync: local only" />
       </div>
     </aside>
   );

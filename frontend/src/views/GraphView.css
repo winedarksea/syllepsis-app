@@ -85,3 +85,17 @@
   stroke: var(--color-bg);
   stroke-width: 3px;
 }
+
+/* Edge style variants — driven by data-graph-edge on the app root */
+[data-graph-edge='glow'] .gv-edge {
+  opacity: 0.9;
+  filter: drop-shadow(0 0 3px var(--color-accent));
+}
+
+[data-graph-edge='plain'] .gv-edge {
+  opacity: 0.45;
+}
+
+[data-graph-edge='plain'] .gv-edge-casing {
+  display: none;
+}

@@ -7,6 +7,41 @@
 
 export type ThemeVars = Record<string, string>;
 
+// Bounded visual-personality enum variants — applied as data-attributes on the app root,
+// driving CSS selectors in GraphView.css, BookView.css, and WorldView.css.
+export interface ThemeStyle {
+  graphEdge?: 'weave' | 'glow' | 'plain';
+  graphNode?: 'disc' | 'star' | 'hex';
+  divider?:   'rule' | 'knot' | 'dotdash';
+  grid?:      'survey' | 'dots' | 'contour' | 'none';
+  iconSet?:   string;
+}
+
+// Safe per-slot SVG override: only path-data + viewBox, rendered as controlled <svg><path>.
+// No raw markup ever touches the DOM — only the listed fields reach the renderer.
+export type ThemeIcon = { viewBox?: string; path: string | string[] };
+
+// The named nav/signature slots that themes may override with custom glyphs.
+export type SignatureSlot = 'book' | 'unsorted' | 'search' | 'graph' | 'worlds' | 'packs' | 'new' | 'sync';
+
+export const SIGNATURE_SLOTS: readonly SignatureSlot[] = [
+  'book', 'unsorted', 'search', 'graph', 'worlds', 'packs', 'new', 'sync',
+];
+
+// Material Symbols fallback ligature name for each slot (used when no icon set / override).
+export const SLOT_FALLBACK: Record<SignatureSlot, string> = {
+  book: 'menu_book',
+  unsorted: 'inbox',
+  search: 'search',
+  graph: 'hub',
+  worlds: 'map',
+  packs: 'inventory_2',
+  new: 'add',
+  sync: 'cloud_off',
+};
+
+export type ThemeIcons = Partial<Record<SignatureSlot, ThemeIcon>>;
+
 export interface Theme {
   id: string;
   name: string;
@@ -14,6 +49,8 @@ export interface Theme {
   builtin?: boolean;
   light: ThemeVars;
   dark: ThemeVars;
+  style?: ThemeStyle;
+  icons?: ThemeIcons;
 }
 
 // Every color/shadow token a complete theme defines. Imported themes are merged over the Nordic
@@ -36,6 +73,7 @@ const NORDIC: Theme = {
   id: 'nordic',
   name: 'Nordic / Icelandic',
   builtin: true,
+  style: { graphEdge: 'weave', graphNode: 'hex', divider: 'knot', grid: 'survey', iconSet: 'nordic' },
   light: {
     '--color-bg': '#e8e5de', '--color-surface': '#f3f0e8', '--color-surface-raised': '#dde4e6',
     '--color-border': '#9a9992', '--color-border-focus': '#2f7fa3',
@@ -73,6 +111,7 @@ const NAVIGATORS_ARCHIVE: Theme = {
   id: 'navigators-archive',
   name: "Navigator's Archive",
   builtin: true,
+  style: { graphEdge: 'glow', graphNode: 'star', divider: 'dotdash', grid: 'contour', iconSet: 'archive' },
   // Light "The Logbook": warm parchment surfaces, brass/gold accents, ink/indigo secondary.
   light: {
     '--color-bg': '#f1e7d0', '--color-surface': '#f7efdd', '--color-surface-raised': '#e9dcc0',
@@ -131,10 +170,36 @@ export function themeSwatches(theme: Theme, mode: 'light' | 'dark'): string[] {
   return [v['--color-bg'], v['--color-surface'], v['--color-accent'], v['--color-secondary']];
 }
 
+/** Resolved ThemeStyle with all defaults filled in. Mode-independent. */
+export function resolveThemeStyle(id: string, custom: Theme[]): Required<ThemeStyle> {
+  const theme = themeById(id, custom) ?? NORDIC;
+  return {
+    graphEdge: theme.style?.graphEdge ?? 'weave',
+    graphNode: theme.style?.graphNode ?? 'disc',
+    divider:   theme.style?.divider   ?? 'dotdash',
+    grid:      theme.style?.grid      ?? 'survey',
+    iconSet:   theme.style?.iconSet   ?? 'material',
+  };
+}
+
+/** Merged icon overrides: theme.icons wins over the active iconSet's entries. Mode-independent. */
+export function resolveThemeIcons(id: string, custom: Theme[]): ThemeIcons {
+  const theme = themeById(id, custom) ?? NORDIC;
+  return theme.icons ?? {};
+}
+
 /** Serialize a theme to a JSON string usable as an import template. */
 export function themeToJson(theme: Theme): string {
   return JSON.stringify(
-    { id: theme.id, name: theme.name, author: theme.author ?? '', light: theme.light, dark: theme.dark },
+    {
+      id: theme.id,
+      name: theme.name,
+      author: theme.author ?? '',
+      style: theme.style ?? {},
+      icons: theme.icons ?? {},
+      light: theme.light,
+      dark: theme.dark,
+    },
     null,
     2,
   );
@@ -154,6 +219,43 @@ function pickTokens(raw: unknown): ThemeVars {
     }
   }
   return out;
+}
+
+const VALID_GRAPH_EDGE = new Set(['weave', 'glow', 'plain']);
+const VALID_GRAPH_NODE = new Set(['disc', 'star', 'hex']);
+const VALID_DIVIDER    = new Set(['rule', 'knot', 'dotdash']);
+const VALID_GRID       = new Set(['survey', 'dots', 'contour', 'none']);
+
+function pickStyle(raw: unknown): ThemeStyle | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const s = raw as Record<string, unknown>;
+  const out: ThemeStyle = {};
+  if (typeof s.graphEdge === 'string' && VALID_GRAPH_EDGE.has(s.graphEdge)) out.graphEdge = s.graphEdge as ThemeStyle['graphEdge'];
+  if (typeof s.graphNode === 'string' && VALID_GRAPH_NODE.has(s.graphNode)) out.graphNode = s.graphNode as ThemeStyle['graphNode'];
+  if (typeof s.divider   === 'string' && VALID_DIVIDER.has(s.divider))     out.divider   = s.divider   as ThemeStyle['divider'];
+  if (typeof s.grid      === 'string' && VALID_GRID.has(s.grid))           out.grid      = s.grid      as ThemeStyle['grid'];
+  if (typeof s.iconSet   === 'string' && s.iconSet.trim())                  out.iconSet   = s.iconSet.trim();
+  return Object.keys(out).length ? out : undefined;
+}
+
+function isThemeIcon(v: unknown): v is ThemeIcon {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  const obj = v as Record<string, unknown>;
+  const path = obj.path;
+  if (typeof path === 'string' && path.trim()) return true;
+  if (Array.isArray(path) && path.every((p) => typeof p === 'string')) return true;
+  return false;
+}
+
+function pickIcons(raw: unknown): ThemeIcons | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const src = raw as Record<string, unknown>;
+  const out: ThemeIcons = {};
+  for (const slot of SIGNATURE_SLOTS) {
+    const v = src[slot];
+    if (isThemeIcon(v)) out[slot] = v as ThemeIcon;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /**
@@ -182,6 +284,8 @@ export function normalizeImportedTheme(text: string): { theme?: Theme; error?: s
 
   const id = typeof obj.id === 'string' && obj.id.trim() ? slugify(obj.id) : slugify(name);
   const author = typeof obj.author === 'string' ? obj.author.trim() : undefined;
+  const style = pickStyle(obj.style);
+  const icons = pickIcons(obj.icons);
   return {
     theme: {
       id,
@@ -189,6 +293,8 @@ export function normalizeImportedTheme(text: string): { theme?: Theme; error?: s
       author: author || undefined,
       light: { ...NORDIC.light, ...light },
       dark: { ...NORDIC.dark, ...dark },
+      ...(style ? { style } : {}),
+      ...(icons ? { icons } : {}),
     },
   };
 }

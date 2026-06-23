@@ -16,7 +16,9 @@ import type {
 } from '../types';
 import {
   allThemes, themeById, themeSwatches, themeToJson, normalizeImportedTheme, BUILTIN_THEMES,
+  resolveThemeStyle, type Theme,
 } from '../theme/themes';
+import { getIconSet } from '../theme/icons/sets';
 import { Icon } from '../components/Icon';
 import './SettingsView.css';
 
@@ -272,6 +274,39 @@ function NumberInput({ value, onChange, step }: { value: number; onChange: (n: n
 
 // ── Theme family picker (app-level) ────────────────────────────────────────────
 
+// Renders 2–3 signature glyphs from a theme card's own icon set (not the active theme).
+// Uses a simplified inline SVG — no store access, no hook — so card previews are independent.
+function CardIcons({ t, customThemes }: { t: Theme; customThemes: Theme[] }) {
+  const style = resolveThemeStyle(t.id, customThemes);
+  const set = getIconSet(style.iconSet);
+  const slots = (['graph', 'worlds', 'book'] as const).filter((s) => set[s]);
+  if (slots.length === 0) return null;
+  return (
+    <div className="sv-card-icons">
+      {slots.map((s) => {
+        const icon = set[s]!;
+        const paths = Array.isArray(icon.path) ? icon.path : [icon.path];
+        return (
+          <svg
+            key={s}
+            viewBox={icon.viewBox ?? '0 0 24 24'}
+            width={16}
+            height={16}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            {paths.map((d, i) => <path key={i} d={d} />)}
+          </svg>
+        );
+      })}
+    </div>
+  );
+}
+
 function ThemePicker({ onNotice, onError }: { onNotice: (m: string) => void; onError: (m: string) => void }) {
   const { theme, themeId, customThemes, setThemeId, addCustomTheme, removeCustomTheme } = useStore();
   const themes = allThemes(customThemes);
@@ -309,7 +344,7 @@ function ThemePicker({ onNotice, onError }: { onNotice: (m: string) => void; onE
       <div className="sv-themes-head">
         <div className="sv-field-label">
           <span>Theme</span>
-          <span className="sv-field-hint">Each theme brings its own light & dark palette. Import a JSON theme file, or copy the current theme as a starting template.</span>
+          <span className="sv-field-hint">Each theme brings its own palette, visual style (graph edges, node shapes, dividers, grid), and signature icons. Import a JSON theme file, or copy the current theme as a starting template.</span>
         </div>
         <div className="sv-themes-actions">
           <button className="sv-btn" onClick={copyTemplate}>Copy template</button>
@@ -336,6 +371,7 @@ function ThemePicker({ onNotice, onError }: { onNotice: (m: string) => void; onE
               ) : t.author ? (
                 <span className="sv-theme-tag">by {t.author}</span>
               ) : null}
+              <CardIcons t={t} customThemes={customThemes} />
             </div>
             {!t.builtin && (
               <span

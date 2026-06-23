@@ -19,7 +19,7 @@ import { StyleCardsView } from './views/StyleCardsView';
 import { SettingsView } from './views/SettingsView';
 import { Editor } from './editor/Editor';
 import { Icon } from './components/Icon';
-import { resolveThemeVars } from './theme/themes';
+import { resolveThemeVars, resolveThemeStyle } from './theme/themes';
 import type { BookInfo, TrackedBookInfo, ObjectType } from './types';
 import './App.css';
 
@@ -444,9 +444,17 @@ export default function App() {
   // overriding the base light.css/dark.css. Built-in Nordic resolves to the same values it has in
   // CSS; other built-ins and imported custom themes override here.
   const themeVars = resolveThemeVars(themeId, theme, customThemes);
+  const themeStyle = resolveThemeStyle(themeId, customThemes);
 
   return (
-    <div data-theme={theme} style={{ height: '100%', ...themeVars } as CSSProperties}>
+    <div
+      data-theme={theme}
+      data-graph-edge={themeStyle.graphEdge}
+      data-graph-node={themeStyle.graphNode}
+      data-divider={themeStyle.divider}
+      data-grid={themeStyle.grid}
+      style={{ height: '100%', ...themeVars } as CSSProperties}
+    >
       {book ? <Workspace /> : <BookPicker />}
     </div>
   );

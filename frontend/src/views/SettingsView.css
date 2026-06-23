@@ -316,12 +316,19 @@ select.sv-input { min-width: 180px; cursor: pointer; }
   border: 1px solid var(--color-border);
 }
 
-.sv-theme-meta { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.sv-theme-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2); }
 .sv-theme-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--color-text); }
 .sv-theme-tag {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   font-style: italic;
+}
+.sv-card-icons {
+  display: flex;
+  gap: var(--sp-1);
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  opacity: 0.7;
 }
 
 .sv-theme-delete {
