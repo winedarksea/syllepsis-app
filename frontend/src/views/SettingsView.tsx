@@ -47,6 +47,7 @@ const THEME_OPTIONS: { value: ThemePref; icon: string; label: string }[] = [
 ];
 
 const LOCAL_PROVIDER = 'local';
+const LORO_URL = 'https://github.com/loro-dev/loro';
 
 interface Props {
   // When opened as a modal on the launch screen, WizardShell supplies the title, so skip the
@@ -295,7 +296,7 @@ function Section({ title, subtitle, children }: { title: string; subtitle: strin
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="sv-field">
       <div className="sv-field-label">
@@ -767,7 +768,14 @@ function SyncPanel({ value, onSaved, onError }: {
       <Field label="Sync enabled" hint="When off, edits stay local and no CRDT sidecars are written.">
         <Toggle checked={draft.enabled} onChange={(b) => setDraft({ ...draft, enabled: b })} />
       </Field>
-      <Field label="Merge strategy" hint="LWW is always available; Loro adds character-level text merge (requires the loro build feature).">
+      <Field
+        label="Merge strategy"
+        hint={(
+          <>
+            LWW is always available; <a href={LORO_URL} target="_blank" rel="noreferrer">Loro</a> adds character-level text merge (requires the loro build feature).
+          </>
+        )}
+      >
         <select className="sv-input" value={draft.crdt_backend} onChange={(e) => setDraft({ ...draft, crdt_backend: e.target.value })}>
           <option value="lww">Last-writer-wins (LWW)</option>
           <option value="loro">Loro (fine-grained)</option>
@@ -780,7 +788,9 @@ function SyncPanel({ value, onSaved, onError }: {
         <NumberInput value={draft.external_edit_skew_secs} onChange={(n) => setDraft({ ...draft, external_edit_skew_secs: n })} />
       </Field>
       {draft.crdt_backend !== 'loro' && (
-        <p className="sv-error">Managed cloud sync requires Loro. Git and mounted-folder sync can still be used.</p>
+        <p className="sv-error">
+          Managed cloud sync requires <a href={LORO_URL} target="_blank" rel="noreferrer">Loro</a>. Git and mounted-folder sync can still be used.
+        </p>
       )}
       <SaveBar saving={saving} dirty={dirty} onSave={commit} />
 
