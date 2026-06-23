@@ -12,6 +12,7 @@ import { GraphView } from './views/GraphView';
 import { WorldView } from './views/WorldView';
 import { PrivacyView } from './views/PrivacyView';
 import { PacksView } from './views/PacksView';
+import { TextImportView } from './views/TextImportView';
 import { Diagnostics } from './views/Diagnostics';
 import { StatsView } from './views/StatsView';
 import { StyleCardsView } from './views/StyleCardsView';
@@ -388,6 +389,8 @@ function Workspace() {
           <PrivacyView />
         ) : view === 'packs' ? (
           <PacksView />
+        ) : view === 'text_import' ? (
+          <TextImportView />
         ) : view === 'stats' ? (
           <StatsView />
         ) : view === 'style_cards' ? (

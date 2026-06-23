@@ -1,0 +1,251 @@
+.ti-root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.ti-header,
+.ti-preview-header,
+.ti-actions,
+.ti-preview-item-header,
+.ti-category-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ti-header {
+  justify-content: space-between;
+}
+
+.ti-title {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.ti-subtitle,
+.ti-preview-header p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 0.92rem;
+}
+
+.ti-panel {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  padding: 16px;
+}
+
+.ti-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.ti-field input,
+.ti-field select,
+.ti-field textarea,
+.ti-title-input,
+.ti-body-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  padding: 9px 10px;
+}
+
+.ti-source {
+  min-height: 220px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  line-height: 1.45;
+}
+
+.ti-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.ti-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-top: 14px;
+}
+
+.ti-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+
+.ti-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.ti-btn,
+.ti-icon-btn {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.ti-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  font-weight: 600;
+}
+
+.ti-btn-primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.ti-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ti-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+}
+
+.ti-notice,
+.ti-error,
+.ti-warning {
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+}
+
+.ti-notice {
+  background: var(--color-tag-bg);
+  color: var(--color-accent);
+}
+
+.ti-error,
+.ti-warning {
+  background: var(--color-tertiary-subtle);
+  color: var(--color-error);
+}
+
+.ti-warning {
+  margin-top: 8px;
+}
+
+.ti-category-row {
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.ti-chip,
+.ti-kind,
+.ti-prior {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.ti-chip {
+  background: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+}
+
+.ti-kind {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.ti-prior {
+  background: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+}
+
+.ti-preview-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.ti-preview-item {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--color-bg);
+}
+
+.ti-preview-item-header {
+  margin-bottom: 10px;
+}
+
+.ti-item-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+  font-weight: 700;
+}
+
+.ti-title-input {
+  font-weight: 700;
+}
+
+.ti-body-input {
+  min-height: 110px;
+  margin-top: 8px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .ti-root {
+    padding: 16px;
+  }
+
+  .ti-header,
+  .ti-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ti-controls {
+    grid-template-columns: 1fr;
+  }
+}

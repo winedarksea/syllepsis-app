@@ -13,6 +13,7 @@ import type {
   ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
   PublishReport, GitignoreReport,
   BookStats, StyleCard, CrossBookNote,
+  TextImportOptions, TextImportPreview, TextImportCommitRequest, TextImportReport,
 } from '../types';
 
 export const api = {
@@ -146,6 +147,13 @@ export const api = {
       parentPath,
       bookName,
     }),
+
+  // Text import
+  readTextImportFile: (path: string) => invoke<string>('read_text_import_file', { path }),
+  previewTextImport: (sourceText: string, options: TextImportOptions) =>
+    invoke<TextImportPreview>('preview_text_import', { sourceText, options }),
+  commitTextImport: (request: TextImportCommitRequest) =>
+    invoke<TextImportReport>('commit_text_import', { request }),
 
   // Publishing & serving (Phase 6)
   publishSite: (outDir: string) => invoke<PublishReport>('publish_site', { outDir }),

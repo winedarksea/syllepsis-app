@@ -500,6 +500,66 @@ export interface ImportReport {
   created_categories: string[];
 }
 
+// ── Text import (mirrors syllepsis_core::app::text_import) ──
+
+export type TextImportSplitMode = 'one_note' | 'non_empty_line' | 'paragraph' | 'smart';
+export type TextImportBlockKind = 'paragraph' | 'list' | 'table' | 'code';
+export type TextImportPriorPreviewTarget = 'none' | 'previous_imported_note' | 'category' | 'existing_note';
+
+export interface TextImportOptions {
+  split_mode: TextImportSplitMode;
+  detect_headings: boolean;
+  detect_lists: boolean;
+  detect_tables: boolean;
+  detect_code_blocks: boolean;
+  convert_indented_lists: boolean;
+}
+
+export interface TextImportPriorPreview {
+  target: TextImportPriorPreviewTarget;
+  target_label?: string | null;
+  kind: PriorKind;
+}
+
+export interface TextImportPreviewItem {
+  index: number;
+  title: string;
+  body: string;
+  block_kind: TextImportBlockKind;
+  category_context?: string | null;
+  intended_prior?: TextImportPriorPreview | null;
+  warnings: string[];
+}
+
+export interface TextImportCategoryPreview {
+  name: string;
+  long_name: string;
+  heading_level: number;
+}
+
+export interface TextImportPreview {
+  items: TextImportPreviewItem[];
+  categories: TextImportCategoryPreview[];
+  warnings: string[];
+}
+
+export type TextImportPlacement =
+  | { kind: 'unsorted' }
+  | { kind: 'category'; category: string }
+  | { kind: 'after_note'; note_id: string };
+
+export interface TextImportCommitRequest {
+  items: TextImportPreviewItem[];
+  categories: TextImportCategoryPreview[];
+  placement: TextImportPlacement;
+}
+
+export interface TextImportReport {
+  imported: string[];
+  created_categories: string[];
+  first_note_id?: string | null;
+}
+
 // ── Book statistics (mirrors syllepsis_core::app::commands::BookStats) ──
 
 export interface BookStats {

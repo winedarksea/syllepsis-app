@@ -5,7 +5,7 @@ pub mod state;
 
 use commands::{
     book::*, categories::*, cloud_llm::*, lifecycle::*, llm::*, notes::*, pack::*, publish::*,
-    search::*, spatial::*, style_cards::*, sync::*,
+    search::*, spatial::*, style_cards::*, sync::*, text_import::*,
 };
 use state::AppState;
 
@@ -112,6 +112,10 @@ pub fn run() {
             preview_pack,
             import_pack,
             import_pack_as_book,
+            // text import
+            read_text_import_file,
+            preview_text_import,
+            commit_text_import,
             // publishing & serving (Phase 6)
             publish_site,
             refresh_private_gitignore,

@@ -5,7 +5,7 @@ import type { BookInfo, Category } from '../types';
 
 export type View =
   | 'book' | 'unsorted' | 'category' | 'editor' | 'search' | 'graph'
-  | 'diagnostics' | 'worlds' | 'privacy' | 'packs' | 'stats' | 'style_cards';
+  | 'diagnostics' | 'worlds' | 'privacy' | 'packs' | 'text_import' | 'stats' | 'style_cards';
 
 interface AppStore {
   // Book

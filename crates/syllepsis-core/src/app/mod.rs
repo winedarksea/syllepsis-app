@@ -10,5 +10,6 @@ pub mod publish;
 pub mod search;
 pub mod spatial;
 pub mod sync;
+pub mod text_import;
 
 pub use dto::NoteDto;
