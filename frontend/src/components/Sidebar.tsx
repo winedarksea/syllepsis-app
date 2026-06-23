@@ -28,6 +28,8 @@ const NAV: { view: string; icon: string; label: string }[] = [
   { view: 'worlds', icon: 'map', label: 'Worlds' },
   { view: 'packs', icon: 'inventory_2', label: 'Packs' },
   { view: 'privacy', icon: 'lock', label: 'Privacy' },
+  { view: 'stats', icon: 'bar_chart', label: 'Statistics' },
+  { view: 'style_cards', icon: 'style', label: 'Style Cards' },
   { view: 'diagnostics', icon: 'monitor_heart', label: 'Diagnostics' },
 ];
 

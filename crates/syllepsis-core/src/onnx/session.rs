@@ -13,7 +13,7 @@ use std::path::Path;
 
 // `OrtExecutionProvider` is the trait that provides `.is_available()` and `.build()` on the EP
 // structs (`ep::CoreML`, `ep::CPU`, …); it must be in scope to call those methods.
-use ort::ep::{self, ExecutionProvider as OrtExecutionProvider, ExecutionProviderDispatch};
+use ort::ep::{self, coreml, ExecutionProvider as OrtExecutionProvider, ExecutionProviderDispatch};
 use ort::session::{builder::GraphOptimizationLevel, Session};
 
 use crate::error::{CoreError, CoreResult};
@@ -32,7 +32,13 @@ pub struct ModelSession {
 impl ModelSession {
     /// Load the model's weights file and place it on the chosen execution provider.
     pub fn load(weights_path: &Path, manifest: &ModelManifest) -> CoreResult<ModelSession> {
-        let choice = resolve_execution_provider(manifest);
+        let available = available_providers();
+        let choice = select_execution_provider(
+            &manifest.preferred_execution_providers,
+            &available,
+            Platform::host(),
+        );
+        log_execution_provider_choice(manifest, weights_path, &available, &choice);
         let mut builder = Session::builder()
             .map_err(map_ort_err)?
             .with_execution_providers(dispatches(&choice))
@@ -77,7 +83,7 @@ fn available_providers() -> Vec<ExecutionProvider> {
 fn dispatches(choice: &ExecutionProviderChoice) -> Vec<ExecutionProviderDispatch> {
     let mut list = Vec::new();
     match choice.provider {
-        ExecutionProvider::CoreMl => list.push(ep::CoreML::default().build()),
+        ExecutionProvider::CoreMl => list.push(coreml_dispatch()),
         ExecutionProvider::Cuda => list.push(ep::CUDA::default().build()),
         ExecutionProvider::DirectMl => list.push(ep::DirectML::default().build()),
         ExecutionProvider::Cpu => {}
@@ -86,7 +92,73 @@ fn dispatches(choice: &ExecutionProviderChoice) -> Vec<ExecutionProviderDispatch
     list
 }
 
+fn coreml_dispatch() -> ExecutionProviderDispatch {
+    let provider = ep::CoreML::default().with_compute_units(coreml::ComputeUnits::All);
+    if coreml_profile_enabled() {
+        provider.with_profile_compute_plan(true).build()
+    } else {
+        provider.build()
+    }
+}
+
+fn coreml_profile_enabled() -> bool {
+    std::env::var("SYLLEPSIS_ONNX_COREML_PROFILE")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
+fn log_execution_provider_choice(
+    manifest: &ModelManifest,
+    weights_path: &Path,
+    available: &[ExecutionProvider],
+    choice: &ExecutionProviderChoice,
+) {
+    let available = provider_list(available);
+    let preferred = provider_list(&manifest.preferred_execution_providers);
+    let coreml_profile = coreml_profile_enabled();
+    tracing::info!(
+        model = %manifest.id,
+        graph = %weights_path.display(),
+        selected_execution_provider = choice.provider.as_str(),
+        used_cpu_fallback = choice.used_cpu_fallback,
+        available_execution_providers = %available,
+        preferred_execution_providers = %preferred,
+        coreml_compute_units = if choice.provider == ExecutionProvider::CoreMl { "all" } else { "n/a" },
+        coreml_profile_compute_plan = coreml_profile,
+        "onnx: loading model session"
+    );
+}
+
+fn provider_list(providers: &[ExecutionProvider]) -> String {
+    providers
+        .iter()
+        .map(|provider| provider.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// Map an `ort` error (generic over its recovery type `R`) onto the crate error type.
 pub(crate) fn map_ort_err<R>(e: ort::Error<R>) -> CoreError {
     CoreError::Model(format!("onnx runtime: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_onnx_build_exposes_coreml_provider() {
+        assert!(
+            available_providers().contains(&ExecutionProvider::CoreMl),
+            "macOS ONNX builds must enable ORT's coreml feature or local models silently fall back to CPU"
+        );
+    }
+
+    #[test]
+    fn provider_list_is_log_friendly() {
+        assert_eq!(
+            provider_list(&[ExecutionProvider::Cpu, ExecutionProvider::CoreMl]),
+            "cpu,coreml"
+        );
+    }
 }

@@ -1,11 +1,12 @@
 // The search-centred web of results: a query box, category facet filters, and ranked hits
 // fused from exact + BM25 + vector retrieval (RRF). Selecting a hit previews its related
 // notes and opens it in the editor.
+// Also supports cross-book search across all tracked books.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
-import type { SearchResults } from '../types';
+import type { SearchResults, CrossBookNote } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import './SearchView.css';
 
@@ -14,26 +15,36 @@ export function SearchView() {
   const [query, setQuery] = useState('');
   const [activeFacets, setActiveFacets] = useState<string[]>([]);
   const [results, setResults] = useState<SearchResults | null>(null);
+  const [crossBookResults, setCrossBookResults] = useState<CrossBookNote[] | null>(null);
+  const [crossBookMode, setCrossBookMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const run = useCallback((q: string, facets: string[]) => {
-    if (!q.trim()) { setResults(null); return; }
+  const run = useCallback((q: string, facets: string[], crossBook: boolean) => {
+    if (!q.trim()) { setResults(null); setCrossBookResults(null); return; }
     setLoading(true);
-    api.search(q, facets)
-      .then((r) => { setResults(r); setError(null); })
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
+    setError(null);
+    if (crossBook) {
+      api.searchAcrossBooks(q)
+        .then((r) => { setCrossBookResults(r); setResults(null); })
+        .catch((e) => setError(String(e)))
+        .finally(() => setLoading(false));
+    } else {
+      api.search(q, facets)
+        .then((r) => { setResults(r); setCrossBookResults(null); setError(null); })
+        .catch((e) => setError(String(e)))
+        .finally(() => setLoading(false));
+    }
   }, []);
 
   // Debounced search-as-you-type.
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => run(query, activeFacets), 180);
+    debounce.current = setTimeout(() => run(query, activeFacets, crossBookMode), 300);
     return () => { if (debounce.current) clearTimeout(debounce.current); };
-  }, [query, activeFacets, run]);
+  }, [query, activeFacets, crossBookMode, run]);
 
   const toggleFacet = useCallback((cat: string) => {
     setActiveFacets((prev) =>
@@ -48,12 +59,19 @@ export function SearchView() {
           className="sv-input"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search your book — exact, keyword, and meaning…"
+          placeholder={crossBookMode ? 'Search across all tracked books…' : 'Search your book — exact, keyword, and meaning…'}
           autoFocus
         />
+        <button
+          className={`sv-cross-book-toggle ${crossBookMode ? 'active' : ''}`}
+          onClick={() => { setCrossBookMode((v) => !v); setResults(null); setCrossBookResults(null); }}
+          title="Search across all tracked books"
+        >
+          All books
+        </button>
       </div>
 
-      {results && results.facets.length > 0 && (
+      {!crossBookMode && results && results.facets.length > 0 && (
         <div className="sv-facets">
           {results.facets.map((f) => (
             <button
@@ -70,14 +88,19 @@ export function SearchView() {
       <div className="sv-body">
         {error && <div className="sv-state sv-error">{error}</div>}
         {!query.trim() && (
-          <div className="sv-state sv-hint">Type to search across every note.</div>
+          <div className="sv-state sv-hint">
+            {crossBookMode
+              ? 'Search all your tracked books to find notes and create cross-book links.'
+              : 'Type to search across every note.'}
+          </div>
         )}
         {loading && <div className="sv-state">Searching…</div>}
-        {results && results.hits.length === 0 && query.trim() && !loading && (
+
+        {/* Current-book results */}
+        {!crossBookMode && results && results.hits.length === 0 && query.trim() && !loading && (
           <div className="sv-state">No matches.</div>
         )}
-
-        {results && results.hits.length > 0 && (
+        {!crossBookMode && results && results.hits.length > 0 && (
           <div className="sv-results">
             {results.hits.map((hit) => (
               <div
@@ -106,9 +129,30 @@ export function SearchView() {
             ))}
           </div>
         )}
+
+        {/* Cross-book results */}
+        {crossBookMode && crossBookResults !== null && crossBookResults.length === 0 && query.trim() && !loading && (
+          <div className="sv-state">No matches in other books.</div>
+        )}
+        {crossBookMode && crossBookResults && crossBookResults.length > 0 && (
+          <div className="sv-results">
+            {crossBookResults.map((hit) => (
+              <div key={`${hit.book_path}/${hit.note_id}`} className="sv-hit sv-hit-cross-book">
+                <div className="sv-hit-header">
+                  <span className="sv-hit-title">{hit.title || '(untitled)'}</span>
+                  <span className="sv-cross-book-badge">{hit.book_name}</span>
+                </div>
+                {hit.summary && <p className="sv-hit-summary">{hit.summary}</p>}
+                <div className="sv-cross-book-link-hint">
+                  Link syntax: <code>[{hit.title || hit.note_id}](book:{hit.book_name}/{hit.note_id})</code>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {preview && <RelatedCarousel noteId={preview} />}
+      {!crossBookMode && preview && <RelatedCarousel noteId={preview} />}
     </div>
   );
 }

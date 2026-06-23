@@ -138,3 +138,29 @@ pub fn save_table_data(
         app::save_table_data(book, &note_id, rows).map_err(|e| e.to_string())
     })
 }
+
+/// Export the full book as a single HTML document, writing it to `path`.
+#[tauri::command]
+pub fn export_html(state: State<AppState>, path: String) -> Result<(), String> {
+    with_book!(state, book, {
+        let html = app::export_html(book).map_err(|e| e.to_string())?;
+        std::fs::write(&path, html).map_err(|e| format!("write HTML: {e}"))
+    })
+}
+
+/// Export the full book as Markdown, writing it to `path`.
+#[tauri::command]
+pub fn export_markdown_to_file(state: State<AppState>, path: String) -> Result<(), String> {
+    with_book!(state, book, {
+        let md = app::export_markdown(book).map_err(|e| e.to_string())?;
+        std::fs::write(&path, md).map_err(|e| format!("write Markdown: {e}"))
+    })
+}
+
+/// Aggregate statistics about the open book.
+#[tauri::command]
+pub fn book_stats(state: State<AppState>) -> Result<app::BookStats, String> {
+    with_book!(state, book, {
+        app::book_stats(book).map_err(|e| e.to_string())
+    })
+}

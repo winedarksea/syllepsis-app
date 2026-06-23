@@ -215,6 +215,16 @@ export interface BookOpenWarningInfo {
   should_offer_create_here: boolean;
 }
 
+// ── Cross-book search (mirrors CrossBookNote in search.rs) ──
+
+export interface CrossBookNote {
+  book_name: string;
+  book_path: string;
+  note_id: string;
+  title: string;
+  summary: string;
+}
+
 // ── Search & embeddings (mirrors syllepsis_core::search::results) ──
 
 export interface SearchHit {
@@ -488,6 +498,49 @@ export interface ImportReport {
   imported: string[];
   skipped_locally_modified: string[];
   created_categories: string[];
+}
+
+// ── Book statistics (mirrors syllepsis_core::app::commands::BookStats) ──
+
+export interface BookStats {
+  total_notes: number;
+  sorted_notes: number;
+  unsorted_notes: number;
+  private_notes: number;
+  archived_notes: number;
+  starred_notes: number;
+  notes_by_type: Record<string, number>;
+  notes_by_category: Record<string, number>;
+  total_categories: number;
+  notes_with_location: number;
+}
+
+// ── Style cards (mirrors syllepsis_core::model::style_card) ──
+
+export type StyleField = 'technical' | 'instructional' | 'persuasive' | 'narrative' | 'reflective' | 'administrative';
+export type StyleTenor = 'intimate' | 'peer' | 'expert_to_peer' | 'expert_to_novice' | 'institutional';
+export type StyleMode = 'spoken' | 'conversational_written' | 'edited_written' | 'formal_written';
+export type StyleDensity = 'sparse' | 'moderate' | 'dense';
+export type StyleTexture = 'plain' | 'polished' | 'vivid' | 'aphoristic' | 'procedural';
+export type StyleOrganization = 'conclusion_first' | 'stepwise' | 'narrative' | 'compare_contrast' | 'problem_solution';
+
+export interface StyleExemplar {
+  text: string;
+  note: string;
+}
+
+export interface StyleCard {
+  id: string;
+  version: number;
+  short_description: string;
+  field: StyleField;
+  tenor: StyleTenor;
+  mode: StyleMode;
+  density: StyleDensity;
+  texture: StyleTexture;
+  organization: StyleOrganization;
+  exemplars: StyleExemplar[];
+  source_urls: string[];
 }
 
 // ── Publishing & serving (mirrors syllepsis_core::app::publish) ──

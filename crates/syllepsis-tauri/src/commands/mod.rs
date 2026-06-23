@@ -8,4 +8,5 @@ pub mod pack;
 pub mod publish;
 pub mod search;
 pub mod spatial;
+pub mod style_cards;
 pub mod sync;

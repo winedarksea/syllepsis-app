@@ -617,3 +617,148 @@
   font-size: var(--font-size-sm);
   cursor: pointer;
 }
+
+/* Strikethrough text (Lexical applies the class via theme) */
+.lexical-strikethrough { text-decoration: line-through; }
+
+/* MetaPanel location world helper */
+.meta-location-helper-btn {
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.meta-world-helper {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+
+.meta-world-helper-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.meta-world-helper-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.meta-world-helper-row select,
+.meta-world-helper-row input {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+.meta-world-helper-apply {
+  align-self: flex-start;
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  transition: background var(--transition-fast);
+}
+.meta-world-helper-apply:hover:not(:disabled) { background: var(--color-accent-hover); }
+.meta-world-helper-apply:disabled { opacity: 0.5; cursor: default; }
+
+.meta-world-helper-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.meta-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  line-height: var(--line-height-loose);
+  margin: 0;
+}
+.meta-hint code {
+  font-family: var(--font-mono);
+  background: var(--color-surface-raised);
+  padding: 0 3px;
+  border-radius: 2px;
+}
+
+/* Active toolbar button state */
+.editor-format-toolbar button.active {
+  background: var(--color-surface-raised);
+  color: var(--color-accent);
+}
+
+/* Syntax sugar insert dropdown */
+.editor-syntax-dropdown {
+  position: relative;
+}
+.editor-syntax-dropdown > button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.editor-syntax-dropdown > button:hover,
+.editor-syntax-dropdown > button.active {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+.editor-syntax-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 260px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.18));
+  overflow: hidden;
+}
+.editor-syntax-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  width: 100%;
+  text-align: left;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  transition: background var(--transition-fast);
+}
+.editor-syntax-item:hover { background: var(--color-surface-raised); }
+.editor-syntax-item-code {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  background: var(--color-tag-bg);
+  color: var(--color-tag-text);
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.editor-syntax-item-desc {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -6,15 +6,32 @@
 //! "share as much code as possible").
 
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::app::dto::NoteDto;
 use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
-use crate::markdown::dialect;
+use crate::markdown::{dialect, parser as md_parser};
 use crate::model::metadata::LockMode;
 use crate::model::{Category, Note, ObjectType, PriorEdge};
 use crate::sort::{self, RenderItem};
 use crate::storage::{layout, Book, NoteStore};
+
+/// Aggregate statistics about a book.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BookStats {
+    pub total_notes: usize,
+    pub sorted_notes: usize,
+    pub unsorted_notes: usize,
+    pub private_notes: usize,
+    pub archived_notes: usize,
+    pub starred_notes: usize,
+    pub notes_by_type: HashMap<String, usize>,
+    pub notes_by_category: HashMap<String, usize>,
+    pub total_categories: usize,
+    pub notes_with_location: usize,
+}
 
 /// Render all sorted notes as the continuous book view.
 pub fn book_view(book: &Book) -> CoreResult<Vec<RenderItem>> {
@@ -26,6 +43,83 @@ pub fn book_view(book: &Book) -> CoreResult<Vec<RenderItem>> {
 /// Export the book view as a single linear markdown manuscript.
 pub fn export_markdown(book: &Book) -> CoreResult<String> {
     Ok(sort::to_markdown(&book_view(book)?))
+}
+
+/// Export the book view as an HTML document.
+pub fn export_html(book: &Book) -> CoreResult<String> {
+    let markdown = export_markdown(book)?;
+    let body_html = md_parser::to_html(&markdown);
+    let name = &book.metadata.name;
+    Ok(format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{name}</title>
+<style>
+body {{ font-family: Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 24px; line-height: 1.7; color: #1a1a1a; }}
+h1, h2, h3, h4 {{ font-family: inherit; margin: 1.4em 0 0.4em; }}
+blockquote {{ border-left: 3px solid #ccc; margin: 1em 0; padding-left: 1em; color: #555; }}
+code {{ font-family: monospace; background: #f4f4f4; padding: 1px 4px; border-radius: 3px; }}
+pre {{ background: #f4f4f4; padding: 12px; border-radius: 4px; overflow-x: auto; }}
+</style>
+</head>
+<body>
+<h1>{name}</h1>
+{body_html}
+</body>
+</html>"#
+    ))
+}
+
+/// Aggregate statistics about a book.
+pub fn book_stats(book: &Book) -> CoreResult<BookStats> {
+    let all_notes = book.store.read_all_notes()?;
+    let categories = book.store.categories()?;
+
+    let mut stats = BookStats {
+        total_notes: 0,
+        sorted_notes: 0,
+        unsorted_notes: 0,
+        private_notes: 0,
+        archived_notes: 0,
+        starred_notes: 0,
+        notes_by_type: HashMap::new(),
+        notes_by_category: HashMap::new(),
+        total_categories: categories.len(),
+        notes_with_location: 0,
+    };
+
+    for note in &all_notes {
+        if note.metadata.lifecycle.marked_for_deletion_at.is_some() {
+            continue;
+        }
+        stats.total_notes += 1;
+        if note.is_sorted() {
+            stats.sorted_notes += 1;
+        } else {
+            stats.unsorted_notes += 1;
+        }
+        if note.metadata.lifecycle.private {
+            stats.private_notes += 1;
+        }
+        if note.metadata.lifecycle.archived {
+            stats.archived_notes += 1;
+        }
+        if note.metadata.classification.starred {
+            stats.starred_notes += 1;
+        }
+        if note.location.is_some() {
+            stats.notes_with_location += 1;
+        }
+        let type_key = note.object_type.id_prefix().to_string();
+        *stats.notes_by_type.entry(type_key).or_insert(0) += 1;
+        for cat in &note.categories {
+            *stats.notes_by_category.entry(cat.clone()).or_insert(0) += 1;
+        }
+    }
+    Ok(stats)
 }
 
 /// The unsorted queue: quick captures awaiting organization. Excludes hidden (archived/private)

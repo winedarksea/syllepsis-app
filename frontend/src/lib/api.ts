@@ -12,6 +12,7 @@ import type {
   LockMode, PolicyOverview,
   ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
   PublishReport, GitignoreReport,
+  BookStats, StyleCard, CrossBookNote,
 } from '../types';
 
 export const api = {
@@ -47,6 +48,9 @@ export const api = {
   forkNote: (id: string) => invoke<NoteDto>('fork_note', { id }),
   deleteNote: (id: string) => invoke<void>('delete_note', { id }),
   exportMarkdown: () => invoke<string>('export_markdown'),
+  exportHtml: (path: string) => invoke<void>('export_html', { path }),
+  exportMarkdownToFile: (path: string) => invoke<void>('export_markdown_to_file', { path }),
+  bookStats: () => invoke<BookStats>('book_stats'),
   importAsset: (sourcePath: string) => invoke<string>('import_asset', { sourcePath }),
   readTableData: (noteId: string) => invoke<string[][]>('read_table_data', { noteId }),
   saveTableData: (noteId: string, rows: string[][]) =>
@@ -60,6 +64,7 @@ export const api = {
     invoke<SearchResults>('search', { query, categoryFilter }),
   relatedNotes: (id: string) => invoke<RelatedNote[]>('related_notes', { id }),
   embeddingDiagnostics: () => invoke<EmbeddingDiagnostics>('embedding_diagnostics'),
+  searchAcrossBooks: (query: string) => invoke<CrossBookNote[]>('search_across_books', { query }),
 
   // LLM
   llmStatus: () => invoke<LlmStatus>('llm_status'),
@@ -145,4 +150,9 @@ export const api = {
   // Publishing & serving (Phase 6)
   publishSite: (outDir: string) => invoke<PublishReport>('publish_site', { outDir }),
   refreshPrivateGitignore: () => invoke<GitignoreReport>('refresh_private_gitignore'),
+
+  // Style cards
+  listStyleCards: () => invoke<StyleCard[]>('list_style_cards'),
+  saveStyleCard: (card: StyleCard) => invoke<StyleCard>('save_style_card', { card }),
+  deleteStyleCard: (id: string) => invoke<void>('delete_style_card', { id }),
 };

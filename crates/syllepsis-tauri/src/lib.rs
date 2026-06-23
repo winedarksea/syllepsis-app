@@ -5,7 +5,7 @@ pub mod state;
 
 use commands::{
     book::*, categories::*, cloud_llm::*, lifecycle::*, llm::*, notes::*, pack::*, publish::*,
-    search::*, spatial::*, sync::*,
+    search::*, spatial::*, style_cards::*, sync::*,
 };
 use state::AppState;
 
@@ -55,6 +55,9 @@ pub fn run() {
             fork_note,
             delete_note,
             export_markdown,
+            export_html,
+            export_markdown_to_file,
+            book_stats,
             import_asset,
             read_table_data,
             save_table_data,
@@ -65,6 +68,7 @@ pub fn run() {
             search,
             related_notes,
             embedding_diagnostics,
+            search_across_books,
             // llm
             llm_status,
             llm_route_statuses,
@@ -111,6 +115,10 @@ pub fn run() {
             // publishing & serving (Phase 6)
             publish_site,
             refresh_private_gitignore,
+            // style cards
+            list_style_cards,
+            save_style_card,
+            delete_style_card,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Syllepsis");

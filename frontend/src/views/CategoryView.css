@@ -134,3 +134,85 @@
 .cv-status-pending { color: var(--color-tertiary); }    /* ember = needs attention */
 
 .cv-card-date { font-family: var(--font-mono); }
+
+/* Category edit toggle */
+.cv-edit-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sp-1);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  transition: color var(--transition-fast), background var(--transition-fast);
+  margin-left: auto;
+}
+.cv-edit-toggle:hover { color: var(--color-accent); background: var(--color-surface-raised); }
+
+/* Inline category editor */
+.cv-edit-panel {
+  padding: var(--sp-4) var(--sp-6);
+  background: var(--color-surface-raised);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  flex-shrink: 0;
+}
+
+.cv-edit-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-heading);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cv-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+.cv-edit-field input,
+.cv-edit-field select {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  width: 100%;
+  max-width: 280px;
+}
+.cv-edit-field input:focus,
+.cv-edit-field select:focus { border-color: var(--color-accent); outline: none; }
+
+.cv-edit-icon-preview {
+  font-size: var(--font-size-2xl);
+  line-height: 1;
+  margin-top: var(--sp-1);
+}
+
+.cv-edit-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+
+.cv-edit-btn {
+  padding: var(--sp-1) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  transition: all var(--transition-fast);
+}
+.cv-edit-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-text); }
+.cv-edit-btn-primary {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-color: var(--color-accent);
+}
+.cv-edit-btn-primary:hover:not(:disabled) { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
+.cv-edit-btn:disabled { opacity: 0.5; cursor: default; }

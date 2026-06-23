@@ -1,10 +1,12 @@
 // Collapsible metadata editor for a note: categories, location, sort position (prior),
-// classification, and scheduling dates. Edits are applied to a NoteDto copy via `onChange`;
-// the parent editor persists them through the normal updateNote save path.
+// classification, scheduling dates, and type-specific metadata.
+// Edits are applied to a NoteDto copy via `onChange`; the parent editor persists them
+// through the normal updateNote save path.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { api } from '../lib/api';
 import type {
-  NoteDto, Category, PriorKind, PriorRef, StatementType, Priority, FlexDate,
+  NoteDto, Category, PriorKind, PriorRef, StatementType, Priority, FlexDate, World,
 } from '../types';
 
 const STATEMENT_TYPES: StatementType[] = [
@@ -38,6 +40,23 @@ interface Props {
 export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [newCategory, setNewCategory] = useState('');
+  const [worlds, setWorlds] = useState<World[]>([]);
+  const [showWorldHelper, setShowWorldHelper] = useState(false);
+  const [worldId, setWorldId] = useState('');
+  const [coordX, setCoordX] = useState('');
+  const [coordY, setCoordY] = useState('');
+
+  useEffect(() => {
+    api.listWorlds().then(setWorlds).catch(() => {});
+  }, []);
+
+  const buildLocationToken = () => {
+    const w = worldId.trim();
+    const x = coordX.trim();
+    const y = coordY.trim();
+    if (!x || !y) return null;
+    return w ? `${w}/${x},${y}` : `${x},${y}`;
+  };
 
   const otherNotes = useMemo(
     () => allNotes.filter((n) => n.id !== note.id),
@@ -111,13 +130,58 @@ export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
 
           {/* Location */}
           <section className="meta-section">
-            <label className="meta-label">Location</label>
+            <div className="meta-row" style={{ justifyContent: 'space-between' }}>
+              <label className="meta-label">Location</label>
+              <button
+                className="meta-location-helper-btn"
+                onClick={() => setShowWorldHelper((v) => !v)}
+                title="World/coordinate helper"
+              >
+                {showWorldHelper ? 'Hide helper' : 'World helper'}
+              </button>
+            </div>
             <input
               className="meta-input"
               value={note.location ?? ''}
               onChange={(e) => patch({ location: e.target.value || undefined })}
-              placeholder='Place name or "lat,lon" to pin on a map'
+              placeholder='e.g. "Tokyo", "48.85,2.35", or "earth/48.85,2.35"'
             />
+            {showWorldHelper && (
+              <div className="meta-world-helper">
+                <div className="meta-world-helper-row">
+                  <label className="meta-world-helper-label">World</label>
+                  <select value={worldId} onChange={(e) => setWorldId(e.target.value)}>
+                    <option value="">Default (earth)</option>
+                    {worlds.map((w) => <option key={w.id} value={w.id}>{w.display_name}</option>)}
+                  </select>
+                </div>
+                <div className="meta-world-helper-row">
+                  <label className="meta-world-helper-label">
+                    {worldId && worlds.find((w) => w.id === worldId)?.kind === 'image' ? 'X (0–1)' : 'Latitude'}
+                  </label>
+                  <input value={coordX} onChange={(e) => setCoordX(e.target.value)} placeholder="0.0" />
+                </div>
+                <div className="meta-world-helper-row">
+                  <label className="meta-world-helper-label">
+                    {worldId && worlds.find((w) => w.id === worldId)?.kind === 'image' ? 'Y (0–1)' : 'Longitude'}
+                  </label>
+                  <input value={coordY} onChange={(e) => setCoordY(e.target.value)} placeholder="0.0" />
+                </div>
+                <button
+                  className="meta-world-helper-apply"
+                  disabled={!coordX.trim() || !coordY.trim()}
+                  onClick={() => {
+                    const token = buildLocationToken();
+                    if (token) { patch({ location: token }); setShowWorldHelper(false); }
+                  }}
+                >
+                  Apply
+                </button>
+                <p className="meta-world-helper-hint">
+                  Result: <code>{buildLocationToken() ?? '(enter coordinates)'}</code>
+                </p>
+              </div>
+            )}
           </section>
 
           {/* Sort position */}
@@ -190,10 +254,10 @@ export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
 
           {/* Dates */}
           <section className="meta-section">
-            <label className="meta-label">Dates</label>
+            <label className="meta-label">{note.type === 'todo' ? 'Task dates' : 'Dates'}</label>
             <div className="meta-row">
               <label className="meta-date">
-                Scheduled
+                {note.type === 'todo' ? 'Due' : 'Scheduled'}
                 <input
                   type="date"
                   value={flexDateValue(note.metadata.dates.scheduled)}
@@ -203,7 +267,7 @@ export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
                 />
               </label>
               <label className="meta-date">
-                Completed
+                {note.type === 'todo' ? 'Done' : 'Completed'}
                 <input
                   type="date"
                   value={flexDateValue(note.metadata.dates.completed)}
@@ -213,7 +277,23 @@ export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
                 />
               </label>
             </div>
+            {note.type === 'todo' && (
+              <p className="meta-hint">
+                Inline <code>due:</code>, <code>start:</code>, <code>done:</code> tokens in the body also set these via the syntax insert menu.
+              </p>
+            )}
           </section>
+
+          {/* Task link syntax hints (for todo notes) */}
+          {note.type === 'todo' && (
+            <section className="meta-section">
+              <label className="meta-label">Task links</label>
+              <p className="meta-hint">
+                Use <code>waiting:note-id</code> or <code>blocked-by:note-id</code> in the body to link tasks.
+                The note id is the <code>id:</code> field from the note's frontmatter.
+              </p>
+            </section>
+          )}
         </div>
       )}
     </div>

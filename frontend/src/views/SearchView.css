@@ -6,6 +6,9 @@
 }
 
 .sv-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
   padding: var(--sp-5) var(--sp-6);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
@@ -13,7 +16,8 @@
 }
 
 .sv-input {
-  width: 100%;
+  flex: 1;
+  width: auto;
   padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -134,4 +138,51 @@
   border: 1px solid var(--color-tag-border);
   border-radius: var(--radius-sm);
   padding: 1px var(--sp-2);
+}
+
+/* Cross-book search toggle */
+.sv-cross-book-toggle {
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+.sv-cross-book-toggle:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.sv-cross-book-toggle.active {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-color: var(--color-accent);
+}
+
+/* Cross-book results */
+.sv-hit-cross-book {
+  background: color-mix(in srgb, var(--color-accent) 4%, transparent);
+}
+
+.sv-cross-book-badge {
+  font-size: var(--font-size-xs);
+  background: var(--color-surface-raised);
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--sp-2);
+  flex-shrink: 0;
+}
+
+.sv-cross-book-link-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin-top: var(--sp-1);
+}
+.sv-cross-book-link-hint code {
+  font-family: var(--font-mono);
+  background: var(--color-surface-raised);
+  padding: 0 3px;
+  border-radius: 2px;
+  user-select: all;
 }

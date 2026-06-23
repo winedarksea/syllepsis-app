@@ -1,6 +1,8 @@
 // Renders the sorted book as a continuous document (headings + paragraphs/bullets).
+// Export buttons let users save the book as Markdown or HTML.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import type { RenderItem } from '../types';
@@ -18,10 +20,11 @@ function HeadingTag({ level, text }: { level: number; text: string }) {
 }
 
 export function BookView() {
-  const { openEditor } = useStore();
+  const { openEditor, book } = useStore();
   const [items, setItems] = useState<RenderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     api.bookView()
@@ -29,6 +32,34 @@ export function BookView() {
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, []);
+
+  const exportMarkdown = useCallback(async () => {
+    const path = await saveDialog({
+      title: 'Export book as Markdown',
+      defaultPath: `${book?.name ?? 'book'}.md`,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (!path || typeof path !== 'string') return;
+    setExporting(true);
+    try {
+      await api.exportMarkdownToFile(path);
+    } catch (e) { alert(String(e)); }
+    finally { setExporting(false); }
+  }, [book]);
+
+  const exportHtml = useCallback(async () => {
+    const path = await saveDialog({
+      title: 'Export book as HTML',
+      defaultPath: `${book?.name ?? 'book'}.html`,
+      filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
+    });
+    if (!path || typeof path !== 'string') return;
+    setExporting(true);
+    try {
+      await api.exportHtml(path);
+    } catch (e) { alert(String(e)); }
+    finally { setExporting(false); }
+  }, [book]);
 
   if (loading) return <div className="bv-state">Loading book…</div>;
   if (error) return <div className="bv-state bv-error">{error}</div>;
@@ -43,6 +74,14 @@ export function BookView() {
 
   return (
     <div className="bv-root selectable">
+      <div className="bv-toolbar">
+        <button className="bv-export-btn" onClick={exportMarkdown} disabled={exporting}>
+          Export Markdown
+        </button>
+        <button className="bv-export-btn" onClick={exportHtml} disabled={exporting}>
+          Export HTML
+        </button>
+      </div>
       <div className="bv-document">
         {items.map((item, i) => {
           if (item.kind === 'heading') {

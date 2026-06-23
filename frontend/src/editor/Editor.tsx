@@ -392,7 +392,7 @@ export function Editor({ noteId }: Props) {
       heading: { h2: 'lexical-h2', h3: 'lexical-h3' },
       quote: 'lexical-quote',
       list: { ul: 'lexical-list-ul', ol: 'lexical-list-ol', listitem: 'lexical-listitem' },
-      text: { bold: 'lexical-bold', italic: 'lexical-italic', underline: 'lexical-underline', code: 'lexical-code-inline' },
+      text: { bold: 'lexical-bold', italic: 'lexical-italic', underline: 'lexical-underline', code: 'lexical-code-inline', strikethrough: 'lexical-strikethrough' },
     },
   };
 

@@ -13,6 +13,8 @@ import { WorldView } from './views/WorldView';
 import { PrivacyView } from './views/PrivacyView';
 import { PacksView } from './views/PacksView';
 import { Diagnostics } from './views/Diagnostics';
+import { StatsView } from './views/StatsView';
+import { StyleCardsView } from './views/StyleCardsView';
 import { Editor } from './editor/Editor';
 import type { BookInfo, TrackedBookInfo, ObjectType } from './types';
 import './App.css';
@@ -386,6 +388,10 @@ function Workspace() {
           <PrivacyView />
         ) : view === 'packs' ? (
           <PacksView />
+        ) : view === 'stats' ? (
+          <StatsView />
+        ) : view === 'style_cards' ? (
+          <StyleCardsView />
         ) : view === 'diagnostics' ? (
           <Diagnostics />
         ) : (
