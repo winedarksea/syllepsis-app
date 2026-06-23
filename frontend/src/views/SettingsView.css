@@ -1,0 +1,392 @@
+.sv-root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* In the launch-screen modal the WizardShell provides scroll/padding, so relax the full-height. */
+.sv-modal {
+  height: auto;
+  max-height: 70vh;
+}
+
+.sv-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.sv-title {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: var(--color-heading);
+}
+
+.sv-subtitle {
+  font-family: var(--font-serif);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+  color: var(--color-text-tertiary);
+}
+
+.sv-notice,
+.sv-error {
+  margin: var(--sp-4) var(--sp-6) 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.sv-notice { color: var(--color-accent); background: var(--color-tag-bg); }
+.sv-error { color: var(--color-text-inverse); background: var(--color-error); }
+
+.sv-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-6) var(--sp-8);
+  max-width: 720px;
+  width: 100%;
+}
+
+/* ── Sections ── */
+.sv-section {
+  padding: var(--sp-5) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.sv-section:last-child { border-bottom: none; }
+
+.sv-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.sv-section-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-heading);
+}
+
+.sv-section-subtitle {
+  font-family: var(--font-serif);
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  color: var(--color-text-tertiary);
+}
+
+.sv-section-body { display: flex; flex-direction: column; gap: var(--sp-2); }
+
+.sv-disclosure {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  cursor: pointer;
+  color: var(--color-heading);
+}
+.sv-disclosure .sv-section-title { margin: 0; }
+
+.sv-hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  line-height: var(--line-height-base);
+  margin-bottom: var(--sp-2);
+}
+
+.sv-locked {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.sv-subpanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.sv-subhead {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: var(--sp-3);
+}
+
+/* ── Fields ── */
+.sv-field {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-2) 0;
+}
+
+.sv-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.sv-field-label > span:first-child {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text);
+}
+.sv-field-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  line-height: var(--line-height-base);
+}
+
+.sv-field-control {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.sv-inline { display: flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
+
+/* ── Inputs ── */
+.sv-input {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-3);
+  min-width: 200px;
+}
+.sv-input:focus { outline: none; border-color: var(--color-border-focus); }
+.sv-input-num { min-width: 96px; width: 96px; text-align: right; font-family: var(--font-mono); }
+select.sv-input { min-width: 180px; cursor: pointer; }
+
+/* ── Buttons ── */
+.sv-savebar { display: flex; gap: var(--sp-2); justify-content: flex-end; margin-top: var(--sp-2); }
+
+.sv-btn {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-4);
+  cursor: pointer;
+}
+.sv-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
+.sv-btn:disabled { opacity: 0.45; cursor: default; }
+
+.sv-btn-primary {
+  color: var(--color-text-inverse);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.sv-btn-primary:hover:not(:disabled) { background: var(--color-accent-hover); color: var(--color-text-inverse); }
+
+/* ── Segmented control (theme) ── */
+.sv-segmented {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.sv-segment {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  border-right: 1px solid var(--color-border);
+}
+.sv-segment:last-child { border-right: none; }
+.sv-segment:hover { color: var(--color-accent); }
+.sv-segment.active {
+  color: var(--color-text-inverse);
+  background: var(--color-accent);
+}
+
+/* ── Toggle switch ── */
+.sv-toggle {
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--color-border);
+  border: none;
+  position: relative;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  flex-shrink: 0;
+}
+.sv-toggle.on { background: var(--color-accent); }
+.sv-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  transition: transform var(--transition-fast);
+}
+.sv-toggle.on .sv-toggle-knob { transform: translateX(16px); }
+
+/* ── Cloud providers ── */
+.sv-providers { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.sv-provider {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.sv-provider-head { display: flex; align-items: center; justify-content: space-between; }
+.sv-provider-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--color-text); }
+
+.sv-provider-fields { display: flex; flex-direction: column; gap: var(--sp-2); }
+.sv-provider-fields .sv-input { min-width: 0; width: 100%; }
+
+.sv-badge {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  padding: 1px var(--sp-2);
+}
+.sv-badge.ok { color: var(--color-secondary); background: var(--color-secondary-subtle); }
+.sv-badge.off { color: var(--color-text-tertiary); background: var(--color-surface-raised); }
+
+/* ── Theme family picker ── */
+.sv-themes { display: flex; flex-direction: column; gap: var(--sp-3); padding-top: var(--sp-2); }
+
+.sv-themes-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.sv-themes-actions { display: flex; gap: var(--sp-2); flex-shrink: 0; }
+
+.sv-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--sp-3);
+}
+
+.sv-theme-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+.sv-theme-card:hover { border-color: var(--color-accent); }
+.sv-theme-card.active {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+.sv-swatches { display: flex; gap: var(--sp-1); }
+.sv-swatch {
+  width: 100%;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+}
+
+.sv-theme-meta { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.sv-theme-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--color-text); }
+.sv-theme-tag {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
+.sv-theme-delete {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  background: var(--color-surface);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.sv-theme-card:hover .sv-theme-delete { opacity: 1; }
+.sv-theme-delete:hover { color: var(--color-error); }
+
+/* ── Plugins placeholder ── */
+.sv-plugins {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  padding: var(--sp-3);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+.sv-plugins-icon { color: var(--color-text-tertiary); margin-top: 2px; }
+.sv-plugins-title { font-size: var(--font-size-sm); font-weight: 600; color: var(--color-text); }
+.sv-plugins-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  line-height: var(--line-height-base);
+  margin-top: 2px;
+}
+
+/* ── About ── */
+.sv-about { display: flex; gap: var(--sp-4); align-items: flex-start; }
+.sv-about-mark {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-serif);
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
+  color: var(--color-text-inverse);
+  background: var(--color-accent);
+  border-radius: var(--radius-md);
+  clip-path: var(--clip-chamfer);
+}
+.sv-about-name { font-size: var(--font-size-lg); font-weight: 700; color: var(--color-heading); }
+.sv-about-meta {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+.sv-about-flavor {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  margin-top: var(--sp-2);
+}

@@ -133,6 +133,23 @@ pub fn get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// App version and build date for the Settings → About panel. The build date is baked in by
+/// `build.rs` via the `SYLLEPSIS_BUILD_DATE` env var.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BuildInfo {
+    pub version: String,
+    pub build_date: String,
+}
+
+/// Return the app version and the date this binary was built.
+#[tauri::command]
+pub fn get_build_info() -> BuildInfo {
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        build_date: env!("SYLLEPSIS_BUILD_DATE").to_string(),
+    }
+}
+
 fn book_info(book_path: &Path, book: &Book) -> BookInfo {
     BookInfo {
         name: book.metadata.name.clone(),

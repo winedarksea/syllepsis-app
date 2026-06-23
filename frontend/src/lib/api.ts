@@ -8,6 +8,7 @@ import type {
   LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, CloudLlmPrompt, CloudLlmCompletion,
   CloudLlmProviderDescriptor, CloudLlmProviderSettings, CloudLlmProviderStatus,
   ModelManifest, ModelCacheStatus, ModelDownloadReport,
+  BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig,
   World, Overlay, LookupEntry, ResolvedLocation,
   LockMode, PolicyOverview,
   ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
@@ -18,6 +19,19 @@ import type {
 
 export const api = {
   getVersion: () => invoke<string>('get_version'),
+  getBuildInfo: () => invoke<BuildInfo>('get_build_info'),
+
+  // Book config / settings. Updaters replace a whole sub-config — always pass the complete
+  // object read from getBookConfig (omitted fields fall back to serde defaults, not disk values).
+  getBookConfig: () => invoke<BookConfig>('get_book_config'),
+  updatePrivacyConfig: (privacy: PrivacyConfig) =>
+    invoke<BookConfig>('update_privacy_config', { privacy }),
+  updateSyncConfig: (sync: SyncConfig) => invoke<BookConfig>('update_sync_config', { sync }),
+  updateSearchConfig: (search: SearchConfig) =>
+    invoke<BookConfig>('update_search_config', { search }),
+  updateCleanupConfig: (cleanup: CleanupConfig) =>
+    invoke<BookConfig>('update_cleanup_config', { cleanup }),
+  updateLlmConfig: (llm: LlmConfig) => invoke<BookConfig>('update_llm_config', { llm }),
 
   openBook: (path: string) => invoke<BookInfo>('open_book', { path }),
   listTrackedBooks: () => invoke<TrackedBookInfo[]>('list_tracked_books'),

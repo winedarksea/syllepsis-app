@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from './lib/store';
 import { api } from './lib/api';
@@ -16,7 +16,10 @@ import { TextImportView } from './views/TextImportView';
 import { Diagnostics } from './views/Diagnostics';
 import { StatsView } from './views/StatsView';
 import { StyleCardsView } from './views/StyleCardsView';
+import { SettingsView } from './views/SettingsView';
 import { Editor } from './editor/Editor';
+import { Icon } from './components/Icon';
+import { resolveThemeVars } from './theme/themes';
 import type { BookInfo, TrackedBookInfo, ObjectType } from './types';
 import './App.css';
 
@@ -37,6 +40,7 @@ function BookPicker() {
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const [mode, setMode] = useState<'create' | 'import' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   const reloadTrackedBooks = useCallback(async () => {
     setLoading(true);
@@ -103,6 +107,14 @@ function BookPicker() {
   return (
     <div className="picker-root">
       <div className="picker-card">
+        <button
+          className="picker-settings-btn"
+          onClick={() => setShowSettings(true)}
+          title="Settings"
+          aria-label="Settings"
+        >
+          <Icon name="settings" size={20} />
+        </button>
         <div className="picker-logo">S</div>
         <h1 className="picker-title">Syllepsis</h1>
         <p className="picker-subtitle">Choose a local knowledge book.</p>
@@ -162,6 +174,12 @@ function BookPicker() {
           onCreated={handleBookCreated}
           onError={setError}
         />
+      )}
+
+      {showSettings && (
+        <WizardShell title="Settings" onCancel={() => setShowSettings(false)}>
+          <SettingsView launchMode />
+        </WizardShell>
       )}
     </div>
   );
@@ -395,6 +413,8 @@ function Workspace() {
           <StatsView />
         ) : view === 'style_cards' ? (
           <StyleCardsView />
+        ) : view === 'settings' ? (
+          <SettingsView />
         ) : view === 'diagnostics' ? (
           <Diagnostics />
         ) : (
@@ -409,10 +429,24 @@ function Workspace() {
 // Root
 // ──────────────────────────────────────────────
 export default function App() {
-  const { book, theme } = useStore();
+  const { book, theme, themePref, syncSystemTheme, themeId, customThemes } = useStore();
+
+  // When following the system theme, re-resolve live as the OS color scheme changes.
+  useEffect(() => {
+    if (themePref !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = () => syncSystemTheme();
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [themePref, syncSystemTheme]);
+
+  // Apply the active theme family's token map for the current mode as inline custom properties,
+  // overriding the base light.css/dark.css. Built-in Nordic resolves to the same values it has in
+  // CSS; other built-ins and imported custom themes override here.
+  const themeVars = resolveThemeVars(themeId, theme, customThemes);
 
   return (
-    <div data-theme={theme} style={{ height: '100%' }}>
+    <div data-theme={theme} style={{ height: '100%', ...themeVars } as CSSProperties}>
       {book ? <Workspace /> : <BookPicker />}
     </div>
   );

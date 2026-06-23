@@ -9,6 +9,7 @@
 }
 
 .picker-card {
+  position: relative;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -19,6 +20,20 @@
   width: min(720px, 100%);
   max-height: min(760px, 100%);
 }
+
+.picker-settings-btn {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.picker-settings-btn:hover { color: var(--color-accent); background: var(--color-surface-raised); }
 
 .picker-logo {
   width: 36px;

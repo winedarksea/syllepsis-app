@@ -328,6 +328,88 @@ export interface CloudLlmProviderSettings {
   base_url?: string | null;
 }
 
+export interface BuildInfo {
+  version: string;
+  build_date: string;
+}
+
+// Book operational config — mirrors syllepsis_core::config::Config, persisted to _config.yaml.
+// Updaters replace a whole sub-config, so always send the complete object read from getBookConfig.
+export interface MarkdownConfig {
+  dialect_version: string;
+}
+
+export interface SummaryConfig {
+  max_chars: number;
+  max_fraction_of_body: number;
+}
+
+export interface CleanupConfig {
+  default_vanish_days: number;
+  deletion_delay_days: number;
+  todo_archive_days: number;
+}
+
+export interface PrivacyConfig {
+  unlock_delay_hours: number;
+  confirmation_delay_hours: number;
+}
+
+export interface EmbeddingConfig {
+  chunk_token_limit: number;
+  chunk_overlap_tokens: number;
+  dimensions: number;
+  model_id: string;
+  matryoshka_dims: number | null;
+}
+
+export interface SearchConfig {
+  rrf_k: number;
+  category_upweight: number;
+  bm25_k1: number;
+  bm25_b: number;
+  result_limit: number;
+  related_limit: number;
+  duplicate_similarity: number;
+  blind_spot_similarity: number;
+}
+
+export interface LlmRouting {
+  summarize: ModelRef;
+  fact_check: ModelRef;
+  devils_advocate: ModelRef;
+  grammar: ModelRef;
+  category_suggest: ModelRef;
+  rewrite: ModelRef;
+}
+
+export interface LlmConfig {
+  enabled: boolean;
+  provider: string;
+  local_model: string;
+  max_new_tokens: number;
+  auto_accept: boolean;
+  routing: LlmRouting;
+}
+
+export interface SyncConfig {
+  enabled: boolean;
+  crdt_backend: string;
+  conflict_marker: string;
+  external_edit_skew_secs: number;
+}
+
+export interface BookConfig {
+  markdown: MarkdownConfig;
+  summary: SummaryConfig;
+  cleanup: CleanupConfig;
+  privacy: PrivacyConfig;
+  embedding: EmbeddingConfig;
+  search: SearchConfig;
+  llm: LlmConfig;
+  sync: SyncConfig;
+}
+
 export interface Proposal {
   id: string;
   target: string;

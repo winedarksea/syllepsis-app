@@ -1,6 +1,7 @@
 pub mod book;
 pub mod categories;
 pub mod cloud_llm;
+pub mod config;
 pub mod lifecycle;
 pub mod llm;
 pub mod notes;

@@ -4,8 +4,8 @@ pub mod commands;
 pub mod state;
 
 use commands::{
-    book::*, categories::*, cloud_llm::*, lifecycle::*, llm::*, notes::*, pack::*, publish::*,
-    search::*, spatial::*, style_cards::*, sync::*, text_import::*,
+    book::*, categories::*, cloud_llm::*, config::*, lifecycle::*, llm::*, notes::*, pack::*,
+    publish::*, search::*, spatial::*, style_cards::*, sync::*, text_import::*,
 };
 use state::AppState;
 
@@ -39,11 +39,19 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // book lifecycle
             get_version,
+            get_build_info,
             open_book,
             create_book,
             create_book_in_parent,
             list_tracked_books,
             forget_tracked_book,
+            // book config / settings
+            get_book_config,
+            update_privacy_config,
+            update_sync_config,
+            update_search_config,
+            update_cleanup_config,
+            update_llm_config,
             // notes
             book_view,
             unsorted_notes,

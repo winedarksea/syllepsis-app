@@ -38,7 +38,7 @@ Edit mode, reading mode, source mode (raw = source)
 
 Implement the "navigator's" theme alternative theme, and generally make sure theme switching is possible. Ideally each theme would support both light and dark mode. Also some special icons or even perhaps special visual style (such as different styles for the graph connections and nodes).
 
-Need to make a GitHub Actions flow that publishes to syllepsis.org (our domain) a landing page as well as the built installer binaries.
+Need to make a GitHub Actions flow that publishes to syllepsis.org (our domain) a landing page as well as the built installer binaries available for download (likely all hosted on Cloudflare Pages).
 
 A collection of related functions:
 Unlock delay enforcement: 24-hour gate on unlocking files not enforced
@@ -55,3 +55,5 @@ No support for images yet.
 Existing pack notes do not preserve prior. They should.
 
 Embeddings aren't fully developed yet (like clusters). Should maybe have their own view, and link into statistics.
+
+Merge note tool (LLM backed with preview and edit before final merge). Users should be able to specify the higher priority note (the one to try and save the most content from) of the two.

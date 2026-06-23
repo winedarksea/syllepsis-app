@@ -23,6 +23,7 @@ This document provides guidelines for agents working on the Syllepsis codebase.
 ### 2.3 Error Handling
 - **Robustness at the Edge:** Wrap potentially unstable operations (like `np.linalg.solve`) with try/except blocks to handle `LinAlgError` or singular matrices gracefully.
 - **Avoid Pointless Fallbacks** Only include fallbacks where the fallback is effective. Heuristic fallbacks can hide errors and slow debugging, so avoid them.
+- **Protect the Notes:** User's notes (unsaved being typed and saved on disk) should generally be protected as a first priority. Protecting notes from being corrupted or accidentally deleted is a key requirement.
 
 ### 2.4 High-Signal Comments
 - **Explain "Why", Not "What":** Comments should explain the reasoning behind complex algorithms or architectural decisions.

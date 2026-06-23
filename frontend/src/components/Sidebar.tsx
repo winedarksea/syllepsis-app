@@ -54,6 +54,13 @@ export function Sidebar({ onNewNote }: Props) {
         <span className="sidebar-app-name">Syllepsis</span>
         <div className="sidebar-header-actions">
           <button
+            className={`sidebar-theme-btn ${view === 'settings' ? 'active' : ''}`}
+            onClick={() => setView('settings')}
+            title="Settings"
+          >
+            <Icon name="settings" size={18} />
+          </button>
+          <button
             className="sidebar-theme-btn"
             onClick={closeBook}
             title="Close book — back to launch screen"

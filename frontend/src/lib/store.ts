@@ -2,10 +2,48 @@
 
 import { create } from 'zustand';
 import type { BookInfo, Category } from '../types';
+import type { Theme } from '../theme/themes';
+import { DEFAULT_THEME_ID, themeById } from '../theme/themes';
 
 export type View =
   | 'book' | 'unsorted' | 'category' | 'editor' | 'search' | 'graph'
-  | 'diagnostics' | 'worlds' | 'privacy' | 'packs' | 'text_import' | 'stats' | 'style_cards';
+  | 'diagnostics' | 'worlds' | 'privacy' | 'packs' | 'text_import' | 'stats' | 'style_cards'
+  | 'settings';
+
+export type ThemePref = 'light' | 'dark' | 'system';
+
+const THEME_PREF_KEY = 'syllepsis.themePref';
+const THEME_ID_KEY = 'syllepsis.themeId';
+const CUSTOM_THEMES_KEY = 'syllepsis.customThemes';
+
+function readSystemTheme(): 'light' | 'dark' {
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function readThemePref(): ThemePref {
+  const stored = localStorage.getItem(THEME_PREF_KEY);
+  return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+}
+
+function resolveTheme(pref: ThemePref): 'light' | 'dark' {
+  return pref === 'system' ? readSystemTheme() : pref;
+}
+
+function readCustomThemes(): Theme[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_THEMES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed as Theme[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function readThemeId(custom: Theme[]): string {
+  const stored = localStorage.getItem(THEME_ID_KEY);
+  // Fall back to the default if the stored family was deleted or never existed.
+  return stored && themeById(stored, custom) ? stored : DEFAULT_THEME_ID;
+}
 
 interface AppStore {
   // Book
@@ -38,9 +76,22 @@ interface AppStore {
   unsortedCount: number;
   setUnsortedCount: (n: number) => void;
 
-  // Theme
+  // Theme: `themePref` is the light/dark/system choice (persisted); `theme` is the resolved mode
+  // applied to the DOM. When the pref is 'system', `theme` tracks the OS color scheme.
+  themePref: ThemePref;
   theme: 'light' | 'dark';
+  setThemePref: (pref: ThemePref) => void;
   toggleTheme: () => void;
+  // Re-resolve from the OS color scheme; a no-op unless the pref is 'system'.
+  syncSystemTheme: () => void;
+
+  // Theme family: `themeId` selects which palette (built-in or imported custom) is active; each
+  // family carries its own light & dark token sets. `customThemes` are user-imported (persisted).
+  themeId: string;
+  customThemes: Theme[];
+  setThemeId: (id: string) => void;
+  addCustomTheme: (theme: Theme) => void;
+  removeCustomTheme: (id: string) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -76,7 +127,42 @@ export const useStore = create<AppStore>((set) => ({
   unsortedCount: 0,
   setUnsortedCount: (unsortedCount) => set({ unsortedCount }),
 
-  theme: (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') as 'light' | 'dark',
+  themePref: readThemePref(),
+  theme: resolveTheme(readThemePref()),
+  setThemePref: (themePref) => {
+    localStorage.setItem(THEME_PREF_KEY, themePref);
+    set({ themePref, theme: resolveTheme(themePref) });
+  },
   toggleTheme: () =>
-    set((s) => ({ theme: s.theme === 'light' ? 'dark' : 'light' })),
+    set((s) => {
+      const next = s.theme === 'light' ? 'dark' : 'light';
+      localStorage.setItem(THEME_PREF_KEY, next);
+      return { themePref: next, theme: next };
+    }),
+  syncSystemTheme: () =>
+    set((s) => (s.themePref === 'system' ? { theme: readSystemTheme() } : {})),
+
+  themeId: readThemeId(readCustomThemes()),
+  customThemes: readCustomThemes(),
+  setThemeId: (themeId) => {
+    localStorage.setItem(THEME_ID_KEY, themeId);
+    set({ themeId });
+  },
+  addCustomTheme: (theme) =>
+    set((s) => {
+      // Replace any existing theme with the same id, then select the imported one.
+      const customThemes = [...s.customThemes.filter((t) => t.id !== theme.id), theme];
+      localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(customThemes));
+      localStorage.setItem(THEME_ID_KEY, theme.id);
+      return { customThemes, themeId: theme.id };
+    }),
+  removeCustomTheme: (id) =>
+    set((s) => {
+      const customThemes = s.customThemes.filter((t) => t.id !== id);
+      localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(customThemes));
+      // If the deleted family was active, fall back to the default.
+      const themeId = s.themeId === id ? DEFAULT_THEME_ID : s.themeId;
+      localStorage.setItem(THEME_ID_KEY, themeId);
+      return { customThemes, themeId };
+    }),
 }));
