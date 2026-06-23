@@ -1,0 +1,26 @@
+# Built-in Syllepsis plugin: a PDF text-extractor compiled to WASM (Rust → WASM demonstration).
+# Its own workspace so the host workspace never tries to build it for the native target.
+[workspace]
+
+[package]
+name = "pdf-import"
+version = "0.1.0"
+edition = "2021"
+description = "Syllepsis import source plugin: extracts plain text from a PDF for the Note Importer."
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+extism-pdk = "1"
+serde = { version = "1", features = ["derive"] }
+# Pure-Rust PDF parsing. default-features off drops the date (chrono/time/jiff) and image
+# (embed_image/image) deps that don't belong in a WASM text extractor; the content parser the
+# text extractor needs is built in.
+lopdf = { version = "0.36", default-features = false }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

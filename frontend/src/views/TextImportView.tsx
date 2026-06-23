@@ -5,6 +5,7 @@ import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import type {
   NoteDto,
+  PluginDescriptor,
   TextImportOptions,
   TextImportPlacement,
   TextImportPreview,
@@ -17,6 +18,9 @@ const TEXT_FILTER = [
   { name: 'Text or Markdown', extensions: ['txt', 'md', 'markdown'] },
   { name: 'All files', extensions: ['*'] },
 ];
+
+// The built-in text source (paste/text-file). Plugin import sources are appended to this.
+const TEXT_SOURCE = 'text';
 
 const DEFAULT_OPTIONS: TextImportOptions = {
   split_mode: 'smart',
@@ -48,6 +52,8 @@ export function TextImportView() {
   const [preview, setPreview] = useState<TextImportPreview | null>(null);
   const [items, setItems] = useState<TextImportPreviewItem[]>([]);
   const [notes, setNotes] = useState<NoteDto[]>([]);
+  const [importPlugins, setImportPlugins] = useState<PluginDescriptor[]>([]);
+  const [source, setSource] = useState<string>(TEXT_SOURCE);
   const [placementMode, setPlacementMode] = useState<'unsorted' | 'category' | 'after_note'>('unsorted');
   const [placementCategory, setPlacementCategory] = useState('');
   const [placementNoteId, setPlacementNoteId] = useState('');
@@ -57,7 +63,16 @@ export function TextImportView() {
 
   useEffect(() => {
     api.listNotes().then(setNotes).catch(console.error);
+    api
+      .listPlugins()
+      .then((plugins) => setImportPlugins(plugins.filter((p) => p.kind === 'import_source')))
+      .catch(console.error);
   }, []);
+
+  const activePlugin = useMemo(
+    () => importPlugins.find((p) => p.id === source) ?? null,
+    [importPlugins, source],
+  );
 
   const chooseFile = useCallback(async () => {
     const picked = await openDialog({
@@ -78,6 +93,32 @@ export function TextImportView() {
       setBusy(false);
     }
   }, []);
+
+  // Run an import-source plugin over a chosen file, producing the same preview the text source does.
+  const choosePluginFile = useCallback(async () => {
+    if (!activePlugin) return;
+    const exts = activePlugin.import_extensions.length > 0 ? activePlugin.import_extensions : ['*'];
+    const picked = await openDialog({
+      multiple: false,
+      title: `Choose a ${activePlugin.name} file`,
+      filters: [{ name: activePlugin.name, extensions: exts }, { name: 'All files', extensions: ['*'] }],
+    });
+    if (!picked || typeof picked !== 'string') return;
+    setBusy(true);
+    try {
+      const nextPreview = await api.previewPluginImport(activePlugin.id, picked, options);
+      setPreview(nextPreview);
+      setItems(nextPreview.items);
+      setError(null);
+      setNotice(
+        `${activePlugin.name}: previewed ${nextPreview.items.length} note${nextPreview.items.length === 1 ? '' : 's'} from ${picked.split('/').pop() ?? 'file'}.`,
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [activePlugin, options]);
 
   const runPreview = useCallback(async () => {
     if (!sourceText.trim()) {
@@ -156,13 +197,20 @@ export function TextImportView() {
     <div className="ti-root">
       <div className="ti-header">
         <div>
-          <h2 className="ti-title">Text Import</h2>
-          <p className="ti-subtitle">Paste or load a long text document, preview the split, then import as notes.</p>
+          <h2 className="ti-title">Note Import</h2>
+          <p className="ti-subtitle">Bring in text from a paste, a file, or an import plugin, preview the split, then import as notes.</p>
         </div>
-        <button className="ti-btn" disabled={busy} onClick={chooseFile}>
-          <Icon name="folder_open" size={18} />
-          <span>Choose file</span>
-        </button>
+        {source === TEXT_SOURCE ? (
+          <button className="ti-btn" disabled={busy} onClick={chooseFile}>
+            <Icon name="folder_open" size={18} />
+            <span>Choose file</span>
+          </button>
+        ) : (
+          <button className="ti-btn ti-btn-primary" disabled={busy} onClick={choosePluginFile}>
+            <Icon name="folder_open" size={18} />
+            <span>Choose {activePlugin?.name ?? 'file'}</span>
+          </button>
+        )}
       </div>
 
       {notice && <div className="ti-notice" onClick={() => setNotice(null)}>{notice}</div>}
@@ -170,14 +218,32 @@ export function TextImportView() {
 
       <section className="ti-panel">
         <label className="ti-field">
-          <span>Source text</span>
-          <textarea
-            className="ti-source"
-            value={sourceText}
-            onChange={(event) => setSourceText(event.target.value)}
-            placeholder="Paste plain text or Markdown here."
-          />
+          <span>Source</span>
+          <select value={source} onChange={(event) => { setSource(event.target.value); setPreview(null); setItems([]); }}>
+            <option value={TEXT_SOURCE}>Paste or text file</option>
+            {importPlugins.map((plugin) => (
+              <option key={plugin.id} value={plugin.id}>
+                {plugin.name}{plugin.import_extensions.length > 0 ? ` (.${plugin.import_extensions.join(', .')})` : ''}
+              </option>
+            ))}
+          </select>
         </label>
+
+        {source === TEXT_SOURCE ? (
+          <label className="ti-field">
+            <span>Source text</span>
+            <textarea
+              className="ti-source"
+              value={sourceText}
+              onChange={(event) => setSourceText(event.target.value)}
+              placeholder="Paste plain text or Markdown here."
+            />
+          </label>
+        ) : (
+          <p className="ti-subtitle">
+            {activePlugin?.description ?? 'Choose a file above to extract its text, then preview and chunk it into notes.'}
+          </p>
+        )}
 
         <div className="ti-controls">
           <label className="ti-field">
@@ -232,10 +298,17 @@ export function TextImportView() {
         </div>
 
         <div className="ti-actions">
-          <button className="ti-btn ti-btn-primary" disabled={busy || !sourceText.trim()} onClick={runPreview}>
-            <Icon name="visibility" size={18} />
-            <span>Preview import</span>
-          </button>
+          {source === TEXT_SOURCE ? (
+            <button className="ti-btn ti-btn-primary" disabled={busy || !sourceText.trim()} onClick={runPreview}>
+              <Icon name="visibility" size={18} />
+              <span>Preview import</span>
+            </button>
+          ) : (
+            <button className="ti-btn" disabled={busy} onClick={choosePluginFile}>
+              <Icon name="visibility" size={18} />
+              <span>Re-run preview</span>
+            </button>
+          )}
           <button className="ti-btn ti-btn-primary" disabled={commitDisabled} onClick={commitImport}>
             <Icon name="upload_file" size={18} />
             <span>Import {items.length || ''} note{items.length === 1 ? '' : 's'}</span>

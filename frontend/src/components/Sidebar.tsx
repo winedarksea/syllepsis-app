@@ -28,7 +28,7 @@ const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[]
   { view: 'graph', icon: 'hub', label: 'Graph', slot: 'graph' },
   { view: 'worlds', icon: 'map', label: 'Worlds', slot: 'worlds' },
   { view: 'packs', icon: 'inventory_2', label: 'Packs', slot: 'packs' },
-  { view: 'text_import', icon: 'upload_file', label: 'Text Import' },
+  { view: 'text_import', icon: 'upload_file', label: 'Note Import' },
   { view: 'privacy', icon: 'lock', label: 'Privacy' },
   { view: 'stats', icon: 'bar_chart', label: 'Statistics' },
   { view: 'style_cards', icon: 'style', label: 'Style Cards' },

@@ -34,6 +34,11 @@ reqwest = { version = "0.13", optional = true, default-features = false, feature
 # keeps the heavy ML deps optional. See crates/syllepsis-core/src/crdt/loro_backend.rs.
 loro = { version = "1.13", optional = true }
 
+# Extism is the WASM plugin runtime (wraps wasmtime). Kept behind a feature so the default
+# build/test never compiles wasmtime; the always-on plugin::manifest/registry have no WASM dep.
+# See crates/syllepsis-core/src/plugin/host.rs.
+extism = { version = "1", optional = true }
+
 [features]
 default = []
 # Enables the real ONNX-backed embedder (Qwen3-Embedding-0.6B) and local LLM (Gemma 4 E2B),
@@ -41,6 +46,8 @@ default = []
 onnx = ["dep:ort", "dep:ndarray", "dep:tokenizers", "dep:reqwest"]
 # Enables the fine-grained Loro text CRDT backend behind the CrdtBackend seam (crdt::loro_backend).
 loro = ["dep:loro"]
+# Enables the WASM plugin runtime (plugin::host) so plugins can actually execute.
+extism = ["dep:extism"]
 
 [dev-dependencies]
 tempfile = "3"

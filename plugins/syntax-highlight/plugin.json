@@ -1,0 +1,10 @@
+{
+  "format": "syllepsis_plugin_001",
+  "id": "syntax-highlight",
+  "name": "Syntax Highlighter",
+  "version": "0.1.0",
+  "description": "Highlights fenced code blocks (rust, python, javascript/typescript) to sanitized HTML.",
+  "kind": "code_block_renderer",
+  "entry_wasm": "syntax_highlight.wasm",
+  "languages": ["rust", "python", "javascript", "typescript", "js", "ts", "py", "rs"]
+}

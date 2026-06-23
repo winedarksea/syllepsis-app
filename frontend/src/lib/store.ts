@@ -76,6 +76,11 @@ interface AppStore {
   unsortedCount: number;
   setUnsortedCount: (n: number) => void;
 
+  // Fenced-code languages claimed by code-block-renderer plugins (lower-cased). Loaded once at
+  // startup; the editor maps these languages to a rendered PluginBlockNode instead of plain code.
+  pluginRenderLanguages: string[];
+  setPluginRenderLanguages: (languages: string[]) => void;
+
   // Theme: `themePref` is the light/dark/system choice (persisted); `theme` is the resolved mode
   // applied to the DOM. When the pref is 'system', `theme` tracks the OS color scheme.
   themePref: ThemePref;
@@ -126,6 +131,9 @@ export const useStore = create<AppStore>((set) => ({
 
   unsortedCount: 0,
   setUnsortedCount: (unsortedCount) => set({ unsortedCount }),
+
+  pluginRenderLanguages: [],
+  setPluginRenderLanguages: (pluginRenderLanguages) => set({ pluginRenderLanguages }),
 
   themePref: readThemePref(),
   theme: resolveTheme(readThemePref()),

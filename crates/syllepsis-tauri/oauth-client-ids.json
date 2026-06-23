@@ -1,0 +1,14 @@
+{
+  "google_drive": {
+    "client_id": "",
+    "callback_port": 53682
+  },
+  "dropbox": {
+    "client_id": "pzsjacfdp19jnep",
+    "callback_port": 53683
+  },
+  "onedrive": {
+    "client_id": "",
+    "callback_port": 53684
+  }
+}

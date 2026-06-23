@@ -1,0 +1,23 @@
+# Built-in Syllepsis plugin: a fenced-code-block syntax highlighter compiled to WASM.
+# Its own workspace so the host workspace never tries to build it for the native target.
+[workspace]
+
+[package]
+name = "syntax-highlight"
+version = "0.1.0"
+edition = "2021"
+description = "Syllepsis code-block renderer plugin: highlights fenced code blocks to HTML."
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+extism-pdk = "1"
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+# Small WASM artifacts: optimize for size and strip.
+opt-level = "s"
+lto = true
+strip = true

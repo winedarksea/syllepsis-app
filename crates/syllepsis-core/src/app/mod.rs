@@ -7,6 +7,7 @@ pub mod git;
 pub mod lifecycle;
 pub mod llm;
 pub mod pack;
+pub mod plugin;
 pub mod publish;
 pub mod search;
 pub mod spatial;

@@ -1,0 +1,11 @@
+{
+  "format": "syllepsis_plugin_001",
+  "id": "pdf-import",
+  "name": "PDF Importer",
+  "version": "0.1.0",
+  "description": "Extracts plain text from a PDF and feeds it into the Note Importer to chunk into notes.",
+  "kind": "import_source",
+  "entry_wasm": "pdf_import.wasm",
+  "import_extensions": ["pdf"],
+  "capabilities": ["note_write"]
+}

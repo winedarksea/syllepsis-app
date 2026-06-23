@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/syllepsis-core", "crates/syllepsis-tauri"]
+# The WASM plugin crates target wasm32 and carry their own `[workspace]`; keep them out of the
+# host workspace so a plain `cargo build` never tries to compile them for the native target.
+exclude = ["plugins/pdf-import", "plugins/syntax-highlight"]
 
 # Shared dependency versions. Member crates opt in with `dep.workspace = true`,
 # keeping versions consistent across the workspace (AGENTS.md: clean seams).

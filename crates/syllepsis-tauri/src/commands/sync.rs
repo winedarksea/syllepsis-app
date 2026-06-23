@@ -2,14 +2,17 @@
 //! patch-log sync.
 
 use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Emitter, State};
 
 use syllepsis_core::app::git as git_app;
 use syllepsis_core::app::sync as app;
@@ -25,11 +28,13 @@ use syllepsis_core::sync::{
 use crate::state::AppState;
 
 const SYNC_KEYCHAIN_SERVICE: &str = "syllepsis.sync";
+const DEVELOPMENT_SYNC_KEYCHAIN_SERVICE: &str = "syllepsis.sync.dev";
 const ACCESS_TOKEN_FIELD: &str = "access-token";
 const REFRESH_TOKEN_FIELD: &str = "refresh-token";
 const OAUTH_STATE_FIELD: &str = "oauth-state";
 const CODE_VERIFIER_FIELD: &str = "code-verifier";
-const OAUTH_REDIRECT_URI: &str = "syllepsis://oauth-callback";
+const OAUTH_CALLBACK_PATH: &str = "/oauth-callback";
+const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 const ACTIVITY_RETENTION_DAYS: i64 = 90;
 const WATCH_ACTIVITY_DEBOUNCE: Duration = Duration::from_millis(750);
 
@@ -374,36 +379,68 @@ pub fn cloud_sync_provider_statuses() -> Result<Vec<CloudSyncProviderStatus>, St
 }
 
 #[tauri::command]
-pub fn connect_cloud_sync_provider(provider: String) -> Result<CloudSyncConnectStart, String> {
+pub fn connect_cloud_sync_provider(
+    app: tauri::AppHandle,
+    provider: String,
+) -> Result<CloudSyncConnectStart, String> {
     descriptor_for(&provider)?;
+    let oauth_client_config = oauth_client_config(provider.as_str())?;
+    let listener = TcpListener::bind(("127.0.0.1", oauth_client_config.callback_port))
+        .map_err(|error| format!("start OAuth callback listener: {error}"))?;
+    let callback_address = listener
+        .local_addr()
+        .map_err(|error| format!("read OAuth callback address: {error}"))?;
+    let redirect_uri = format!(
+        "http://127.0.0.1:{}{OAUTH_CALLBACK_PATH}",
+        callback_address.port()
+    );
     let state = ulid::Ulid::new().to_string();
     let verifier = pkce_verifier();
     let challenge = pkce_challenge(&verifier);
+    let auth_url = oauth_url(&provider, &state, &challenge, &redirect_uri)?;
     let mut store = KeyringSyncCredentialStore;
     store.set(&account(&provider, OAUTH_STATE_FIELD), &state)?;
     store.set(&account(&provider, CODE_VERIFIER_FIELD), &verifier)?;
+
+    let callback_provider = provider.clone();
+    let callback_redirect_uri = redirect_uri.clone();
+    thread::spawn(move || {
+        let result = receive_oauth_callback(listener).and_then(|callback_url| {
+            complete_cloud_sync_oauth_callback(
+                &callback_provider,
+                &callback_url,
+                &callback_redirect_uri,
+            )
+        });
+        match result {
+            Ok(status) => {
+                let _ = app.emit("cloud-sync://oauth-completed", status);
+            }
+            Err(error) => {
+                let _ = app.emit("cloud-sync://oauth-failed", error);
+            }
+        }
+    });
+
     Ok(CloudSyncConnectStart {
-        auth_url: oauth_url(&provider, &state, &challenge)?,
-        redirect_uri: OAUTH_REDIRECT_URI.to_string(),
+        auth_url,
+        redirect_uri,
         provider,
         state,
     })
 }
 
-#[tauri::command]
-pub fn handle_cloud_sync_oauth_callback(
-    callback_url: String,
+fn complete_cloud_sync_oauth_callback(
+    provider: &str,
+    callback_url: &str,
+    redirect_uri: &str,
 ) -> Result<CloudSyncProviderStatus, String> {
     let params = parse_query_params(&callback_url);
-    let provider = params
-        .get("provider")
-        .cloned()
-        .unwrap_or_else(|| "google_drive".to_string());
-    let descriptor = descriptor_for(&provider)?;
     let mut store = KeyringSyncCredentialStore;
+    let descriptor = descriptor_for(provider)?;
 
     let expected_state = store
-        .get(&account(&provider, OAUTH_STATE_FIELD))?
+        .get(&account(provider, OAUTH_STATE_FIELD))?
         .ok_or_else(|| "no pending OAuth request for this provider".to_string())?;
     let callback_state = params
         .get("state")
@@ -411,28 +448,35 @@ pub fn handle_cloud_sync_oauth_callback(
     if callback_state != &expected_state {
         return Err("OAuth callback state did not match the pending request".to_string());
     }
-    store.delete(&account(&provider, OAUTH_STATE_FIELD))?;
+    store.delete(&account(provider, OAUTH_STATE_FIELD))?;
+
+    if let Some(error) = params.get("error") {
+        let description = params
+            .get("error_description")
+            .map(String::as_str)
+            .unwrap_or("authorization was not completed");
+        return Err(format!("{error}: {description}"));
+    }
 
     if let Some(token) = params.get("refresh_token").or_else(|| params.get("token")) {
         // Some providers (or manual testing) may deliver a token directly.
-        store.set(&account(&provider, REFRESH_TOKEN_FIELD), token)?;
+        store.set(&account(provider, REFRESH_TOKEN_FIELD), token)?;
     } else if let Some(code) = params.get("code") {
         // Standard authorization-code + PKCE flow: exchange the code for tokens.
         let verifier = store
-            .get(&account(&provider, CODE_VERIFIER_FIELD))?
+            .get(&account(provider, CODE_VERIFIER_FIELD))?
             .ok_or_else(|| "no PKCE code verifier found; restart the connect flow".to_string())?;
-        store.delete(&account(&provider, CODE_VERIFIER_FIELD))?;
-        let credentials = exchange_code_for_tokens(&provider, code, &verifier)?;
+        store.delete(&account(provider, CODE_VERIFIER_FIELD))?;
+        let credentials = exchange_code_for_tokens(provider, code, &verifier, redirect_uri)?;
         if let Some(access) = credentials.access_token {
-            store.set(&account(&provider, ACCESS_TOKEN_FIELD), &access)?;
+            store.set(&account(provider, ACCESS_TOKEN_FIELD), &access)?;
         }
         if let Some(refresh) = credentials.refresh_token {
-            store.set(&account(&provider, REFRESH_TOKEN_FIELD), &refresh)?;
+            store.set(&account(provider, REFRESH_TOKEN_FIELD), &refresh)?;
         }
     } else {
         return Err("OAuth callback did not include a token or code".to_string());
     }
-
     Ok(CloudSyncProviderStatus {
         provider: descriptor.provider,
         display_name: descriptor.display_name,
@@ -448,6 +492,7 @@ pub fn disconnect_cloud_sync_provider(provider: String) -> Result<CloudSyncProvi
     store.delete(&account(&provider, ACCESS_TOKEN_FIELD))?;
     store.delete(&account(&provider, REFRESH_TOKEN_FIELD))?;
     store.delete(&account(&provider, OAUTH_STATE_FIELD))?;
+    store.delete(&account(&provider, CODE_VERIFIER_FIELD))?;
     Ok(CloudSyncProviderStatus {
         provider: descriptor.provider,
         display_name: descriptor.display_name,
@@ -529,7 +574,7 @@ struct KeyringSyncCredentialStore;
 
 impl KeyringSyncCredentialStore {
     fn get(&self, account: &str) -> Result<Option<String>, String> {
-        let entry = keyring::Entry::new(SYNC_KEYCHAIN_SERVICE, account)
+        let entry = keyring::Entry::new(sync_keychain_service(), account)
             .map_err(|e| format!("open keychain entry: {e}"))?;
         match entry.get_password() {
             Ok(secret) => Ok(Some(secret)),
@@ -539,7 +584,7 @@ impl KeyringSyncCredentialStore {
     }
 
     fn set(&mut self, account: &str, secret: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(SYNC_KEYCHAIN_SERVICE, account)
+        let entry = keyring::Entry::new(sync_keychain_service(), account)
             .map_err(|e| format!("open keychain entry: {e}"))?;
         entry
             .set_password(secret)
@@ -547,12 +592,20 @@ impl KeyringSyncCredentialStore {
     }
 
     fn delete(&mut self, account: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(SYNC_KEYCHAIN_SERVICE, account)
+        let entry = keyring::Entry::new(sync_keychain_service(), account)
             .map_err(|e| format!("open keychain entry: {e}"))?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(format!("delete keychain entry: {e}")),
         }
+    }
+}
+
+fn sync_keychain_service() -> &'static str {
+    if cfg!(debug_assertions) {
+        DEVELOPMENT_SYNC_KEYCHAIN_SERVICE
+    } else {
+        SYNC_KEYCHAIN_SERVICE
     }
 }
 
@@ -623,6 +676,7 @@ fn opendal_store_for(provider: &str) -> Result<OpenDalManagedObjectStore, String
 }
 
 struct CloudCredentials {
+    client_id: String,
     access_token: Option<String>,
     refresh_token: Option<String>,
 }
@@ -631,6 +685,7 @@ fn credentials_for(provider: &str) -> Result<CloudCredentials, String> {
     descriptor_for(provider)?;
     let store = KeyringSyncCredentialStore;
     let credentials = CloudCredentials {
+        client_id: require_oauth_client_id(provider)?,
         access_token: token_for_field(&store, provider, ACCESS_TOKEN_FIELD)?,
         refresh_token: token_for_field(&store, provider, REFRESH_TOKEN_FIELD)?,
     };
@@ -665,6 +720,7 @@ fn apply_opendal_tokens_gdrive(
     mut builder: opendal::services::Gdrive,
     credentials: &CloudCredentials,
 ) -> Result<opendal::Operator, String> {
+    builder = builder.client_id(&credentials.client_id);
     if let Some(token) = &credentials.access_token {
         builder = builder.access_token(token);
     }
@@ -680,6 +736,7 @@ fn apply_opendal_tokens_dropbox(
     mut builder: opendal::services::Dropbox,
     credentials: &CloudCredentials,
 ) -> Result<opendal::Operator, String> {
+    builder = builder.client_id(&credentials.client_id);
     if let Some(token) = &credentials.access_token {
         builder = builder.access_token(token);
     }
@@ -695,6 +752,7 @@ fn apply_opendal_tokens_onedrive(
     mut builder: opendal::services::Onedrive,
     credentials: &CloudCredentials,
 ) -> Result<opendal::Operator, String> {
+    builder = builder.client_id(&credentials.client_id);
     if let Some(token) = &credentials.access_token {
         builder = builder.access_token(token);
     }
@@ -734,19 +792,52 @@ fn descriptor_for(provider: &str) -> Result<CloudSyncProviderDescriptor, String>
         .ok_or_else(|| format!("unknown cloud sync provider: {provider}"))
 }
 
-fn oauth_url(provider: &str, state: &str, pkce_challenge: &str) -> Result<String, String> {
-    let descriptor = descriptor_for(provider)?;
-    let client_id_env = match provider {
-        "google_drive" => "SYLLEPSIS_GOOGLE_DRIVE_CLIENT_ID",
-        "dropbox" => "SYLLEPSIS_DROPBOX_CLIENT_ID",
-        "onedrive" => "SYLLEPSIS_ONEDRIVE_CLIENT_ID",
+#[derive(Deserialize)]
+struct CloudSyncOAuthClientConfig {
+    client_id: String,
+    callback_port: u16,
+}
+
+#[derive(Deserialize)]
+struct CloudSyncOAuthClientIds {
+    google_drive: CloudSyncOAuthClientConfig,
+    dropbox: CloudSyncOAuthClientConfig,
+    onedrive: CloudSyncOAuthClientConfig,
+}
+
+fn oauth_client_config(provider: &str) -> Result<CloudSyncOAuthClientConfig, String> {
+    let configured_client_ids: CloudSyncOAuthClientIds =
+        serde_json::from_str(include_str!("../../oauth-client-ids.json"))
+            .map_err(|error| format!("parse bundled OAuth client IDs: {error}"))?;
+    let config = match provider {
+        "google_drive" => configured_client_ids.google_drive,
+        "dropbox" => configured_client_ids.dropbox,
+        "onedrive" => configured_client_ids.onedrive,
         other => return Err(format!("unknown cloud sync provider: {other}")),
     };
-    let client_id = std::env::var(client_id_env)
-        .map_err(|_| format!("{client_id_env} is not configured for OAuth"))?;
+    if config.client_id.trim().is_empty() {
+        return Err(format!(
+            "{provider} OAuth is not configured in this build; add the Syllepsis app client ID to crates/syllepsis-tauri/oauth-client-ids.json"
+        ));
+    }
+    Ok(config)
+}
+
+fn require_oauth_client_id(provider: &str) -> Result<String, String> {
+    Ok(oauth_client_config(provider)?.client_id.trim().to_string())
+}
+
+fn oauth_url(
+    provider: &str,
+    state: &str,
+    pkce_challenge: &str,
+    redirect_uri: &str,
+) -> Result<String, String> {
+    let descriptor = descriptor_for(provider)?;
+    let client_id = require_oauth_client_id(provider)?;
     let scope = match provider {
         "google_drive" => "https://www.googleapis.com/auth/drive.file",
-        "dropbox" => "files.content.write files.content.read",
+        "dropbox" => "files.content.write files.content.read files.metadata.read",
         "onedrive" => "Files.ReadWrite offline_access",
         _ => "",
     };
@@ -760,7 +851,7 @@ fn oauth_url(provider: &str, state: &str, pkce_challenge: &str) -> Result<String
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256{}",
         descriptor.auth_url_base,
         percent_encode(&client_id),
-        percent_encode(OAUTH_REDIRECT_URI),
+        percent_encode(redirect_uri),
         percent_encode(scope),
         percent_encode(state),
         percent_encode(pkce_challenge),
@@ -797,22 +888,16 @@ fn exchange_code_for_tokens(
     provider: &str,
     code: &str,
     verifier: &str,
+    redirect_uri: &str,
 ) -> Result<CloudCredentials, String> {
-    let client_id_env = match provider {
-        "google_drive" => "SYLLEPSIS_GOOGLE_DRIVE_CLIENT_ID",
-        "dropbox" => "SYLLEPSIS_DROPBOX_CLIENT_ID",
-        "onedrive" => "SYLLEPSIS_ONEDRIVE_CLIENT_ID",
-        other => return Err(format!("unknown cloud sync provider: {other}")),
-    };
-    let client_id = std::env::var(client_id_env)
-        .map_err(|_| format!("{client_id_env} is not configured for OAuth"))?;
+    let client_id = require_oauth_client_id(provider)?;
     let endpoint = token_endpoint(provider)?;
 
     // Build an application/x-www-form-urlencoded body without the `form` reqwest feature.
     let body = format!(
         "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
         percent_encode(code),
-        percent_encode(OAUTH_REDIRECT_URI),
+        percent_encode(redirect_uri),
         percent_encode(&client_id),
         percent_encode(verifier),
     );
@@ -847,9 +932,65 @@ fn exchange_code_for_tokens(
         ));
     }
     Ok(CloudCredentials {
+        client_id,
         access_token,
         refresh_token,
     })
+}
+
+fn receive_oauth_callback(listener: TcpListener) -> Result<String, String> {
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("configure OAuth callback listener: {error}"))?;
+    let deadline = Instant::now() + OAUTH_CALLBACK_TIMEOUT;
+    loop {
+        match listener.accept() {
+            Ok((mut stream, _)) => return read_oauth_callback_request(&mut stream),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Err(
+                        "OAuth authorization timed out; choose Reconnect to try again".to_string(),
+                    );
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => return Err(format!("accept OAuth callback: {error}")),
+        }
+    }
+}
+
+fn read_oauth_callback_request(stream: &mut TcpStream) -> Result<String, String> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|error| format!("configure OAuth callback connection: {error}"))?;
+    let mut request_bytes = [0_u8; 8192];
+    let bytes_read = stream
+        .read(&mut request_bytes)
+        .map_err(|error| format!("read OAuth callback: {error}"))?;
+    let request = String::from_utf8_lossy(&request_bytes[..bytes_read]);
+    let request_target = request
+        .lines()
+        .next()
+        .and_then(|request_line| request_line.split_whitespace().nth(1))
+        .ok_or_else(|| "OAuth callback did not contain a valid HTTP request".to_string())?;
+    if !request_target.starts_with(OAUTH_CALLBACK_PATH) {
+        return Err("OAuth callback used an unexpected path".to_string());
+    }
+
+    let response_body =
+        "Authorization received. You can close this browser tab and return to Syllepsis.";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+        response_body.len()
+    );
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|error| format!("write OAuth callback response: {error}"))?;
+
+    let local_address = stream
+        .local_addr()
+        .map_err(|error| format!("read OAuth callback listener address: {error}"))?;
+    Ok(format!("http://{local_address}{request_target}"))
 }
 
 fn parse_query_params(url: &str) -> std::collections::BTreeMap<String, String> {
@@ -1023,5 +1164,43 @@ mod tests {
             "a.md",
             now + Duration::from_secs(2)
         ));
+    }
+
+    #[test]
+    fn oauth_callback_listener_reads_loopback_request() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream
+                .write_all(
+                    b"GET /oauth-callback?code=code-123&state=state-123 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+                )
+                .unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            response
+        });
+
+        let (mut stream, _) = listener.accept().unwrap();
+        let callback_url = read_oauth_callback_request(&mut stream).unwrap();
+        assert!(callback_url.ends_with("/oauth-callback?code=code-123&state=state-123"));
+        drop(stream);
+        assert!(client.join().unwrap().contains("Authorization received"));
+    }
+
+    #[test]
+    fn bundled_oauth_callback_ports_are_distinct() {
+        let configured: CloudSyncOAuthClientIds =
+            serde_json::from_str(include_str!("../../oauth-client-ids.json")).unwrap();
+        let ports = [
+            configured.google_drive.callback_port,
+            configured.dropbox.callback_port,
+            configured.onedrive.callback_port,
+        ];
+        assert!(ports.iter().all(|port| *port >= 1024));
+        assert_ne!(ports[0], ports[1]);
+        assert_ne!(ports[0], ports[2]);
+        assert_ne!(ports[1], ports[2]);
     }
 }

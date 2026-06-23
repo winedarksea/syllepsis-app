@@ -778,3 +778,25 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Plugin-rendered code blocks (code_block_renderer plugins) ───────────────── */
+.plugin-block {
+  margin: 0.6em 0;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.plugin-block pre,
+pre.plugin-block {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface-2, #f4f4f4);
+  border-radius: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm, 0.9em);
+  line-height: 1.5;
+}
+.plugin-block .tok-keyword { color: #a626a4; font-weight: 600; }
+.plugin-block .tok-string { color: #50a14f; }
+.plugin-block .tok-comment { color: #9ca0a4; font-style: italic; }
+.plugin-block .tok-number { color: #986801; }
+.plugin-block-fallback { opacity: 0.85; }

@@ -22,6 +22,8 @@
     "@lexical/rich-text": "^0.45.0",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "dompurify": "^3.4.11",
     "lexical": "^0.45.0",
     "material-symbols": "^0.45.2",
     "react": "^19.2.6",

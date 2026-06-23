@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
@@ -14,7 +15,7 @@ import type { ThemePref } from '../lib/store';
 import type {
   BuildInfo, BookConfig, CloudLlmProviderDescriptor, CloudLlmProviderStatus,
   PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, ModelRef,
-  CloudSyncProviderDescriptor, CloudSyncProviderStatus,
+  CloudSyncProviderDescriptor, CloudSyncProviderStatus, PluginDescriptor,
 } from '../types';
 import {
   allThemes, themeById, themeSwatches, themeToJson, normalizeImportedTheme, BUILTIN_THEMES,
@@ -58,6 +59,7 @@ export function SettingsView({ launchMode = false }: Props) {
   const [config, setConfig] = useState<BookConfig | null>(null);
   const [descriptors, setDescriptors] = useState<CloudLlmProviderDescriptor[]>([]);
   const [statuses, setStatuses] = useState<CloudLlmProviderStatus[]>([]);
+  const [plugins, setPlugins] = useState<PluginDescriptor[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -74,6 +76,7 @@ export function SettingsView({ launchMode = false }: Props) {
   useEffect(() => {
     api.getBuildInfo().then(setBuild).catch((e) => setError(String(e)));
     loadCloud().catch((e) => setError(String(e)));
+    api.listPlugins().then(setPlugins).catch((e) => setError(String(e)));
   }, [loadCloud]);
 
   useEffect(() => {
@@ -196,15 +199,40 @@ export function SettingsView({ launchMode = false }: Props) {
           </Section>
         )}
 
-        {/* ── Plugins (placeholder) ── */}
+        {/* ── Plugins ── */}
         <Section title="Plugins" subtitle={SUBTITLES.plugins[flavorLang]}>
-          <div className="sv-plugins">
-            <Icon name="extension" size={22} className="sv-plugins-icon" />
-            <div>
-              <div className="sv-plugins-title">Coming soon</div>
-              <p className="sv-plugins-text">Sandboxed (WASM) extensions will let you add new tools, views, and AI actions. A hosted marketplace for plugins, themes, and knowledge packs is planned.</p>
+          {plugins.length === 0 ? (
+            <div className="sv-plugins">
+              <Icon name="extension" size={22} className="sv-plugins-icon" />
+              <div>
+                <div className="sv-plugins-title">No plugins installed</div>
+                <p className="sv-plugins-text">Sandboxed (WASM) extensions add import sources and code-block renderers. Built-in plugins load automatically; drop your own into the app's <code>plugins</code> folder.</p>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="sv-plugin-list">
+              {plugins.map((plugin) => (
+                <div key={plugin.id} className="sv-plugin-item">
+                  <Icon name={plugin.kind === 'import_source' ? 'upload_file' : 'code'} size={20} className="sv-plugins-icon" />
+                  <div className="sv-plugin-body">
+                    <div className="sv-plugin-head">
+                      <span className="sv-plugins-title">{plugin.name}</span>
+                      <span className="sv-plugin-version">v{plugin.version}</span>
+                      <span className="sv-plugin-badge">{plugin.source === 'builtin' ? 'Built-in' : 'User'}</span>
+                      <span className="sv-plugin-badge">{plugin.kind === 'import_source' ? 'Import source' : 'Code block'}</span>
+                    </div>
+                    {plugin.description && <p className="sv-plugins-text">{plugin.description}</p>}
+                    {plugin.kind === 'code_block_renderer' && plugin.languages.length > 0 && (
+                      <p className="sv-plugins-text">Languages: {plugin.languages.join(', ')}</p>
+                    )}
+                    {plugin.kind === 'import_source' && plugin.import_extensions.length > 0 && (
+                      <p className="sv-plugins-text">Files: .{plugin.import_extensions.join(', .')}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </Section>
 
         {/* ── About ── */}
@@ -651,25 +679,39 @@ function SyncPanel({ value, onSaved, onError }: {
     loadCloud().catch((e) => onError(String(e)));
   }, [loadCloud, onError]);
 
-  // Listen for the OS deep-link redirect after the user authorizes in their browser.
-  // The tauri-plugin-deep-link fires "deep-link://new-url" with an array of URL strings.
-  // Keep the Sync panel open while authorizing so this listener is active.
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<string[]>('deep-link://new-url', async (event) => {
-      for (const url of event.payload) {
-        if (!url.startsWith('syllepsis://oauth-callback')) continue;
-        try {
-          const status = await api.handleCloudSyncOauthCallback(url);
-          setCloudStatuses((prev) =>
-            prev.map((s) => (s.provider === status.provider ? status : s))
-          );
-        } catch (e) {
-          onError(String(e));
-        }
+    let unlistenCompleted: (() => void) | undefined;
+    let unlistenFailed: (() => void) | undefined;
+    let disposed = false;
+
+    Promise.all([
+      listen<CloudSyncProviderStatus>('cloud-sync://oauth-completed', (event) => {
+        setBusy(null);
+        setCloudStatuses((prev) =>
+          prev.map((status) =>
+            status.provider === event.payload.provider ? event.payload : status
+          )
+        );
+      }),
+      listen<string>('cloud-sync://oauth-failed', (event) => {
+        setBusy(null);
+        onError(event.payload);
+      }),
+    ]).then(([completed, failed]) => {
+      if (disposed) {
+        completed();
+        failed();
+        return;
       }
-    }).then((u) => { unlisten = u; });
-    return () => { unlisten?.(); };
+      unlistenCompleted = completed;
+      unlistenFailed = failed;
+    }).catch((error) => onError(String(error)));
+
+    return () => {
+      disposed = true;
+      unlistenCompleted?.();
+      unlistenFailed?.();
+    };
   }, [onError]);
 
   const cloudStatus = (provider: string) => cloudStatuses.find((status) => status.provider === provider);
@@ -678,7 +720,7 @@ function SyncPanel({ value, onSaved, onError }: {
     setBusy(provider);
     try {
       const start = await api.connectCloudSyncProvider(provider);
-      window.open(start.auth_url, '_blank', 'noopener,noreferrer');
+      await openUrl(start.auth_url);
     } catch (e) { onError(String(e)); }
     finally { setBusy(null); }
   }, [onError]);
@@ -715,7 +757,7 @@ function SyncPanel({ value, onSaved, onError }: {
       <SaveBar saving={saving} dirty={dirty} onSave={commit} />
 
       <div className="sv-subhead">Managed Cloud</div>
-      <p className="sv-hint">After clicking Connect, authorize in your browser then return here — keep this panel open so the callback is received.</p>
+      <p className="sv-hint">Authorize in your browser. Syllepsis stores the resulting account tokens in your operating system keychain.</p>
       <div className="sv-providers">
         {cloudProviders.map((provider) => {
           const status = cloudStatus(provider.provider);
@@ -726,7 +768,9 @@ function SyncPanel({ value, onSaved, onError }: {
                 <span className={`sv-pill ${status?.connected ? 'ok' : ''}`}>{status?.connected ? 'Connected' : 'Not connected'}</span>
               </div>
               <div className="sv-actions">
-                <button className="sv-btn" disabled={busy === provider.provider} onClick={() => connectCloud(provider.provider)}>Connect</button>
+                <button className="sv-btn" disabled={busy === provider.provider} onClick={() => connectCloud(provider.provider)}>
+                  {status?.connected ? 'Reconnect' : 'Authorize'}
+                </button>
                 <button className="sv-btn" disabled={busy === provider.provider || !status?.connected} onClick={() => disconnectCloud(provider.provider)}>Disconnect</button>
               </div>
             </div>

@@ -61,6 +61,11 @@ pub enum CoreError {
     /// merge/snapshot (de)serialization failure, or sync-state bookkeeping (Phase 4).
     #[error("sync error: {0}")]
     Sync(String),
+
+    /// A plugin could not be loaded, was misconfigured, or failed while executing: a malformed
+    /// manifest, a missing/invalid WASM module, or an error returned from a plugin call.
+    #[error("plugin error: {0}")]
+    Plugin(String),
 }
 
 impl CoreError {

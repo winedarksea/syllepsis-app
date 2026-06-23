@@ -374,13 +374,26 @@ function WizardShell({ title, onCancel, children }: { title: string; onCancel: (
 // Main workspace (book is open)
 // ──────────────────────────────────────────────
 function Workspace() {
-  const { view, editingNoteId, setCategories, setUnsortedCount, openEditor } = useStore();
+  const { view, editingNoteId, setCategories, setUnsortedCount, openEditor, setPluginRenderLanguages } = useStore();
 
   // Refresh sidebar data on view change (i.e. when returning from the editor).
   useEffect(() => {
     api.allCategories().then(setCategories).catch(console.error);
     api.unsortedNotes().then((ns) => setUnsortedCount(ns.length)).catch(console.error);
   }, [view, setCategories, setUnsortedCount]);
+
+  // Load the set of code languages that render plugins claim (once per workspace).
+  useEffect(() => {
+    api
+      .listPlugins()
+      .then((plugins) => {
+        const languages = plugins
+          .filter((p) => p.kind === 'code_block_renderer')
+          .flatMap((p) => p.languages.map((l) => l.toLowerCase()));
+        setPluginRenderLanguages([...new Set(languages)]);
+      })
+      .catch(console.error);
+  }, [setPluginRenderLanguages]);
 
   const handleNewNote = useCallback(async (type: ObjectType = 'note') => {
     const note = await api.createNote(type, 'New Note');

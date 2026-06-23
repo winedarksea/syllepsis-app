@@ -756,6 +756,22 @@ export interface TextImportReport {
   first_note_id?: string | null;
 }
 
+// ── Plugins (mirrors syllepsis_core::app::plugin::PluginDescriptor) ──
+
+export type PluginKind = 'import_source' | 'code_block_renderer';
+export type PluginSource = 'builtin' | 'user';
+
+export interface PluginDescriptor {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  kind: PluginKind;
+  languages: string[];
+  import_extensions: string[];
+  source: PluginSource;
+}
+
 // ── Book statistics (mirrors syllepsis_core::app::commands::BookStats) ──
 
 export interface BookStats {

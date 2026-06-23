@@ -1,0 +1,3 @@
+# Built plugin artifacts and per-crate build output (rebuild with build.sh / cargo).
+dist/
+*/target/

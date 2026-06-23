@@ -18,6 +18,7 @@ import type {
   PublishReport, GitignoreReport,
   BookStats, StyleCard, CrossBookNote,
   TextImportOptions, TextImportPreview, TextImportCommitRequest, TextImportReport,
+  PluginDescriptor,
 } from '../types';
 
 export const api = {
@@ -172,6 +173,13 @@ export const api = {
   commitTextImport: (request: TextImportCommitRequest) =>
     invoke<TextImportReport>('commit_text_import', { request }),
 
+  // Plugins (WASM)
+  listPlugins: () => invoke<PluginDescriptor[]>('list_plugins'),
+  runRenderPlugin: (language: string, code: string) =>
+    invoke<string>('run_render_plugin', { language, code }),
+  previewPluginImport: (pluginId: string, path: string, options: TextImportOptions) =>
+    invoke<TextImportPreview>('preview_plugin_import', { pluginId, path, options }),
+
   // Publishing & serving (Phase 6)
   publishSite: (outDir: string) => invoke<PublishReport>('publish_site', { outDir }),
   refreshPrivateGitignore: () => invoke<GitignoreReport>('refresh_private_gitignore'),
@@ -196,8 +204,6 @@ export const api = {
     invoke<CloudSyncProviderStatus[]>('cloud_sync_provider_statuses'),
   connectCloudSyncProvider: (provider: string) =>
     invoke<CloudSyncConnectStart>('connect_cloud_sync_provider', { provider }),
-  handleCloudSyncOauthCallback: (callbackUrl: string) =>
-    invoke<CloudSyncProviderStatus>('handle_cloud_sync_oauth_callback', { callbackUrl }),
   disconnectCloudSyncProvider: (provider: string) =>
     invoke<CloudSyncProviderStatus>('disconnect_cloud_sync_provider', { provider }),
   listCloudBooks: (provider: string) =>

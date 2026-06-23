@@ -18,6 +18,37 @@ Example configuration:
 
 Notes marked as **private** are excluded from the GitHub publish but included in the Google Drive backup.
 
+### Managed cloud OAuth application setup
+
+Syllepsis uses OAuth authorization-code flow with PKCE. A user only chooses **Authorize**,
+approves access in the provider's browser page, and returns to the app. Access and refresh tokens
+are stored in the operating system keychain. Reconnect repeats the same flow if access is revoked.
+
+The Syllepsis project must register one public/native OAuth application with each provider. OAuth
+client IDs identify the app and are safe to bundle; desktop applications must not bundle client
+secrets. Put the registered client IDs in
+`crates/syllepsis-tauri/oauth-client-ids.json`. This file is compiled into both `tauri dev` and
+packaged builds.
+
+The desktop app listens on these loopback callback URIs:
+
+- Google Drive: `http://127.0.0.1:53682/oauth-callback`
+- Dropbox: `http://127.0.0.1:53683/oauth-callback`
+- OneDrive: `http://127.0.0.1:53684/oauth-callback`
+
+Provider configuration:
+
+- Google: enable the Google Drive API and create a Desktop app OAuth client. Google desktop
+  clients accept loopback redirects without adding each URI in the console.
+- Dropbox: create a scoped app with `files.content.read`, `files.content.write`, and
+  `files.metadata.read`, enable PKCE, request offline access, and register the exact callback URI
+  above.
+- Microsoft: create a public mobile/desktop client, add delegated `Files.ReadWrite`, allow
+  `offline_access`, and register the exact callback URI above.
+
+Debug and release builds use separate keychain service names so development authorization cannot
+overwrite a user's packaged-app tokens.
+
 ## CRDT for Real-Time Sync
 
 Near-real-time saves and cloud syncs use a CRDT library. Candidates:

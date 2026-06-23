@@ -6,6 +6,7 @@ pub mod lifecycle;
 pub mod llm;
 pub mod notes;
 pub mod pack;
+pub mod plugins;
 pub mod publish;
 pub mod search;
 pub mod spatial;

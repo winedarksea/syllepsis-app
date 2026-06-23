@@ -143,7 +143,7 @@ export function StatsView() {
             />
             <StatCard
               label="Cloud providers"
-              value={`${operational.cloud.connected_provider_count}/${operational.cloud.provider_count}`}
+              value={`${operational.cloud.connected_provider_count}`}
               sub={
                 operational.cloud.connected_provider_names.length > 0
                   ? operational.cloud.connected_provider_names.join(', ')

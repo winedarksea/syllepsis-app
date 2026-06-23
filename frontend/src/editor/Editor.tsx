@@ -3,7 +3,7 @@
 // Table type uses an editable grid or a raw CSV textarea.
 // The top toolbar, meta panel, LLM tools, and save logic are always shared.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LexicalComposer, type InitialConfigType } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
@@ -13,6 +13,7 @@ import { ListPlugin } from '@lexical/react/LexicalListPlugin';
 import { MarkdownShortcutPlugin } from '@lexical/react/LexicalMarkdownShortcutPlugin';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $convertFromMarkdownString, $convertToMarkdownString, TRANSFORMERS } from '@lexical/markdown';
+import type { Transformer } from '@lexical/markdown';
 import { HeadingNode, QuoteNode } from '@lexical/rich-text';
 import { ListNode, ListItemNode } from '@lexical/list';
 import { CodeNode, CodeHighlightNode } from '@lexical/code-core';
@@ -20,6 +21,8 @@ import { LinkNode } from '@lexical/link';
 import type { EditorState, LexicalEditor } from 'lexical';
 import { CategoryNode } from './nodes/CategoryNode';
 import { ClozeNode } from './nodes/ClozeNode';
+import { PluginBlockNode } from './nodes/PluginBlockNode';
+import { createPluginCodeTransformer } from './pluginCodeTransformer';
 import { Toolbar } from './Toolbar';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
@@ -113,16 +116,16 @@ function parsePastedTable(text: string): string[][] | null {
 
 // ── Lexical plugins ────────────────────────────────────────────────────────────
 
-function InitBodyPlugin({ body }: { body: string }) {
+function InitBodyPlugin({ body, transformers }: { body: string; transformers: Transformer[] }) {
   const [editor] = useLexicalComposerContext();
   const initialised = useRef(false);
   useEffect(() => {
     if (initialised.current) return;
     initialised.current = true;
     editor.update(() => {
-      $convertFromMarkdownString(body, TRANSFORMERS);
+      $convertFromMarkdownString(body, transformers);
     }, { tag: 'init-body' });
-  }, [editor, body]);
+  }, [editor, body, transformers]);
   return null;
 }
 
@@ -143,7 +146,16 @@ function SaveShortcutPlugin({ onSave }: { onSave: () => void }) {
 interface Props { noteId: string; }
 
 export function Editor({ noteId }: Props) {
-  const { closeEditor, setCategories, categories } = useStore();
+  const { closeEditor, setCategories, categories, pluginRenderLanguages } = useStore();
+
+  // Map plugin-claimed code languages to a rendered PluginBlockNode; all other code fences keep
+  // the built-in behavior. Used for both import (init) and export (save) so the markdown round-trips.
+  const transformers = useMemo<Transformer[]>(() => {
+    const pluginTransformer = createPluginCodeTransformer(pluginRenderLanguages);
+    return pluginTransformer ? [pluginTransformer, ...TRANSFORMERS] : TRANSFORMERS;
+  }, [pluginRenderLanguages]);
+  const transformersRef = useRef(transformers);
+  transformersRef.current = transformers;
   const [note, setNote] = useState<NoteDto | null>(null);
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
@@ -204,7 +216,7 @@ export function Editor({ noteId }: Props) {
 
   const handleEditorChange = useCallback((state: EditorState, _editor: LexicalEditor, tags: Set<string>) => {
     state.read(() => {
-      const markdown = $convertToMarkdownString(TRANSFORMERS);
+      const markdown = $convertToMarkdownString(transformersRef.current);
       getCurrentBody.current = () => markdown;
       if (!tags.has('init-body')) markDirty();
     });
@@ -394,7 +406,7 @@ export function Editor({ noteId }: Props) {
 
   const editorConfig: InitialConfigType = {
     namespace: `note-${noteId}`,
-    nodes: [CategoryNode, ClozeNode, HeadingNode, QuoteNode, ListNode, ListItemNode, CodeNode, CodeHighlightNode, LinkNode],
+    nodes: [CategoryNode, ClozeNode, PluginBlockNode, HeadingNode, QuoteNode, ListNode, ListItemNode, CodeNode, CodeHighlightNode, LinkNode],
     onError: (err) => setError(err.message),
     theme: {
       root: 'lexical-root',
@@ -524,9 +536,9 @@ export function Editor({ noteId }: Props) {
           </div>
           <HistoryPlugin />
           <ListPlugin />
-          <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
+          <MarkdownShortcutPlugin transformers={transformers} />
           <OnChangePlugin onChange={handleEditorChange} />
-          <InitBodyPlugin body={body} />
+          <InitBodyPlugin body={body} transformers={transformers} />
           <SaveShortcutPlugin onSave={save} />
         </LexicalComposer>
       )}

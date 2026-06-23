@@ -33,6 +33,7 @@ pub mod markdown;
 pub mod model;
 pub mod onnx;
 pub mod pack;
+pub mod plugin;
 pub mod publish;
 pub mod search;
 pub mod sort;
@@ -50,6 +51,7 @@ pub use llm::{LlmProvider, LlmService, LlmTask, Proposal, ProposalStatus};
 pub use model::{Category, Metadata, Note, ObjectType, PriorEdge, PriorKind};
 pub use model::{SpatialRegion, World, WorldKind};
 pub use onnx::{ModelCache, ModelKind, ModelManifest, RuntimeDiagnostics};
+pub use plugin::{InstalledPlugin, PluginKind, PluginManifest, PluginRegistry, PluginSource};
 pub use search::{SearchEngine, SearchHit, SearchResults};
 pub use sort::{render, to_markdown, RenderItem};
 pub use spatial::{

@@ -441,3 +441,24 @@ select.sv-input { min-width: 180px; cursor: pointer; }
   color: var(--color-text-tertiary);
   margin-top: var(--sp-2);
 }
+
+/* ── Plugins list ───────────────────────────────────────────────────────────── */
+.sv-plugin-list { display: flex; flex-direction: column; gap: 10px; }
+.sv-plugin-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: 8px;
+  background: var(--surface-1, #fff);
+}
+.sv-plugin-body { flex: 1; min-width: 0; }
+.sv-plugin-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sv-plugin-version { font-size: var(--font-size-xs, 0.75em); opacity: 0.65; }
+.sv-plugin-badge {
+  font-size: var(--font-size-xs, 0.72em);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2, #f0f0f0);
+  color: var(--text-2, #555);
+}

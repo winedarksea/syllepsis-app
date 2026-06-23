@@ -5,9 +5,10 @@ pub mod state;
 
 use commands::{
     book::*, categories::*, cloud_llm::*, config::*, lifecycle::*, llm::*, notes::*, pack::*,
-    publish::*, search::*, spatial::*, style_cards::*, sync::*, text_import::*,
+    plugins::*, publish::*, search::*, spatial::*, style_cards::*, sync::*, text_import::*,
 };
 use state::AppState;
+use tauri::Manager;
 
 /// Initialize tracing so "fancier" operations (LLM calls, search) log to the console in
 /// `tauri dev`. Defaults to `info` in debug builds and `warn` in release; override with `RUST_LOG`.
@@ -36,7 +37,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
+        .setup(|app| {
+            // Discover and load WASM plugins once at startup, then share them as app state.
+            let (builtin_dir, user_dir) = commands::plugins::plugin_dirs(app.handle());
+            let runtime = commands::plugins::PluginRuntime::load(builtin_dir, user_dir);
+            app.manage(runtime);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // book lifecycle
             get_version,
@@ -110,7 +119,6 @@ pub fn run() {
             cloud_sync_provider_descriptors,
             cloud_sync_provider_statuses,
             connect_cloud_sync_provider,
-            handle_cloud_sync_oauth_callback,
             disconnect_cloud_sync_provider,
             list_cloud_books,
             upload_book_to_cloud,
@@ -144,6 +152,10 @@ pub fn run() {
             read_text_import_file,
             preview_text_import,
             commit_text_import,
+            // plugins (WASM)
+            list_plugins,
+            run_render_plugin,
+            preview_plugin_import,
             // publishing & serving (Phase 6)
             publish_site,
             refresh_private_gitignore,
