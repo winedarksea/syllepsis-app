@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import type { NoteDto, Category } from '../types';
@@ -134,7 +135,7 @@ export function CategoryView() {
               onKeyDown={(e) => e.key === 'Enter' && openEditor(note.id)}
             >
               <div className="cv-card-header">
-                <span className="cv-card-title">{note.title || '(untitled)'}</span>
+                <span className="cv-card-title">{displayTitle(note.title, note.summary, note.body)}</span>
                 <span className="cv-card-type">{note.type}</span>
               </div>
               {note.summary && <p className="cv-card-summary">{note.summary}</p>}

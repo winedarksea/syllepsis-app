@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import type { NoteDto } from '../types';
@@ -106,7 +107,7 @@ export function UnsortedQueue() {
               onKeyDown={(e) => e.key === 'Enter' && openEditor(note.id)}
             >
               <div className="uq-card-header">
-                <span className="uq-card-title">{note.title || '(untitled)'}</span>
+                <span className="uq-card-title">{displayTitle(note.title, note.summary, note.body)}</span>
                 {note.metadata.classification.starred && (
                   <Icon name="star" size={14} fill className="uq-card-star" title="Starred" />
                 )}

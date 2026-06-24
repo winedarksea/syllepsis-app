@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import type { RelatedNote } from '../types';
 import './RelatedCarousel.css';
@@ -50,7 +51,7 @@ export function RelatedCarousel({ noteId }: Props) {
             onClick={() => openEditor(r.note_id)}
             title={`${Math.round(r.similarity * 100)}% similar`}
           >
-            <div className="rc-card-title">{r.title || '(untitled)'}</div>
+            <div className="rc-card-title">{displayTitle(r.title, r.summary)}</div>
             {r.summary && <div className="rc-card-summary">{r.summary}</div>}
             <div className="rc-card-foot">
               <span className="rc-sim">{Math.round(r.similarity * 100)}%</span>

@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import type { SearchResults, CrossBookNote } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
@@ -117,7 +118,7 @@ export function SearchView() {
                 onKeyDown={(e) => e.key === 'Enter' && openEditor(hit.note_id)}
               >
                 <div className="sv-hit-header">
-                  <span className="sv-hit-title">{hit.title || '(untitled)'}</span>
+                  <span className="sv-hit-title">{displayTitle(hit.title, hit.summary)}</span>
                   <div className="sv-hit-meta">
                     <span
                       className="sv-hit-score"
@@ -152,12 +153,12 @@ export function SearchView() {
             {crossBookResults.map((hit) => (
               <div key={`${hit.book_path}/${hit.note_id}`} className="sv-hit sv-hit-cross-book">
                 <div className="sv-hit-header">
-                  <span className="sv-hit-title">{hit.title || '(untitled)'}</span>
+                  <span className="sv-hit-title">{displayTitle(hit.title, hit.summary)}</span>
                   <span className="sv-cross-book-badge">{hit.book_name}</span>
                 </div>
                 {hit.summary && <p className="sv-hit-summary">{hit.summary}</p>}
                 <div className="sv-cross-book-link-hint">
-                  Link syntax: <code>[{hit.title || hit.note_id}](book:{hit.book_name}/{hit.note_id})</code>
+                  Link syntax: <code>[{displayTitle(hit.title, hit.summary)}](book:{hit.book_name}/{hit.note_id})</code>
                 </div>
               </div>
             ))}

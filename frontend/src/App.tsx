@@ -398,7 +398,7 @@ function Workspace() {
   }, [setPluginRenderLanguages, setPluginsLoaded]);
 
   const handleNewNote = useCallback(async (type: ObjectType = 'note') => {
-    const note = await api.createNote(type, 'New Note');
+    const note = await api.createNote(type, '');
     openEditor(note.id);
   }, [openEditor]);
 
