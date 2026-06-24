@@ -36,7 +36,13 @@ pub struct GitignoreReport {
 
 /// Render the book's **public** view (private notes and notes in private categories removed) to a
 /// single read-only `index.html` under `out_dir`. Returns what was published and what was withheld.
-pub fn publish_site(book: &Book, out_dir: &Path) -> CoreResult<PublishReport> {
+/// `render_code_block(language, code) -> Option<html>` is called for each fenced code block; pass
+/// `&|_, _| None` for a plain export with no plugin rendering.
+pub fn publish_site(
+    book: &Book,
+    out_dir: &Path,
+    render_code_block: &dyn Fn(&str, &str) -> Option<String>,
+) -> CoreResult<PublishReport> {
     let private_categories = private_category_names(book)?;
     // The "active" corpus a publish considers: everything except archived and pending-deletion
     // notes. Each active note is then either published or withheld for privacy, so the two counts
@@ -66,7 +72,7 @@ pub fn publish_site(book: &Book, out_dir: &Path) -> CoreResult<PublishReport> {
 
     let items = sort::render(public, categories);
     let markdown = sort::to_markdown(&items);
-    let html = crate::publish::render_site(&book.metadata.name, &markdown);
+    let html = crate::publish::render_site_with_plugins(&book.metadata.name, &markdown, render_code_block);
 
     std::fs::create_dir_all(out_dir)?;
     let index_path = out_dir.join("index.html");
@@ -172,7 +178,7 @@ mod tests {
         set_category_private(&book, "secret", true).unwrap();
 
         let out = dir.path().join("site");
-        let report = publish_site(&book, &out).unwrap();
+        let report = publish_site(&book, &out, &|_, _| None).unwrap();
 
         assert_eq!(report.published_notes, 1);
         assert_eq!(report.excluded_private, 2);

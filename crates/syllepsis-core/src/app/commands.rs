@@ -45,32 +45,15 @@ pub fn export_markdown(book: &Book) -> CoreResult<String> {
     Ok(sort::to_markdown(&book_view(book)?))
 }
 
-/// Export the book view as an HTML document.
-pub fn export_html(book: &Book) -> CoreResult<String> {
+/// Export the book view as an HTML document, routing plugin-claimed code blocks through
+/// `render_code_block`. Pass `&|_, _| None` for a plain export with no plugin rendering.
+pub fn export_html(
+    book: &Book,
+    render_code_block: &dyn Fn(&str, &str) -> Option<String>,
+) -> CoreResult<String> {
     let markdown = export_markdown(book)?;
-    let body_html = md_parser::to_html(&markdown);
-    let name = &book.metadata.name;
-    Ok(format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{name}</title>
-<style>
-body {{ font-family: Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 24px; line-height: 1.7; color: #1a1a1a; }}
-h1, h2, h3, h4 {{ font-family: inherit; margin: 1.4em 0 0.4em; }}
-blockquote {{ border-left: 3px solid #ccc; margin: 1em 0; padding-left: 1em; color: #555; }}
-code {{ font-family: monospace; background: #f4f4f4; padding: 1px 4px; border-radius: 3px; }}
-pre {{ background: #f4f4f4; padding: 12px; border-radius: 4px; overflow-x: auto; }}
-</style>
-</head>
-<body>
-<h1>{name}</h1>
-{body_html}
-</body>
-</html>"#
-    ))
+    let cleaned = dialect::strip_comments(&markdown);
+    Ok(crate::publish::build_export_html(&book.metadata.name, &cleaned, render_code_block))
 }
 
 /// Aggregate statistics about a book.

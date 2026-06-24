@@ -46,7 +46,18 @@ export function createPluginCodeTransformer(
       if (lines.length > 0 && lines[0].startsWith(' ')) lines[0] = lines[0].slice(1);
       while (lines.length > 0 && lines[lines.length - 1].length === 0) lines.pop();
 
-      rootNode.append($createPluginBlockNode(language, lines.join('\n')));
+      const pluginNode = $createPluginBlockNode(language, lines.join('\n'));
+      // During $convertFromMarkdownString, rootNode is the editor root (calling .replace()
+      // throws "cannot be called on root nodes"). Find the start-fence paragraph via the same
+      // regex and insert before it; Lexical removes the fence paragraphs after we return.
+      const startFence = rootNode
+        .getChildren()
+        .find((child) => regExpStart.test(child.getTextContent()));
+      if (startFence !== undefined) {
+        startFence.insertBefore(pluginNode);
+      } else {
+        rootNode.append(pluginNode);
+      }
     },
   };
 }

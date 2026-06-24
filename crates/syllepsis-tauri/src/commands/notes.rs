@@ -2,10 +2,11 @@
 
 use tauri::State;
 
-use syllepsis_core::app::{commands as app, dto::NoteDto};
+use syllepsis_core::app::{commands as app, dto::NoteDto, plugin as app_plugin};
 use syllepsis_core::model::{ObjectType, PriorEdge};
 use syllepsis_core::sort::RenderItem;
 
+use crate::commands::plugins::PluginRuntime;
 use crate::state::AppState;
 
 macro_rules! with_book {
@@ -139,11 +140,20 @@ pub fn save_table_data(
     })
 }
 
-/// Export the full book as a single HTML document, writing it to `path`.
+/// Export the full book as a single HTML document, writing it to `path`. Fenced code blocks whose
+/// language is claimed by a code-block-renderer plugin are rendered via that plugin.
 #[tauri::command]
-pub fn export_html(state: State<AppState>, path: String) -> Result<(), String> {
+pub fn export_html(
+    state: State<AppState>,
+    plugins: State<PluginRuntime>,
+    path: String,
+) -> Result<(), String> {
     with_book!(state, book, {
-        let html = app::export_html(book).map_err(|e| e.to_string())?;
+        plugins.host.set_book_root(Some(book.root.clone()));
+        let html = app::export_html(book, &|lang, code| {
+            app_plugin::run_render_plugin(&plugins.host, &plugins.registry, lang, code).ok()
+        })
+        .map_err(|e| e.to_string())?;
         std::fs::write(&path, html).map_err(|e| format!("write HTML: {e}"))
     })
 }

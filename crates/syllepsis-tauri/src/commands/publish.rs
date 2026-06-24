@@ -6,7 +6,9 @@ use std::path::Path;
 use tauri::State;
 
 use syllepsis_core::app::publish::{self as app, GitignoreReport, PublishReport};
+use syllepsis_core::app::plugin as app_plugin;
 
+use crate::commands::plugins::PluginRuntime;
 use crate::state::AppState;
 
 macro_rules! with_book {
@@ -20,10 +22,19 @@ macro_rules! with_book {
 }
 
 /// Render the book's public view (private content excluded) to `index.html` under `out_dir`.
+/// Plugin-claimed code blocks are rendered via the loaded WASM plugin host.
 #[tauri::command]
-pub fn publish_site(state: State<AppState>, out_dir: String) -> Result<PublishReport, String> {
+pub fn publish_site(
+    state: State<AppState>,
+    plugins: State<PluginRuntime>,
+    out_dir: String,
+) -> Result<PublishReport, String> {
     with_book!(state, book, {
-        app::publish_site(book, Path::new(&out_dir)).map_err(|e| e.to_string())
+        plugins.host.set_book_root(Some(book.root.clone()));
+        app::publish_site(book, Path::new(&out_dir), &|lang, code| {
+            app_plugin::run_render_plugin(&plugins.host, &plugins.registry, lang, code).ok()
+        })
+        .map_err(|e| e.to_string())
     })
 }
 

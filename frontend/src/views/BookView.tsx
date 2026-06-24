@@ -204,11 +204,11 @@ export function BookView() {
               {isListItem && (
                 <span className="bv-list-marker">{note.numbered ? '1.' : '•'}</span>
               )}
-              <span className="bv-note-body">
+              <div className="bv-note-body">
                 {content.trim()
                   ? <BookNoteBody body={content} claimed={claimed} />
                   : <span className="bv-empty-body">(empty)</span>}
-              </span>
+              </div>
             </div>
           );
         })}
