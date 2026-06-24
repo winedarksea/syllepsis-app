@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use crate::app::dto::NoteDto;
 use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
-use crate::markdown::{dialect, parser as md_parser};
+use crate::markdown::{dialect};
 use crate::model::metadata::LockMode;
 use crate::model::{Category, Note, ObjectType, PriorEdge};
 use crate::sort::{self, RenderItem};
