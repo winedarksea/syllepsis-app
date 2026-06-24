@@ -56,7 +56,9 @@ pub fn list_style_cards(state: State<AppState>) -> Result<Vec<StyleCardEntry>, S
     for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") { continue; }
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
         let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         match serde_json::from_str::<StyleCardEntry>(&text) {
             Ok(card) => cards.push(card),
@@ -69,7 +71,10 @@ pub fn list_style_cards(state: State<AppState>) -> Result<Vec<StyleCardEntry>, S
 
 /// Save (create or update) a style card.
 #[tauri::command]
-pub fn save_style_card(state: State<AppState>, card: StyleCardEntry) -> Result<StyleCardEntry, String> {
+pub fn save_style_card(
+    state: State<AppState>,
+    card: StyleCardEntry,
+) -> Result<StyleCardEntry, String> {
     let guard = state.book.lock().unwrap();
     let book = guard.as_ref().ok_or("no book is open")?;
     let dir = cards_dir(&book.root);
@@ -79,7 +84,10 @@ pub fn save_style_card(state: State<AppState>, card: StyleCardEntry) -> Result<S
     } else {
         card.id.clone()
     };
-    let saved = StyleCardEntry { id: id.clone(), ..card };
+    let saved = StyleCardEntry {
+        id: id.clone(),
+        ..card
+    };
     let text = serde_json::to_string_pretty(&saved).map_err(|e| e.to_string())?;
     std::fs::write(card_path(&book.root, &id), text).map_err(|e| e.to_string())?;
     Ok(saved)

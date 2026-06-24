@@ -25,7 +25,10 @@ pub struct PluginDescriptor {
 
 /// List every installed plugin for the UI. Disabled plugins are included but marked `enabled:
 /// false`; the caller decides whether to surface them.
-pub fn list_plugins(registry: &PluginRegistry, disabled: &HashSet<String>) -> Vec<PluginDescriptor> {
+pub fn list_plugins(
+    registry: &PluginRegistry,
+    disabled: &HashSet<String>,
+) -> Vec<PluginDescriptor> {
     registry
         .all()
         .iter()
@@ -64,7 +67,9 @@ mod run {
         options: &TextImportOptions,
     ) -> CoreResult<TextImportPreview> {
         if disabled.contains(plugin_id) {
-            return Err(CoreError::Plugin(format!("plugin '{plugin_id}' is disabled")));
+            return Err(CoreError::Plugin(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
         }
         let plugin = registry
             .get(plugin_id)
@@ -91,7 +96,9 @@ mod run {
             .render_plugin_for_language(language)
             .ok_or_else(|| CoreError::Plugin(format!("no renderer for language '{language}'")))?;
         if disabled.contains(&plugin.manifest.id) {
-            return Err(CoreError::Plugin(format!("no renderer for language '{language}'")));
+            return Err(CoreError::Plugin(format!(
+                "no renderer for language '{language}'"
+            )));
         }
         host.run_render(&plugin.manifest.id, language, code)
     }

@@ -4,6 +4,7 @@
 
 #![cfg(feature = "extism")]
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use syllepsis_core::app::plugin as app_plugin;
@@ -30,12 +31,22 @@ fn syntax_highlight_plugin_renders_html() {
         "syntax-highlight plugin should be discovered in {dist:?}"
     );
     let host = PluginHost::load(&registry);
-    let html = app_plugin::run_render_plugin(&host, &registry, "rust", "fn main() {}").unwrap();
-    assert!(html.contains("tok-keyword"), "expected highlighted output, got: {html}");
+    let disabled = HashSet::new();
+    let html =
+        app_plugin::run_render_plugin(&host, &registry, &disabled, "rust", "fn main() {}").unwrap();
+    assert!(
+        html.contains("tok-keyword"),
+        "expected highlighted output, got: {html}"
+    );
     assert!(html.contains("fn"));
     // The renderer escapes input — a script tag must not survive as a live tag.
-    let danger = app_plugin::run_render_plugin(&host, &registry, "rust", "<script>x</script>").unwrap();
-    assert!(!danger.contains("<script>"), "renderer must escape angle brackets");
+    let danger =
+        app_plugin::run_render_plugin(&host, &registry, &disabled, "rust", "<script>x</script>")
+            .unwrap();
+    assert!(
+        !danger.contains("<script>"),
+        "renderer must escape angle brackets"
+    );
 }
 
 #[test]
@@ -50,14 +61,19 @@ fn pdf_import_plugin_executes_through_the_host() {
         "pdf-import plugin should be discovered in {dist:?}"
     );
     let host = PluginHost::load(&registry);
+    let disabled = HashSet::new();
     // Feeding non-PDF bytes proves the import call path runs the WASM (the plugin parses and
     // returns an error), which surfaces as a plugin error rather than panicking or hanging.
     let result = app_plugin::import_via_plugin(
         &host,
         &registry,
+        &disabled,
         "pdf-import",
         b"not a pdf",
         &TextImportOptions::default(),
     );
-    assert!(result.is_err(), "invalid PDF bytes should produce a plugin error");
+    assert!(
+        result.is_err(),
+        "invalid PDF bytes should produce a plugin error"
+    );
 }

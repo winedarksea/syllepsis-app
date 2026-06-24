@@ -454,7 +454,7 @@ fn complete_cloud_sync_oauth_callback(
     callback_url: &str,
     redirect_uri: &str,
 ) -> Result<CloudSyncProviderStatus, String> {
-    let params = parse_query_params(&callback_url);
+    let params = parse_query_params(callback_url);
     let mut store = KeyringSyncCredentialStore;
     let descriptor = descriptor_for(provider)?;
 
@@ -1400,12 +1400,6 @@ mod tests {
             .list("syllepsis-sync/books/book-1/")
             .unwrap()
             .is_empty());
-        assert_eq!(
-            store
-                .list("syllepsis-sync/books/book-2/")
-                .unwrap()
-                .len(),
-            1
-        );
+        assert_eq!(store.list("syllepsis-sync/books/book-2/").unwrap().len(), 1);
     }
 }

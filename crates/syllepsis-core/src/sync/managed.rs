@@ -194,7 +194,9 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
             let snap_path = snapshot_path(self.book.metadata.book_id.as_str(), &ulid);
             let snapshot = std::fs::read(&sidecar)?;
             self.store.put(&snap_path, &snapshot)?;
-            state.latest_snapshots.insert(ulid.clone(), snap_path.clone());
+            state
+                .latest_snapshots
+                .insert(ulid.clone(), snap_path.clone());
             report.uploaded_snapshots.push(snap_path);
             // Delete superseded patches so cloud storage doesn't grow unboundedly.
             for entry in self.patch_entries(&ulid)? {
@@ -282,9 +284,13 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
             state.exported_version_vectors.insert(ulid.to_string(), vv);
         }
         if let Some(snapshot) = &record.latest_snapshot_path {
-            state.latest_snapshots.insert(ulid.to_string(), snapshot.clone());
+            state
+                .latest_snapshots
+                .insert(ulid.to_string(), snapshot.clone());
         }
-        report.reconstructed_notes.push(note.id.as_str().to_string());
+        report
+            .reconstructed_notes
+            .push(note.id.as_str().to_string());
         append_activity(
             &self.book.root,
             &SyncActivityEvent::new(
@@ -567,8 +573,14 @@ mod tests {
         let final_a = a.store.read_note(&note.id).unwrap().body;
         let final_b = b.store.read_note(&note.id).unwrap().body;
         assert_eq!(final_a, final_b, "both devices must converge to same text");
-        assert!(final_a.contains("from-a"), "A's edit must survive: {final_a:?}");
-        assert!(final_a.contains("from-b"), "B's edit must survive: {final_a:?}");
+        assert!(
+            final_a.contains("from-a"),
+            "A's edit must survive: {final_a:?}"
+        );
+        assert!(
+            final_a.contains("from-b"),
+            "B's edit must survive: {final_a:?}"
+        );
     }
 
     #[cfg(feature = "loro")]
@@ -595,8 +607,14 @@ mod tests {
             !first.reconstructed_notes.is_empty() || !first.downloaded_patches.is_empty(),
             "first sync must bring in the remote note"
         );
-        assert!(second.downloaded_patches.is_empty(), "second sync must not re-download");
-        assert_eq!(second.skipped_notes, 1, "second sync must skip the up-to-date note");
+        assert!(
+            second.downloaded_patches.is_empty(),
+            "second sync must not re-download"
+        );
+        assert_eq!(
+            second.skipped_notes, 1,
+            "second sync must skip the up-to-date note"
+        );
     }
 
     #[cfg(feature = "loro")]

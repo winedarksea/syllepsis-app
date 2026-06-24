@@ -30,7 +30,12 @@ pub fn render_site_with_plugins(
     render_code_block: &dyn Fn(&str, &str) -> Option<String>,
 ) -> String {
     let mut body_html = String::new();
-    push_html_with_plugins(&mut body_html, body_markdown, Options::all(), render_code_block);
+    push_html_with_plugins(
+        &mut body_html,
+        body_markdown,
+        Options::all(),
+        render_code_block,
+    );
     let escaped_title = escape_html(title);
     format!(
         "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\

@@ -58,7 +58,9 @@ pub fn update_llm_config(state: State<AppState>, llm: LlmConfig) -> Result<Confi
 
 fn get_book_config_impl(state: &AppState) -> Result<Config, String> {
     let guard = state.book.lock().unwrap();
-    let book = guard.as_ref().ok_or_else(|| "no book is open".to_string())?;
+    let book = guard
+        .as_ref()
+        .ok_or_else(|| "no book is open".to_string())?;
     Ok(book.config.clone())
 }
 
@@ -71,7 +73,9 @@ fn update_book_config(
 ) -> Result<Config, String> {
     let updated = {
         let mut guard = state.book.lock().unwrap();
-        let book = guard.as_mut().ok_or_else(|| "no book is open".to_string())?;
+        let book = guard
+            .as_mut()
+            .ok_or_else(|| "no book is open".to_string())?;
         mutate(&mut book.config);
         book.save_config().map_err(|e| e.to_string())?;
         book.config.clone()
@@ -109,7 +113,8 @@ mod tests {
 
         let mut privacy = get_book_config_impl(&state).unwrap().privacy;
         privacy.unlock_delay_hours = 72;
-        let returned = update_book_config(&state, |config| config.privacy = privacy, false).unwrap();
+        let returned =
+            update_book_config(&state, |config| config.privacy = privacy, false).unwrap();
         assert_eq!(returned.privacy.unlock_delay_hours, 72);
 
         // Reopen from disk to confirm `save_config` wrote the change.

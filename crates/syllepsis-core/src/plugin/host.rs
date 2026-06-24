@@ -146,20 +146,8 @@ impl PluginHost {
 fn build_plugin(wasm_path: &PathBuf, ctx: &UserData<HostContext>) -> CoreResult<Plugin> {
     let manifest = Manifest::new([Wasm::file(wasm_path)]);
     let functions = [
-        Function::new(
-            "create_note",
-            [PTR],
-            [PTR],
-            ctx.clone(),
-            host_create_note,
-        ),
-        Function::new(
-            "replace_body",
-            [PTR],
-            [PTR],
-            ctx.clone(),
-            host_replace_body,
-        ),
+        Function::new("create_note", [PTR], [PTR], ctx.clone(), host_create_note),
+        Function::new("replace_body", [PTR], [PTR], ctx.clone(), host_replace_body),
     ];
     Plugin::new(&manifest, functions, true)
         .map_err(|e| CoreError::Plugin(format!("instantiate {}: {e}", wasm_path.display())))

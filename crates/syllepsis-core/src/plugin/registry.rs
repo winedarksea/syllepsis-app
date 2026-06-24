@@ -43,10 +43,16 @@ impl PluginRegistry {
     /// logged and skipped rather than failing the whole scan.
     pub fn discover(builtin_dir: Option<&Path>, user_dir: Option<&Path>) -> PluginRegistry {
         let mut plugins: Vec<InstalledPlugin> = Vec::new();
-        for plugin in builtin_dir.into_iter().flat_map(|d| scan_dir(d, PluginSource::Builtin)) {
+        for plugin in builtin_dir
+            .into_iter()
+            .flat_map(|d| scan_dir(d, PluginSource::Builtin))
+        {
             plugins.push(plugin);
         }
-        for plugin in user_dir.into_iter().flat_map(|d| scan_dir(d, PluginSource::User)) {
+        for plugin in user_dir
+            .into_iter()
+            .flat_map(|d| scan_dir(d, PluginSource::User))
+        {
             // A user plugin replaces a built-in with the same id.
             plugins.retain(|p| p.manifest.id != plugin.manifest.id);
             plugins.push(plugin);
@@ -150,7 +156,12 @@ mod tests {
     #[test]
     fn discovers_builtin_plugins_and_resolves_wasm_path() {
         let dir = tempdir().unwrap();
-        write_plugin(dir.path(), "syntax-highlight", "code_block_renderer", &["rust"]);
+        write_plugin(
+            dir.path(),
+            "syntax-highlight",
+            "code_block_renderer",
+            &["rust"],
+        );
         let registry = PluginRegistry::discover(Some(dir.path()), None);
         assert_eq!(registry.all().len(), 1);
         let plugin = registry.get("syntax-highlight").unwrap();

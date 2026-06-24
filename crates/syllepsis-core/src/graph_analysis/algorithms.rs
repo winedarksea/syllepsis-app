@@ -221,14 +221,14 @@ pub(super) fn deterministic_kmeans(vectors: &[Embedding], requested_k: usize) ->
             break;
         }
         labels = next_labels;
-        for cluster in 0..k {
+        for (cluster, centroid) in centroids.iter_mut().enumerate().take(k) {
             let members: Vec<&Embedding> = vectors
                 .iter()
                 .zip(&labels)
                 .filter_map(|(vector, label)| (*label == cluster).then_some(vector))
                 .collect();
-            if let Some(centroid) = Embedding::average(members) {
-                centroids[cluster] = centroid.0;
+            if let Some(next_centroid) = Embedding::average(members) {
+                *centroid = next_centroid.0;
             }
         }
     }

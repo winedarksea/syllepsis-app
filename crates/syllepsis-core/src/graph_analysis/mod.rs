@@ -22,6 +22,7 @@ pub use types::{
 };
 
 const MAX_SEMANTIC_NEIGHBORS: usize = 30;
+type CategoryLayoutAnalysis = (Vec<(f32, f32)>, Vec<Option<usize>>, Vec<bool>);
 
 #[derive(Debug, Clone)]
 pub struct SemanticGraphCorpus {
@@ -206,7 +207,7 @@ impl SemanticGraphCorpus {
         })
     }
 
-    fn category_analysis(&self) -> (Vec<(f32, f32)>, Vec<Option<usize>>, Vec<bool>) {
+    fn category_analysis(&self) -> CategoryLayoutAnalysis {
         let mut category_ids = BTreeMap::new();
         for note_index in &self.embedded_note_indices {
             let key = self.notes[*note_index]

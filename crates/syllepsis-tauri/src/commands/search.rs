@@ -91,7 +91,9 @@ pub fn search_across_books(
 
     // Load tracked paths (reuse the JSON directly to avoid circular imports).
     #[derive(serde::Deserialize, Default)]
-    struct TrackedBookPaths { paths: Vec<String> }
+    struct TrackedBookPaths {
+        paths: Vec<String>,
+    }
     let tracked_path = app_data_dir.join("tracked-books.json");
     let tracked: TrackedBookPaths = if tracked_path.exists() {
         let content = std::fs::read_to_string(&tracked_path).unwrap_or_default();
@@ -111,7 +113,9 @@ pub fn search_across_books(
     let q = query.to_lowercase();
 
     for path_str in &tracked.paths {
-        if open_path.as_deref() == Some(path_str.as_str()) { continue; }
+        if open_path.as_deref() == Some(path_str.as_str()) {
+            continue;
+        }
         let book_path = PathBuf::from(path_str);
         let book = match Book::open(&book_path) {
             Ok(b) => b.with_models_root(models_root.clone()),
@@ -122,7 +126,9 @@ pub fn search_across_books(
             Err(_) => continue,
         };
         for note in notes {
-            if !note.metadata.is_visible_in_default_views() { continue; }
+            if !note.metadata.is_visible_in_default_views() {
+                continue;
+            }
             if note.title.to_lowercase().contains(&q)
                 || note.summary.to_lowercase().contains(&q)
                 || note.body.to_lowercase().contains(&q)

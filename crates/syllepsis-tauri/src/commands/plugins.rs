@@ -57,7 +57,12 @@ impl PluginRuntime {
             }
         }
         let host = PluginHost::load(&registry);
-        PluginRuntime { registry, host, disabled_ids: Mutex::new(disabled_ids), prefs_path }
+        PluginRuntime {
+            registry,
+            host,
+            disabled_ids: Mutex::new(disabled_ids),
+            prefs_path,
+        }
     }
 }
 
@@ -172,8 +177,14 @@ pub fn run_render_plugin(
     }
     // Snapshot disabled set before entering WASM (releases the lock before the call).
     let disabled = plugins.disabled_ids.lock().unwrap().clone();
-    app_plugin::run_render_plugin(&plugins.host, &plugins.registry, &disabled, &language, &code)
-        .map_err(|e| e.to_string())
+    app_plugin::run_render_plugin(
+        &plugins.host,
+        &plugins.registry,
+        &disabled,
+        &language,
+        &code,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Run an import-source plugin over a chosen file and return a text-import preview, so the rest of

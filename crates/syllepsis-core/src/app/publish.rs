@@ -72,7 +72,8 @@ pub fn publish_site(
 
     let items = sort::render(public, categories);
     let markdown = sort::to_markdown(&items);
-    let html = crate::publish::render_site_with_plugins(&book.metadata.name, &markdown, render_code_block);
+    let html =
+        crate::publish::render_site_with_plugins(&book.metadata.name, &markdown, render_code_block);
 
     std::fs::create_dir_all(out_dir)?;
     let index_path = out_dir.join("index.html");

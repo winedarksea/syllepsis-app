@@ -152,7 +152,8 @@ pub fn export_html(
         plugins.host.set_book_root(Some(book.root.clone()));
         let disabled = plugins.disabled_ids.lock().unwrap().clone();
         let html = app::export_html(book, &|lang, code| {
-            app_plugin::run_render_plugin(&plugins.host, &plugins.registry, &disabled, lang, code).ok()
+            app_plugin::run_render_plugin(&plugins.host, &plugins.registry, &disabled, lang, code)
+                .ok()
         })
         .map_err(|e| e.to_string())?;
         std::fs::write(&path, html).map_err(|e| format!("write HTML: {e}"))
