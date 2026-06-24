@@ -60,18 +60,23 @@ pub fn llm_route_statuses(state: State<AppState>) -> Result<Vec<LlmRouteStatus>,
 
 /// Generate (but do not apply) a proposal for a note and task.
 #[tauri::command]
-pub fn generate_proposal(
-    state: State<AppState>,
+pub async fn generate_proposal(
+    app: AppHandle,
     note_id: String,
     task: LlmTask,
     model_override: Option<ModelRef>,
 ) -> Result<Proposal, String> {
-    with_book!(state, book, {
-        state.with_llm_service(book, |service| {
-            app::generate_proposal_with_service(book, service, &note_id, task, model_override)
-                .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        with_book!(state, book, {
+            state.with_llm_service(book, |service| {
+                app::generate_proposal_with_service(book, service, &note_id, task, model_override)
+                    .map_err(|e| e.to_string())
+            })
         })
     })
+    .await
+    .map_err(|error| format!("local LLM worker failed: {error}"))?
 }
 
 /// Prepare a routed prompt for shell-owned cloud/local-server execution.

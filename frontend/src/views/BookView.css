@@ -146,3 +146,36 @@
   color: var(--color-text-tertiary);
   font-style: italic;
 }
+
+/* Code blocks in the book view — plain fallback */
+.bv-code-block {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3) var(--sp-4);
+  margin: var(--sp-3) 0;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--color-text);
+  cursor: default;
+}
+.bv-code-block code { font: inherit; }
+
+/* Plugin-rendered code blocks (syntax-highlight output) */
+.bv-plugin-block {
+  margin: var(--sp-3) 0;
+  cursor: default;
+}
+.bv-plugin-block pre.plugin-codeblock {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3) var(--sp-4);
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--color-text);
+}

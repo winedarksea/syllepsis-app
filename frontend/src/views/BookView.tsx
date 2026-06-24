@@ -1,12 +1,102 @@
 // Renders the sorted book as a continuous document (headings + paragraphs/bullets).
 // Export buttons let users save the book as Markdown or HTML.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
+import { sanitizeHtml } from '../lib/sanitize';
 import { useStore } from '../lib/store';
 import type { RenderItem } from '../types';
 import './BookView.css';
+
+// ── Body segment parser ──────────────────────────────────────────────────────
+
+type TextSegment = { kind: 'text'; content: string };
+type CodeSegment = { kind: 'code'; language: string; code: string };
+type BodySegment = TextSegment | CodeSegment;
+
+function parseBodySegments(body: string): BodySegment[] {
+  const segments: BodySegment[] = [];
+  // Match fenced code blocks on their own lines; back-reference [1] for the fence length.
+  const fenceRe = /^(`{3,})(\w*)[ \t]*\r?\n([\s\S]*?)^\1[ \t]*$/gm;
+  let lastIndex = 0;
+  let match;
+  while ((match = fenceRe.exec(body)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ kind: 'text', content: body.slice(lastIndex, match.index) });
+    }
+    segments.push({ kind: 'code', language: match[2] || '', code: match[3] });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < body.length) {
+    segments.push({ kind: 'text', content: body.slice(lastIndex) });
+  }
+  return segments.length > 0 ? segments : [{ kind: 'text', content: body }];
+}
+
+// ── BookCodeBlock ────────────────────────────────────────────────────────────
+
+function BookCodeBlock({
+  language,
+  code,
+  claimed,
+}: {
+  language: string;
+  code: string;
+  claimed: Set<string>;
+}) {
+  const [html, setHtml] = useState<string | null>(null);
+  const isClaimed = language.length > 0 && claimed.has(language.toLowerCase());
+
+  useEffect(() => {
+    if (!isClaimed) return;
+    let active = true;
+    setHtml(null);
+    api
+      .runRenderPlugin(language, code)
+      .then((raw) => { if (active) setHtml(sanitizeHtml(raw)); })
+      .catch(() => { if (active) setHtml(null); });
+    return () => { active = false; };
+  }, [language, code, isClaimed]);
+
+  if (isClaimed && html !== null) {
+    return (
+      <div
+        className="bv-plugin-block"
+        data-language={language}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  }
+  return (
+    <pre className="bv-code-block" data-language={language || undefined}>
+      <code>{code}</code>
+    </pre>
+  );
+}
+
+// ── BookNoteBody ─────────────────────────────────────────────────────────────
+
+function BookNoteBody({ body, claimed }: { body: string; claimed: Set<string> }) {
+  const segments = useMemo(() => parseBodySegments(body), [body]);
+  const hasCode = segments.some((s) => s.kind === 'code');
+
+  if (!hasCode) return <>{body.trim()}</>;
+
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.kind === 'code' ? (
+          <BookCodeBlock key={i} language={seg.language} code={seg.code} claimed={claimed} />
+        ) : (
+          <span key={i}>{seg.content}</span>
+        )
+      )}
+    </>
+  );
+}
+
+// ── HeadingTag ───────────────────────────────────────────────────────────────
 
 function HeadingTag({ level, text }: { level: number; text: string }) {
   const l = Math.min(Math.max(level, 1), 6);
@@ -19,8 +109,11 @@ function HeadingTag({ level, text }: { level: number; text: string }) {
   return <h6 className={cls}>{text}</h6>;
 }
 
+// ── BookView ─────────────────────────────────────────────────────────────────
+
 export function BookView() {
-  const { openEditor, book } = useStore();
+  const { openEditor, book, pluginRenderLanguages } = useStore();
+  const claimed = useMemo(() => new Set(pluginRenderLanguages), [pluginRenderLanguages]);
   const [items, setItems] = useState<RenderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -112,7 +205,9 @@ export function BookView() {
                 <span className="bv-list-marker">{note.numbered ? '1.' : '•'}</span>
               )}
               <span className="bv-note-body">
-                {content.trim() || <span className="bv-empty-body">(empty)</span>}
+                {content.trim()
+                  ? <BookNoteBody body={content} claimed={claimed} />
+                  : <span className="bv-empty-body">(empty)</span>}
               </span>
             </div>
           );

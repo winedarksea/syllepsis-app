@@ -118,13 +118,14 @@ fn log_execution_provider_choice(
     tracing::info!(
         model = %manifest.id,
         graph = %weights_path.display(),
-        selected_execution_provider = choice.provider.as_str(),
+        primary_execution_provider = choice.provider.as_str(),
+        cpu_fallback_provider_registered = true,
         used_cpu_fallback = choice.used_cpu_fallback,
         available_execution_providers = %available,
         preferred_execution_providers = %preferred,
         coreml_compute_units = if choice.provider == ExecutionProvider::CoreMl { "all" } else { "n/a" },
         coreml_profile_compute_plan = coreml_profile,
-        "onnx: loading model session"
+        "onnx: loading model session with provider priority"
     );
 }
 

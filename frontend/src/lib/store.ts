@@ -80,6 +80,10 @@ interface AppStore {
   // startup; the editor maps these languages to a rendered PluginBlockNode instead of plain code.
   pluginRenderLanguages: string[];
   setPluginRenderLanguages: (languages: string[]) => void;
+  // True once list_plugins() has settled (success or error). Gates the Lexical editor mount so
+  // InitBodyPlugin always fires with the final pluginRenderLanguages, avoiding a race condition.
+  pluginsLoaded: boolean;
+  setPluginsLoaded: (loaded: boolean) => void;
 
   // Theme: `themePref` is the light/dark/system choice (persisted); `theme` is the resolved mode
   // applied to the DOM. When the pref is 'system', `theme` tracks the OS color scheme.
@@ -134,6 +138,8 @@ export const useStore = create<AppStore>((set) => ({
 
   pluginRenderLanguages: [],
   setPluginRenderLanguages: (pluginRenderLanguages) => set({ pluginRenderLanguages }),
+  pluginsLoaded: false,
+  setPluginsLoaded: (pluginsLoaded) => set({ pluginsLoaded }),
 
   themePref: readThemePref(),
   theme: resolveTheme(readThemePref()),

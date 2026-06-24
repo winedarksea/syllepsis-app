@@ -44,22 +44,49 @@ impl PluginRuntime {
 }
 
 /// Resolve the built-in (bundled resource) and user plugin directories for this app install.
+///
+/// Resolution order for the built-in dir:
+///   1. `SYLLEPSIS_PLUGIN_DIR` env var (explicit override for any environment)
+///   2. `<resource_dir>/plugins` (production bundle)
+///   3. `<workspace-root>/plugins/dist` (debug builds only, found via `CARGO_MANIFEST_DIR`)
 pub fn plugin_dirs(app: &AppHandle) -> (Option<PathBuf>, Option<PathBuf>) {
-    let builtin = std::env::var_os(PLUGIN_DIR_ENV_VAR)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            app.path()
-                .resource_dir()
-                .ok()
-                .map(|dir| dir.join("plugins"))
-        });
+    let builtin = if let Some(v) = std::env::var_os(PLUGIN_DIR_ENV_VAR).filter(|v| !v.is_empty()) {
+        Some(PathBuf::from(v))
+    } else {
+        let resource_candidate = app
+            .path()
+            .resource_dir()
+            .ok()
+            .map(|dir| dir.join("plugins"));
+        // Use the resource dir only if it actually exists (it won't in a `cargo tauri dev` run).
+        match resource_candidate.filter(|p| p.is_dir()) {
+            Some(p) => Some(p),
+            None => dev_builtin_fallback(),
+        }
+    };
+
     let user = app
         .path()
         .app_data_dir()
         .ok()
         .map(|dir| dir.join("plugins"));
     (builtin, user)
+}
+
+/// In debug builds, locate `plugins/dist` relative to the workspace root using the crate's
+/// compile-time manifest path. Returns `None` in release builds or if the directory is absent.
+fn dev_builtin_fallback() -> Option<PathBuf> {
+    #[cfg(debug_assertions)]
+    {
+        // CARGO_MANIFEST_DIR = <workspace>/crates/syllepsis-tauri at compile time.
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let candidate = manifest.join("../../plugins/dist");
+        std::fs::canonicalize(candidate).ok().filter(|p| p.is_dir())
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
 }
 
 /// List every installed plugin (for the Settings panel and the editor's language map).

@@ -146,7 +146,7 @@ function SaveShortcutPlugin({ onSave }: { onSave: () => void }) {
 interface Props { noteId: string; }
 
 export function Editor({ noteId }: Props) {
-  const { closeEditor, setCategories, categories, pluginRenderLanguages } = useStore();
+  const { closeEditor, setCategories, categories, pluginRenderLanguages, pluginsLoaded } = useStore();
 
   // Map plugin-claimed code languages to a rendered PluginBlockNode; all other code fences keep
   // the built-in behavior. Used for both import (init) and export (save) so the markdown round-trips.
@@ -520,6 +520,9 @@ export function Editor({ noteId }: Props) {
             spellCheck={false}
           />
         </div>
+      ) : !pluginsLoaded ? (
+        // Hold until list_plugins() settles so InitBodyPlugin fires with the correct transformers.
+        <div className="editor-body-wrap"><div className="editor-loading">Loading…</div></div>
       ) : (
         // Text note: Lexical rich text editor
         <LexicalComposer key={`${noteId}-${reloadKey}`} initialConfig={editorConfig}>

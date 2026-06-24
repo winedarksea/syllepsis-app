@@ -27,6 +27,12 @@ interface GenerationProgress {
   startedAt: number;
 }
 
+function waitForNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
 function proposalModelLabel(proposal: Proposal): string {
   const executionMode = proposal.provider === 'local' ? 'local LLM' : 'model';
   return `${proposal.provider}/${proposal.model} (${executionMode})`;
@@ -99,6 +105,8 @@ export function LlmToolsMenu({ noteId, onApplied }: Props) {
           model: route.model,
           startedAt,
         });
+        // Let the native WebView paint the progress overlay before starting expensive inference.
+        await waitForNextPaint();
         setProposal(await api.generateProposal(noteId, task));
       } else {
         throw new Error(`No runnable LLM is configured for ${task}.`);
