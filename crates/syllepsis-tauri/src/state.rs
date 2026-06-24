@@ -2,6 +2,9 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use syllepsis_core::graph_analysis::{
+    current_corpus_fingerprint, GraphAnalysisRequest, GraphAnalysisResult, SemanticGraphCorpus,
+};
 use syllepsis_core::llm::{select_llm_provider, LlmService};
 use syllepsis_core::onnx::{manifest, ModelCache};
 use syllepsis_core::storage::Book;
@@ -13,11 +16,17 @@ struct CachedLlmService {
     service: LlmService,
 }
 
+struct CachedGraphCorpus {
+    fingerprint: String,
+    corpus: SemanticGraphCorpus,
+}
+
 /// The single app-level state. The open book is behind a Mutex; `None` means no book
 /// is open yet (the user hasn't opened or created one in this session).
 pub struct AppState {
     pub book: Mutex<Option<Book>>,
     llm_service: Mutex<Option<CachedLlmService>>,
+    graph_corpus: Mutex<Option<CachedGraphCorpus>>,
     pub file_watcher: Mutex<Option<notify::RecommendedWatcher>>,
 }
 
@@ -26,6 +35,7 @@ impl AppState {
         AppState {
             book: Mutex::new(None),
             llm_service: Mutex::new(None),
+            graph_corpus: Mutex::new(None),
             file_watcher: Mutex::new(None),
         }
     }
@@ -33,6 +43,35 @@ impl AppState {
     /// Drop the cached local-model provider after switching books or changing LLM config.
     pub fn invalidate_llm_service(&self) {
         *self.llm_service.lock().unwrap() = None;
+    }
+
+    pub fn invalidate_graph_corpus(&self) {
+        *self.graph_corpus.lock().unwrap() = None;
+    }
+
+    pub fn analyze_graph(
+        &self,
+        request: &GraphAnalysisRequest,
+    ) -> Result<GraphAnalysisResult, String> {
+        let book_guard = self.book.lock().unwrap();
+        let book = book_guard
+            .as_ref()
+            .ok_or_else(|| "no book is open".to_string())?;
+        let fingerprint = current_corpus_fingerprint(book).map_err(|error| error.to_string())?;
+        let mut cached = self.graph_corpus.lock().unwrap();
+        if cached.as_ref().map(|entry| entry.fingerprint.as_str()) != Some(fingerprint.as_str()) {
+            let corpus = SemanticGraphCorpus::build(book).map_err(|error| error.to_string())?;
+            *cached = Some(CachedGraphCorpus {
+                fingerprint,
+                corpus,
+            });
+        }
+        cached
+            .as_ref()
+            .expect("graph corpus was initialized")
+            .corpus
+            .analyze(request)
+            .map_err(|error| error.to_string())
     }
 
     /// Run a closure against the long-lived LLM service for `book`, constructing it on first use or

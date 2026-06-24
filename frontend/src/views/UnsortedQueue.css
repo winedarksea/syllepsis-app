@@ -21,6 +21,35 @@
   color: var(--color-heading);
 }
 
+.uq-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.uq-filter-toggle {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.uq-filter-btn {
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.uq-filter-btn:hover { background: var(--color-surface-raised); }
+.uq-filter-btn.active {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
 .uq-add-btn {
   padding: var(--sp-2) var(--sp-4);
   background: var(--color-accent);

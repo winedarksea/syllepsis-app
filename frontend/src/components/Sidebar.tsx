@@ -23,7 +23,7 @@ const NEW_TYPES: { type: ObjectType; label: string }[] = [
 
 const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[] = [
   { view: 'book', icon: 'menu_book', label: 'Book View', slot: 'book' },
-  { view: 'unsorted', icon: 'inbox', label: 'Unsorted', slot: 'unsorted' },
+  { view: 'unsorted', icon: 'inbox', label: 'Notebox', slot: 'unsorted' },
   { view: 'search', icon: 'search', label: 'Search', slot: 'search' },
   { view: 'graph', icon: 'hub', label: 'Graph', slot: 'graph' },
   { view: 'worlds', icon: 'map', label: 'Worlds', slot: 'worlds' },
@@ -36,7 +36,7 @@ const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[]
 ];
 
 export function Sidebar({ onNewNote }: Props) {
-  const { view, setView, categories, unsortedCount, activeCategory, setActiveCategory, theme, toggleTheme, closeBook } = useStore();
+  const { view, setView, categories, unsortedCount, hideUnsortedBadge, diagnosticsIssueCount, activeCategory, setActiveCategory, theme, toggleTheme, closeBook } = useStore();
   const [newMenuOpen, setNewMenuOpen] = useState(false);
 
   const handleCategory = useCallback((cat: Category) => {
@@ -87,8 +87,11 @@ export function Sidebar({ onNewNote }: Props) {
           >
             <Icon name={item.icon} slot={item.slot} className="sidebar-item-icon" size={19} />
             <span>{item.label}</span>
-            {item.view === 'unsorted' && unsortedCount > 0 && (
+            {item.view === 'unsorted' && unsortedCount > 0 && !hideUnsortedBadge && (
               <span className="sidebar-badge">{unsortedCount}</span>
+            )}
+            {item.view === 'diagnostics' && diagnosticsIssueCount > 0 && (
+              <span className="sidebar-badge sidebar-badge--diag">{diagnosticsIssueCount}</span>
             )}
           </button>
         ))}

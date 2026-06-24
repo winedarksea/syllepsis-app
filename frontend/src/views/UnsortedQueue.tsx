@@ -1,5 +1,5 @@
-// The capture and categorisation surface. Shows all unsorted notes, newest first.
-// Clicking a card opens the note in the editor; "New Note" creates a quick capture.
+// Notebox — capture surface showing unsorted notes by default, with an "All notes" toggle.
+// The sidebar badge always reflects the unsorted-only count regardless of the filter.
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
@@ -54,16 +54,27 @@ export function UnsortedQueue() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   const refresh = useCallback(() => {
-    api.unsortedNotes()
+    setLoading(true);
+    const fetch = showAll ? api.listNotes() : api.unsortedNotes();
+    fetch
       .then((ns) => {
         setNotes(ns);
-        setUnsortedCount(ns.length);
+        // Badge always tracks unsorted count — re-fetch if we just loaded all notes.
+        if (!showAll) setUnsortedCount(ns.length);
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [setUnsortedCount]);
+  }, [showAll, setUnsortedCount]);
+
+  // Keep unsorted count fresh when showing all notes.
+  useEffect(() => {
+    if (showAll) {
+      api.unsortedNotes().then((ns) => setUnsortedCount(ns.length)).catch(console.error);
+    }
+  }, [showAll, setUnsortedCount]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -80,10 +91,26 @@ export function UnsortedQueue() {
   return (
     <div className="uq-root">
       <div className="uq-header">
-        <h2 className="uq-title">Unsorted</h2>
-        <button className="uq-add-btn" onClick={() => setShowForm((s) => !s)}>
-          {showForm ? 'Cancel' : '+ New Note'}
-        </button>
+        <h2 className="uq-title">Notebox</h2>
+        <div className="uq-header-actions">
+          <div className="uq-filter-toggle">
+            <button
+              className={`uq-filter-btn ${!showAll ? 'active' : ''}`}
+              onClick={() => setShowAll(false)}
+            >
+              Unsorted
+            </button>
+            <button
+              className={`uq-filter-btn ${showAll ? 'active' : ''}`}
+              onClick={() => setShowAll(true)}
+            >
+              All notes
+            </button>
+          </div>
+          <button className="uq-add-btn" onClick={() => setShowForm((s) => !s)}>
+            {showForm ? 'Cancel' : '+ New Note'}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -92,7 +119,11 @@ export function UnsortedQueue() {
 
       {notes.length === 0 && !showForm ? (
         <div className="uq-empty">
-          <p>All caught up! Every note has been organised.</p>
+          {showAll ? (
+            <p>No notes yet. Capture your first thought below.</p>
+          ) : (
+            <p>All caught up! Every note has been organised.</p>
+          )}
           <button className="uq-add-btn" onClick={() => setShowForm(true)}>+ Capture a thought</button>
         </div>
       ) : (

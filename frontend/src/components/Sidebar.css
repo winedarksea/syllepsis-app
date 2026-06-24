@@ -118,6 +118,10 @@
   text-align: center;
 }
 
+.sidebar-badge--diag {
+  background: var(--color-diag-badge);
+}
+
 .sidebar-empty {
   font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);

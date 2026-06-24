@@ -3,13 +3,36 @@
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  background: var(--color-bg);
 }
 
-.gv-header {
-  padding: var(--sp-5) var(--sp-6);
+.gv-toolbar {
+  flex-shrink: 0;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
-  flex-shrink: 0;
+}
+
+.gv-toolbar-primary,
+.gv-toolbar-secondary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-6);
+}
+
+.gv-toolbar-primary {
+  min-height: 60px;
+}
+
+.gv-toolbar-secondary {
+  min-height: 42px;
+  padding-top: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.gv-heading {
+  min-width: 150px;
 }
 
 .gv-title {
@@ -19,6 +42,171 @@
   color: var(--color-heading);
 }
 
+.gv-mode-description {
+  display: block;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
+}
+
+.gv-mode-segments {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.gv-mode-segments button {
+  padding: 6px var(--sp-3);
+  border-right: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.gv-mode-segments button:last-child {
+  border-right: none;
+}
+
+.gv-mode-segments button:hover {
+  color: var(--color-accent);
+}
+
+.gv-mode-segments button.active {
+  color: var(--color-text-inverse);
+  background: var(--color-accent);
+}
+
+.gv-mode-select {
+  display: none;
+}
+
+.gv-title-control {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.gv-switch {
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--color-border);
+  position: relative;
+  flex-shrink: 0;
+  transition: background var(--transition-fast);
+}
+
+.gv-switch.on {
+  background: var(--color-accent);
+}
+
+.gv-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  transition: transform var(--transition-fast);
+}
+
+.gv-switch.on .gv-switch-knob {
+  transform: translateX(16px);
+}
+
+.gv-threshold-control {
+  display: grid;
+  grid-template-columns: auto minmax(150px, 320px) 38px auto;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  max-width: 570px;
+}
+
+.gv-threshold-control input[type='range'] {
+  width: 100%;
+  accent-color: var(--color-accent);
+}
+
+.gv-threshold-control output {
+  color: var(--color-heading);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-align: right;
+}
+
+.gv-edge-count {
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.gv-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.gv-advanced-toggle:hover {
+  color: var(--color-accent);
+}
+
+.gv-advanced-panel {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-6);
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+  background: var(--color-surface-raised);
+}
+
+.gv-number-control {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.gv-number-control input {
+  width: 76px;
+  padding: 4px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.gv-provider-note {
+  position: absolute;
+  z-index: 3;
+  top: 112px;
+  right: var(--sp-4);
+  padding: 3px var(--sp-2);
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  pointer-events: none;
+}
+
+.gv-error-banner {
+  padding: var(--sp-2) var(--sp-6);
+  border-bottom: 1px solid var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 9%, var(--color-surface));
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+}
+
 .gv-state {
   display: flex;
   align-items: center;
@@ -26,44 +214,109 @@
   height: 100%;
   color: var(--color-text-secondary);
 }
-.gv-error { color: var(--color-error); }
+
+.gv-error {
+  color: var(--color-error);
+}
 
 .gv-canvas {
+  position: relative;
   flex: 1;
-  overflow: auto;
-  background: var(--color-bg);
+  min-height: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--color-graph-grid) 45%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-graph-grid) 45%, transparent) 1px, transparent 1px),
+    var(--color-bg);
+  background-size: 48px 48px;
 }
 
 .gv-svg {
+  display: block;
   width: 100%;
   height: 100%;
+  touch-action: none;
+  cursor: grab;
 }
 
-/* Edge weave: a background-colored casing under each line so later edges
-   notch a gap through earlier ones at crossings (interlace effect). */
+.gv-svg:active {
+  cursor: grabbing;
+}
+
+.gv-canvas.loading .gv-svg {
+  opacity: 0.54;
+  transition: opacity var(--transition-base);
+}
+
+.gv-cluster-region {
+  pointer-events: none;
+}
+
+.gv-cluster-region path,
+.gv-cluster-region circle {
+  fill: var(--cluster-fill);
+  stroke: var(--cluster-stroke);
+  stroke-width: 1.3;
+}
+
+.gv-cluster-region line {
+  stroke: var(--cluster-fill);
+  stroke-width: 72;
+  stroke-linecap: round;
+  paint-order: stroke;
+  outline: 1px solid var(--cluster-stroke);
+}
+
+.gv-cluster-region text {
+  fill: var(--cluster-stroke);
+  font-family: var(--font-serif);
+  font-size: 12px;
+  font-weight: 600;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--color-bg);
+  stroke-width: 4px;
+}
+
+.gv-cluster-0 { --cluster-stroke: var(--color-accent); --cluster-fill: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.gv-cluster-1 { --cluster-stroke: var(--color-secondary); --cluster-fill: color-mix(in srgb, var(--color-secondary) 11%, transparent); }
+.gv-cluster-2 { --cluster-stroke: var(--color-text-secondary); --cluster-fill: color-mix(in srgb, var(--color-text-secondary) 8%, transparent); }
+.gv-cluster-3 { --cluster-stroke: var(--color-accent-hover); --cluster-fill: color-mix(in srgb, var(--color-accent-hover) 9%, transparent); }
+.gv-cluster-4 { --cluster-stroke: var(--color-tertiary); --cluster-fill: color-mix(in srgb, var(--color-tertiary) 10%, transparent); }
+.gv-pattern-1 path,
+.gv-pattern-1 circle { stroke-dasharray: 7 4; }
+.gv-pattern-2 path,
+.gv-pattern-2 circle { stroke-dasharray: 2 4; }
+
+.gv-semantic-edges line {
+  stroke: var(--color-secondary);
+  stroke-width: 1;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
 .gv-edge-casing {
   stroke: var(--color-bg);
   stroke-width: calc(var(--stroke-graph) + var(--weave-gap));
   stroke-linecap: round;
 }
 
-.gv-edge {
+.gv-prior-edge {
   stroke: var(--color-accent);
-  stroke-width: var(--stroke-graph);
+  stroke-width: var(--stroke-graph-active);
   stroke-linecap: round;
-  opacity: 0.55;
+  opacity: 0.78;
 }
 
 .gv-node {
   cursor: pointer;
 }
 
-/* Quiet pale-stone discs; category carried by the ring color (blue/moss/stone). */
 .gv-node-dot {
-  transition: r var(--transition-fast), stroke-width var(--transition-fast);
   fill: var(--color-surface-raised);
   stroke: var(--color-text-tertiary);
   stroke-width: 1.5;
+  transition: r var(--transition-fast), stroke-width var(--transition-fast);
 }
 
 .gv-node--0 .gv-node-dot { stroke: var(--color-accent); }
@@ -73,29 +326,211 @@
 .gv-node--4 .gv-node-dot { stroke: var(--color-tertiary); }
 
 .gv-node-active .gv-node-dot {
-  stroke-width: 2.5;
   fill: var(--color-accent-subtle);
+  stroke-width: 2.5;
+}
+
+.gv-node-status-ring {
+  fill: none;
+  stroke: var(--color-text-secondary);
+  stroke-width: 1.3;
+  pointer-events: none;
+}
+
+.gv-node-outlier .gv-node-status-ring {
+  stroke: var(--color-warning);
+  stroke-dasharray: 3 2;
+}
+
+.gv-node-no-signal .gv-node-status-ring {
+  stroke: var(--color-text-tertiary);
+  stroke-dasharray: 1 3;
 }
 
 .gv-node-label {
+  fill: var(--color-heading);
   font-family: var(--font-sans);
   font-size: 13px;
-  fill: var(--color-heading);
   paint-order: stroke;
   stroke: var(--color-bg);
   stroke-width: 3px;
+  pointer-events: none;
 }
 
-/* Edge style variants — driven by data-graph-edge on the app root */
-[data-graph-edge='glow'] .gv-edge {
-  opacity: 0.9;
+.gv-camera-controls {
+  position: absolute;
+  right: var(--sp-4);
+  bottom: 48px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+}
+
+.gv-camera-controls button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.gv-camera-controls button:last-child {
+  border-bottom: none;
+}
+
+.gv-camera-controls button:hover {
+  color: var(--color-accent);
+  background: var(--color-surface-raised);
+}
+
+.gv-legend {
+  position: absolute;
+  left: var(--sp-4);
+  bottom: var(--sp-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  max-width: calc(100% - 80px);
+  padding: 5px var(--sp-2);
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  pointer-events: none;
+}
+
+.gv-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.gv-legend-line {
+  display: inline-block;
+  width: 20px;
+  border-top: 1px solid var(--color-secondary);
+}
+
+.gv-legend-line.prior {
+  border-top: 2px solid var(--color-accent);
+}
+
+.gv-legend-region {
+  width: 14px;
+  height: 9px;
+  border: 1px dashed var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.gv-legend-node {
+  width: 10px;
+  height: 10px;
+  border: 1px dashed var(--color-warning);
+  border-radius: 50%;
+}
+
+.gv-legend-node.no-signal {
+  border-color: var(--color-text-tertiary);
+  border-style: dotted;
+}
+
+.gv-loading-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+[data-graph-edge='glow'] .gv-prior-edge {
   filter: drop-shadow(0 0 3px var(--color-accent));
-}
-
-[data-graph-edge='plain'] .gv-edge {
-  opacity: 0.45;
 }
 
 [data-graph-edge='plain'] .gv-edge-casing {
   display: none;
+}
+
+@media (max-width: 840px) {
+  .gv-toolbar-primary,
+  .gv-toolbar-secondary,
+  .gv-advanced-panel {
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
+  }
+
+  .gv-mode-segments {
+    display: none;
+  }
+
+  .gv-mode-select {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .gv-mode-select select {
+    padding: 5px var(--sp-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  .gv-provider-note {
+    top: 110px;
+  }
+}
+
+@media (max-width: 560px) {
+  .gv-toolbar-primary {
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+
+  .gv-heading {
+    min-width: 100px;
+  }
+
+  .gv-title-control {
+    width: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+  }
+
+  .gv-toolbar-secondary {
+    align-items: flex-end;
+  }
+
+  .gv-threshold-control {
+    grid-template-columns: auto 1fr 38px;
+  }
+
+  .gv-edge-count {
+    display: none;
+  }
+
+  .gv-advanced-panel {
+    flex-wrap: wrap;
+  }
+
+  .gv-provider-note {
+    display: none;
+  }
+
+  .gv-legend {
+    right: 54px;
+    max-width: none;
+  }
 }

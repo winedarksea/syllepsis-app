@@ -14,7 +14,7 @@ use crate::embeddings::vector::Embedding;
 ///
 /// Implementations must be deterministic for a given build (the same text always embeds to the
 /// same vector) so that cached vectors stay valid and search results are stable.
-pub trait EmbeddingProvider {
+pub trait EmbeddingProvider: ProviderInfo {
     /// Vector width this provider emits. All embeddings it returns have this length.
     fn dimensions(&self) -> usize;
 

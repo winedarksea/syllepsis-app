@@ -66,6 +66,10 @@ pub enum CoreError {
     /// manifest, a missing/invalid WASM module, or an error returned from a plugin call.
     #[error("plugin error: {0}")]
     Plugin(String),
+
+    /// Semantic graph analysis could not produce a valid clustering or projection.
+    #[error("graph analysis error: {0}")]
+    GraphAnalysis(String),
 }
 
 impl CoreError {

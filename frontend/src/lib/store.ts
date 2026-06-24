@@ -1,7 +1,7 @@
 // Global app state via Zustand.
 
 import { create } from 'zustand';
-import type { BookInfo, Category } from '../types';
+import type { BookInfo, Category, GraphMode } from '../types';
 import type { Theme } from '../theme/themes';
 import { DEFAULT_THEME_ID, themeById } from '../theme/themes';
 
@@ -15,6 +15,7 @@ export type ThemePref = 'light' | 'dark' | 'system';
 const THEME_PREF_KEY = 'syllepsis.themePref';
 const THEME_ID_KEY = 'syllepsis.themeId';
 const CUSTOM_THEMES_KEY = 'syllepsis.customThemes';
+const HIDE_UNSORTED_BADGE_KEY = 'syllepsis.hideUnsortedBadge';
 
 function readSystemTheme(): 'light' | 'dark' {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -75,6 +76,34 @@ interface AppStore {
   // Unsorted count badge
   unsortedCount: number;
   setUnsortedCount: (n: number) => void;
+  hideUnsortedBadge: boolean;
+  setHideUnsortedBadge: (v: boolean) => void;
+
+  // Diagnostics issue count (persisted per-book by Diagnostics view; 0 = clean/unknown)
+  diagnosticsIssueCount: number;
+  setDiagnosticsIssueCount: (n: number) => void;
+
+  // Graph display preferences (session-scoped; intentionally not persisted).
+  showAllGraphTitles: boolean;
+  setShowAllGraphTitles: (show: boolean) => void;
+  graphMode: GraphMode;
+  setGraphMode: (mode: GraphMode) => void;
+  graphSimilarityThreshold: number;
+  setGraphSimilarityThreshold: (threshold: number) => void;
+  graphAdvancedOpen: boolean;
+  setGraphAdvancedOpen: (open: boolean) => void;
+  graphPillarsNeighbors: number;
+  setGraphPillarsNeighbors: (neighbors: number) => void;
+  graphCommunitiesNeighbors: number;
+  setGraphCommunitiesNeighbors: (neighbors: number) => void;
+  graphDensityNeighbors: number;
+  setGraphDensityNeighbors: (neighbors: number) => void;
+  graphKmeansK: number;
+  setGraphKmeansK: (clusters: number) => void;
+  graphLouvainResolution: number;
+  setGraphLouvainResolution: (resolution: number) => void;
+  graphHdbscanMinClusterSize: number;
+  setGraphHdbscanMinClusterSize: (size: number) => void;
 
   // Fenced-code languages claimed by code-block-renderer plugins (lower-cased). Loaded once at
   // startup; the editor maps these languages to a rendered PluginBlockNode instead of plain code.
@@ -135,6 +164,36 @@ export const useStore = create<AppStore>((set) => ({
 
   unsortedCount: 0,
   setUnsortedCount: (unsortedCount) => set({ unsortedCount }),
+  hideUnsortedBadge: localStorage.getItem(HIDE_UNSORTED_BADGE_KEY) === 'true',
+  setHideUnsortedBadge: (hideUnsortedBadge) => {
+    localStorage.setItem(HIDE_UNSORTED_BADGE_KEY, String(hideUnsortedBadge));
+    set({ hideUnsortedBadge });
+  },
+
+  diagnosticsIssueCount: 0,
+  setDiagnosticsIssueCount: (diagnosticsIssueCount) => set({ diagnosticsIssueCount }),
+
+  showAllGraphTitles: false,
+  setShowAllGraphTitles: (showAllGraphTitles) => set({ showAllGraphTitles }),
+  graphMode: 'categories',
+  setGraphMode: (graphMode) => set({ graphMode }),
+  graphSimilarityThreshold: 0.35,
+  setGraphSimilarityThreshold: (graphSimilarityThreshold) => set({ graphSimilarityThreshold }),
+  graphAdvancedOpen: false,
+  setGraphAdvancedOpen: (graphAdvancedOpen) => set({ graphAdvancedOpen }),
+  graphPillarsNeighbors: 50,
+  setGraphPillarsNeighbors: (graphPillarsNeighbors) => set({ graphPillarsNeighbors }),
+  graphCommunitiesNeighbors: 8,
+  setGraphCommunitiesNeighbors: (graphCommunitiesNeighbors) => set({ graphCommunitiesNeighbors }),
+  graphDensityNeighbors: 15,
+  setGraphDensityNeighbors: (graphDensityNeighbors) => set({ graphDensityNeighbors }),
+  graphKmeansK: 5,
+  setGraphKmeansK: (graphKmeansK) => set({ graphKmeansK }),
+  graphLouvainResolution: 1,
+  setGraphLouvainResolution: (graphLouvainResolution) => set({ graphLouvainResolution }),
+  graphHdbscanMinClusterSize: 5,
+  setGraphHdbscanMinClusterSize: (graphHdbscanMinClusterSize) =>
+    set({ graphHdbscanMinClusterSize }),
 
   pluginRenderLanguages: [],
   setPluginRenderLanguages: (pluginRenderLanguages) => set({ pluginRenderLanguages }),

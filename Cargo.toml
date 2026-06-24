@@ -22,6 +22,11 @@ pulldown-cmark = { version = "0.12", default-features = false, features = ["html
 sha2 = "0.10"
 rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
 tracing = "0.1"
+ndarray = "0.17"
+umap-rs = "=0.4.5"
+graphops = "=0.4.3"
+hdbscan = { version = "=0.12.0", default-features = false, features = ["serial"] }
+rand = "0.9"
 
 [profile.release]
 # Smaller, faster binaries for the shipped app; the POC favors size over compile time.

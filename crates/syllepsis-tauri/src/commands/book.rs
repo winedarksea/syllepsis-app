@@ -57,6 +57,7 @@ pub fn open_book(app: AppHandle, state: State<AppState>, path: String) -> Result
     track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
+    state.invalidate_graph_corpus();
     Ok(info)
 }
 
@@ -80,6 +81,7 @@ pub fn create_book(
     track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
+    state.invalidate_graph_corpus();
     Ok(info)
 }
 
@@ -104,6 +106,7 @@ pub fn create_book_in_parent(
     track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
+    state.invalidate_graph_corpus();
     Ok(info)
 }
 

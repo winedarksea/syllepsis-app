@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tauri::State;
 
 use syllepsis_core::app::search as app;
+use syllepsis_core::graph_analysis::{GraphAnalysisRequest, GraphAnalysisResult};
 use syllepsis_core::search::{EmbeddingDiagnostics, RelatedNote, SearchResults};
 use syllepsis_core::storage::{Book, NoteStore};
 
@@ -56,6 +57,21 @@ pub fn embedding_diagnostics(state: State<AppState>) -> Result<EmbeddingDiagnost
     with_book!(state, book, {
         app::embedding_diagnostics(book).map_err(|e| e.to_string())
     })
+}
+
+/// Build a semantic graph snapshot without blocking the Tauri event loop.
+#[tauri::command]
+pub async fn graph_analysis(
+    app_handle: tauri::AppHandle,
+    request: GraphAnalysisRequest,
+) -> Result<GraphAnalysisResult, String> {
+    use tauri::Manager;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        app_handle.state::<AppState>().analyze_graph(&request)
+    })
+    .await
+    .map_err(|error| format!("graph analysis worker failed: {error}"))?
 }
 
 /// Search notes across all tracked books (not just the open one).

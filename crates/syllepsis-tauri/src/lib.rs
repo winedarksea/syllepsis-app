@@ -86,6 +86,7 @@ pub fn run() {
             search,
             related_notes,
             embedding_diagnostics,
+            graph_analysis,
             search_across_books,
             // llm
             llm_status,

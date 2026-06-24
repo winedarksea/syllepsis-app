@@ -56,7 +56,7 @@ interface Props {
 }
 
 export function SettingsView({ launchMode = false }: Props) {
-  const { book, themePref, setThemePref, closeBook } = useStore();
+  const { book, themePref, setThemePref, closeBook, hideUnsortedBadge, setHideUnsortedBadge } = useStore();
   const { flavorLang } = useThemeStyle();
   const [build, setBuild] = useState<BuildInfo | null>(null);
   const [config, setConfig] = useState<BookConfig | null>(null);
@@ -124,6 +124,9 @@ export function SettingsView({ launchMode = false }: Props) {
             </div>
           </Field>
           <ThemePicker onNotice={flash} onError={setError} />
+          <Field label="Show Notebox badge" hint="Displays a count of unsorted notes on the Notebox sidebar item. Turn off to reduce visual noise.">
+            <Toggle checked={!hideUnsortedBadge} onChange={(v) => setHideUnsortedBadge(!v)} />
+          </Field>
         </Section>
 
         {/* ── AI & LLM ── */}

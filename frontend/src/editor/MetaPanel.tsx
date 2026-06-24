@@ -252,7 +252,7 @@ export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
               <label className="meta-checkbox">
                 <input
                   type="checkbox"
-                  checked={note.metadata.lifecycle.private ?? false}
+                  checked={note.metadata.lifecycle?.private ?? false}
                   onChange={(e) => patchMeta({
                     lifecycle: { ...note.metadata.lifecycle, private: e.target.checked },
                   })}

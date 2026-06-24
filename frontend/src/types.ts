@@ -282,6 +282,68 @@ export interface EmbeddingDiagnostics {
   blind_spots: BlindSpot[];
 }
 
+export type GraphMode = 'categories' | 'pillars' | 'communities' | 'density';
+
+export interface GraphAnalysisRequest {
+  mode: GraphMode;
+  umap_neighbors: number;
+  kmeans_k: number;
+  louvain_resolution: number;
+  hdbscan_min_cluster_size: number;
+}
+
+export interface GraphAnalysisNode {
+  id: string;
+  title: string;
+  categories: string[];
+  x: number;
+  y: number;
+  cluster_id?: number;
+  outlier: boolean;
+  no_semantic_signal: boolean;
+}
+
+export interface GraphCluster {
+  id: number;
+  label: string;
+  node_count: number;
+}
+
+export interface GraphSemanticEdge {
+  source: string;
+  target: string;
+  similarity: number;
+}
+
+export interface GraphPriorEdge {
+  source: string;
+  target: string;
+}
+
+export interface GraphProviderMetadata {
+  id: string;
+  semantic: boolean;
+}
+
+export interface GraphAnalysisSummary {
+  note_count: number;
+  embedded_note_count: number;
+  cluster_count: number;
+  outlier_count: number;
+  no_signal_count: number;
+  semantic_edge_candidate_count: number;
+}
+
+export interface GraphAnalysisResult {
+  mode: GraphMode;
+  nodes: GraphAnalysisNode[];
+  clusters: GraphCluster[];
+  semantic_edges: GraphSemanticEdge[];
+  prior_edges: GraphPriorEdge[];
+  provider: GraphProviderMetadata;
+  summary: GraphAnalysisSummary;
+}
+
 // ── LLM (mirrors syllepsis_core::llm and syllepsis_core::app::llm) ──
 
 export type LlmTask =

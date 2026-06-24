@@ -26,6 +26,7 @@ pub mod app;
 pub mod config;
 pub mod crdt;
 pub mod embeddings;
+pub mod graph_analysis;
 pub mod error;
 pub mod id;
 pub mod llm;

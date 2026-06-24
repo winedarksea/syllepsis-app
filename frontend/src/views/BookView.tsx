@@ -98,15 +98,49 @@ function BookNoteBody({ body, claimed }: { body: string; claimed: Set<string> })
 
 // ── HeadingTag ───────────────────────────────────────────────────────────────
 
-function HeadingTag({ level, text }: { level: number; text: string }) {
+function HeadingTag({ level, text, id }: { level: number; text: string; id: string }) {
   const l = Math.min(Math.max(level, 1), 6);
   const cls = `bv-heading bv-h${l}`;
-  if (l === 1) return <h1 className={cls}>{text}</h1>;
-  if (l === 2) return <h2 className={cls}>{text}</h2>;
-  if (l === 3) return <h3 className={cls}>{text}</h3>;
-  if (l === 4) return <h4 className={cls}>{text}</h4>;
-  if (l === 5) return <h5 className={cls}>{text}</h5>;
-  return <h6 className={cls}>{text}</h6>;
+  if (l === 1) return <h1 id={id} className={cls}>{text}</h1>;
+  if (l === 2) return <h2 id={id} className={cls}>{text}</h2>;
+  if (l === 3) return <h3 id={id} className={cls}>{text}</h3>;
+  if (l === 4) return <h4 id={id} className={cls}>{text}</h4>;
+  if (l === 5) return <h5 id={id} className={cls}>{text}</h5>;
+  return <h6 id={id} className={cls}>{text}</h6>;
+}
+
+// ── headingId — stable DOM id for a heading ──────────────────────────────────
+
+function headingId(category: string, index: number): string {
+  return category
+    ? `bv-h-${category.replace(/\s+/g, '-').toLowerCase()}`
+    : `bv-h-${index}`;
+}
+
+// ── BookToc ───────────────────────────────────────────────────────────────────
+
+interface TocEntry { id: string; level: number; text: string }
+
+function BookToc({ headings }: { headings: TocEntry[] }) {
+  const scrollTo = useCallback((id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  return (
+    <nav className="bv-toc" aria-label="Table of contents">
+      <div className="bv-toc-title">Contents</div>
+      <ul>
+        {headings.map((h) => (
+          <li key={h.id} className={`bv-toc-item bv-toc-h${h.level}`}>
+            <a href={`#${h.id}`} onClick={(e) => scrollTo(h.id, e)}>
+              {h.text}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
 }
 
 // ── BookView ─────────────────────────────────────────────────────────────────
@@ -160,10 +194,14 @@ export function BookView() {
     return (
       <div className="bv-state bv-empty">
         <p>No sorted notes yet.</p>
-        <p>Categorise notes in the Unsorted queue to start building your book.</p>
+        <p>Categorise notes in the Notebox to start building your book.</p>
       </div>
     );
   }
+
+  const headings: TocEntry[] = items
+    .filter((it): it is Extract<RenderItem, { kind: 'heading' }> => it.kind === 'heading')
+    .map((it, i) => ({ id: headingId(it.category, i), level: it.level, text: it.text }));
 
   return (
     <div className="bv-root selectable">
@@ -175,43 +213,46 @@ export function BookView() {
           Export HTML
         </button>
       </div>
-      <div className="bv-document">
-        {items.map((item, i) => {
-          if (item.kind === 'heading') {
-            return <HeadingTag key={i} level={item.level} text={item.text} />;
-          }
+      <div className="bv-body">
+        <div className="bv-document">
+          {items.map((item, i) => {
+            if (item.kind === 'heading') {
+              return <HeadingTag key={i} id={headingId(item.category, i)} level={item.level} text={item.text} />;
+            }
 
-          const note = item;
-          const isListItem = note.list_depth > 0;
-          const indent = isListItem ? (note.list_depth - 1) * 24 : note.indented ? 24 : 0;
-          const content = note.body || note.summary;
+            const note = item;
+            const isListItem = note.list_depth > 0;
+            const indent = isListItem ? (note.list_depth - 1) * 24 : note.indented ? 24 : 0;
+            const content = note.body || note.summary;
 
-          return (
-            <div
-              key={note.id}
-              className={[
-                'bv-note',
-                isListItem ? 'bv-note-list' : '',
-                note.indented ? 'bv-note-indented' : '',
-                note.join === 'same_paragraph' ? 'bv-note-inline' : '',
-              ].join(' ').trim()}
-              style={indent > 0 ? { marginLeft: `${indent}px` } : undefined}
-              onClick={() => openEditor(note.id)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => e.key === 'Enter' && openEditor(note.id)}
-            >
-              {isListItem && (
-                <span className="bv-list-marker">{note.numbered ? '1.' : '•'}</span>
-              )}
-              <div className="bv-note-body">
-                {content.trim()
-                  ? <BookNoteBody body={content} claimed={claimed} />
-                  : <span className="bv-empty-body">(empty)</span>}
+            return (
+              <div
+                key={note.id}
+                className={[
+                  'bv-note',
+                  isListItem ? 'bv-note-list' : '',
+                  note.indented ? 'bv-note-indented' : '',
+                  note.join === 'same_paragraph' ? 'bv-note-inline' : '',
+                ].join(' ').trim()}
+                style={indent > 0 ? { marginLeft: `${indent}px` } : undefined}
+                onClick={() => openEditor(note.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && openEditor(note.id)}
+              >
+                {isListItem && (
+                  <span className="bv-list-marker">{note.numbered ? '1.' : '•'}</span>
+                )}
+                <div className="bv-note-body">
+                  {content.trim()
+                    ? <BookNoteBody body={content} claimed={claimed} />
+                    : <span className="bv-empty-body">(empty)</span>}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+        {headings.length > 0 && <BookToc headings={headings} />}
       </div>
     </div>
   );

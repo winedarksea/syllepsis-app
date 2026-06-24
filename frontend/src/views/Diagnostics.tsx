@@ -8,16 +8,27 @@ import type { EmbeddingDiagnostics } from '../types';
 import './Diagnostics.css';
 
 export function Diagnostics() {
-  const { openEditor, book } = useStore();
+  const { openEditor, book, setDiagnosticsIssueCount } = useStore();
   const [diag, setDiag] = useState<EmbeddingDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
 
-  // Persist the last-run timestamp per book so it survives view switches.
+  // Persist last-run timestamp and issue count per book so both survive view switches.
   const lastRunKey = book ? `syllepsis.diag.lastRun.${book.path}` : null;
+  const issueCountKey = book ? `syllepsis.diag.issueCount.${book.path}` : null;
   const [lastRun, setLastRun] = useState<string | null>(
     () => (lastRunKey ? localStorage.getItem(lastRunKey) : null),
   );
+
+  // Seed the store badge from the persisted count on mount so it shows before first run.
+  useEffect(() => {
+    if (issueCountKey) {
+      const stored = parseInt(localStorage.getItem(issueCountKey) ?? '0', 10);
+      if (!isNaN(stored)) setDiagnosticsIssueCount(stored);
+    }
+  // Only run on mount (issueCountKey derived from book, won't change mid-session).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const run = useCallback(async () => {
     setRunning(true);
@@ -28,12 +39,15 @@ export function Diagnostics() {
       const now = new Date().toISOString();
       setLastRun(now);
       if (lastRunKey) localStorage.setItem(lastRunKey, now);
+      const total = result.duplicates.length + result.blind_spots.length;
+      setDiagnosticsIssueCount(total);
+      if (issueCountKey) localStorage.setItem(issueCountKey, String(total));
     } catch (e) {
       setError(String(e));
     } finally {
       setRunning(false);
     }
-  }, [lastRunKey]);
+  }, [lastRunKey, issueCountKey, setDiagnosticsIssueCount]);
 
   useEffect(() => { run(); }, [run]);
 

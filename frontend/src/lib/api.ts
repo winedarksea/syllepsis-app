@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   BookInfo, TrackedBookInfo, Category, NoteDto, ObjectType, PriorEdge, RenderItem,
   SearchResults, RelatedNote, EmbeddingDiagnostics,
+  GraphAnalysisRequest, GraphAnalysisResult,
   LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, CloudLlmPrompt, CloudLlmCompletion,
   CloudLlmProviderDescriptor, CloudLlmProviderSettings, CloudLlmProviderStatus,
   ModelManifest, ModelCacheStatus, ModelDownloadReport,
@@ -83,6 +84,8 @@ export const api = {
     invoke<SearchResults>('search', { query, categoryFilter }),
   relatedNotes: (id: string) => invoke<RelatedNote[]>('related_notes', { id }),
   embeddingDiagnostics: () => invoke<EmbeddingDiagnostics>('embedding_diagnostics'),
+  graphAnalysis: (request: GraphAnalysisRequest) =>
+    invoke<GraphAnalysisResult>('graph_analysis', { request }),
   searchAcrossBooks: (query: string) => invoke<CrossBookNote[]>('search_across_books', { query }),
 
   // LLM
