@@ -178,6 +178,9 @@ export const api = {
 
   // Plugins (WASM)
   listPlugins: () => invoke<PluginDescriptor[]>('list_plugins'),
+  setPluginEnabled: (pluginId: string, enabled: boolean) =>
+    invoke<void>('set_plugin_enabled', { pluginId, enabled }),
+  installUserPlugin: (sourcePath: string) => invoke<string>('install_user_plugin', { sourcePath }),
   runRenderPlugin: (language: string, code: string) =>
     invoke<string>('run_render_plugin', { language, code }),
   previewPluginImport: (pluginId: string, path: string, options: TextImportOptions) =>

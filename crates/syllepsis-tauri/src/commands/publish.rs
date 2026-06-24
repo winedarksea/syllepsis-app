@@ -31,8 +31,9 @@ pub fn publish_site(
 ) -> Result<PublishReport, String> {
     with_book!(state, book, {
         plugins.host.set_book_root(Some(book.root.clone()));
+        let disabled = plugins.disabled_ids.lock().unwrap().clone();
         app::publish_site(book, Path::new(&out_dir), &|lang, code| {
-            app_plugin::run_render_plugin(&plugins.host, &plugins.registry, lang, code).ok()
+            app_plugin::run_render_plugin(&plugins.host, &plugins.registry, &disabled, lang, code).ok()
         })
         .map_err(|e| e.to_string())
     })

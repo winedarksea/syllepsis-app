@@ -90,7 +90,7 @@ export function Sidebar({ onNewNote }: Props) {
             {item.view === 'unsorted' && unsortedCount > 0 && !hideUnsortedBadge && (
               <span className="sidebar-badge">{unsortedCount}</span>
             )}
-            {item.view === 'diagnostics' && diagnosticsIssueCount > 0 && (
+            {item.view === 'diagnostics' && diagnosticsIssueCount > 0 && !hideUnsortedBadge && (
               <span className="sidebar-badge sidebar-badge--diag">{diagnosticsIssueCount}</span>
             )}
           </button>

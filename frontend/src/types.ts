@@ -854,6 +854,7 @@ export interface PluginDescriptor {
   languages: string[];
   import_extensions: string[];
   source: PluginSource;
+  enabled: boolean;
 }
 
 // ── Book statistics (mirrors syllepsis_core::app::commands::BookStats) ──

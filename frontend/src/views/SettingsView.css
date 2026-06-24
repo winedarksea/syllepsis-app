@@ -443,25 +443,30 @@ select.sv-input { min-width: 180px; cursor: pointer; }
 }
 
 /* ── Plugins list ───────────────────────────────────────────────────────────── */
-.sv-plugin-list { display: flex; flex-direction: column; gap: 10px; }
+.sv-plugin-list { display: flex; flex-direction: column; gap: var(--sp-2); }
 .sv-plugin-item {
   display: flex;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--border, #e3e3e3);
-  border-radius: 8px;
-  background: var(--surface-1, #fff);
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
 }
 .sv-plugin-body { flex: 1; min-width: 0; }
-.sv-plugin-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.sv-plugin-version { font-size: var(--font-size-xs, 0.75em); opacity: 0.65; }
+.sv-plugin-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.sv-plugin-version { font-size: var(--font-size-xs); color: var(--color-text-tertiary); }
 .sv-plugin-badge {
-  font-size: var(--font-size-xs, 0.72em);
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--surface-2, #f0f0f0);
-  color: var(--text-2, #555);
+  font-size: var(--font-size-xs);
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-text-secondary);
 }
+
+.sv-plugin-actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; }
+
+.sv-plugin-item--disabled { opacity: 0.55; }
+.sv-plugin-badge--off { color: var(--color-error); background: color-mix(in srgb, var(--color-error) 12%, var(--color-surface-raised)); }
 
 /* ── Delete notebook (danger zone) ─────────────────────────────────────────── */
 .sv-delete-book {

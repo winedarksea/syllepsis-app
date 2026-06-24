@@ -119,7 +119,7 @@
 }
 
 .sidebar-badge--diag {
-  background: var(--color-diag-badge);
+  background: var(--color-unsorted-badge);
 }
 
 .sidebar-empty {

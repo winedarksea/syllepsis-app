@@ -134,7 +134,15 @@ interface AppStore {
 
 export const useStore = create<AppStore>((set) => ({
   book: null,
-  setBook: (book) => set({ book }),
+  setBook: (book) => {
+    // Seed the diagnostics badge from the persisted count so it shows without visiting the view.
+    let diagnosticsIssueCount = 0;
+    if (book) {
+      const stored = parseInt(localStorage.getItem(`syllepsis.diag.issueCount.${book.path}`) ?? '0', 10);
+      if (!isNaN(stored)) diagnosticsIssueCount = stored;
+    }
+    set({ book, diagnosticsIssueCount });
+  },
   // Return to the launch screen, clearing any per-book state so the next book opens clean.
   closeBook: () => set({
     book: null,
@@ -144,6 +152,7 @@ export const useStore = create<AppStore>((set) => ({
     activeWorld: null,
     categories: [],
     unsortedCount: 0,
+    diagnosticsIssueCount: 0,
   }),
 
   view: 'unsorted',

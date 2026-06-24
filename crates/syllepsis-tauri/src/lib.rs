@@ -42,7 +42,13 @@ pub fn run() {
         .setup(|app| {
             // Discover and load WASM plugins once at startup, then share them as app state.
             let (builtin_dir, user_dir) = commands::plugins::plugin_dirs(app.handle());
-            let runtime = commands::plugins::PluginRuntime::load(builtin_dir, user_dir);
+            let prefs_path = app
+                .path()
+                .app_data_dir()
+                .map(|d| d.join("plugin_prefs.json"))
+                .unwrap_or_default();
+            let runtime =
+                commands::plugins::PluginRuntime::load(builtin_dir, user_dir, prefs_path);
             app.manage(runtime);
             Ok(())
         })
@@ -156,6 +162,8 @@ pub fn run() {
             commit_text_import,
             // plugins (WASM)
             list_plugins,
+            set_plugin_enabled,
+            install_user_plugin,
             run_render_plugin,
             preview_plugin_import,
             // publishing & serving (Phase 6)

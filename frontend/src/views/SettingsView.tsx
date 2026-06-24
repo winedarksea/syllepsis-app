@@ -124,7 +124,7 @@ export function SettingsView({ launchMode = false }: Props) {
             </div>
           </Field>
           <ThemePicker onNotice={flash} onError={setError} />
-          <Field label="Show Notebox badge" hint="Displays a count of unsorted notes on the Notebox sidebar item. Turn off to reduce visual noise.">
+          <Field label="Show sidebar badges" hint="Displays count badges on the Notebox and Diagnostics sidebar items. Turn off to reduce visual noise.">
             <Toggle checked={!hideUnsortedBadge} onChange={(v) => setHideUnsortedBadge(!v)} />
           </Field>
         </Section>
@@ -207,38 +207,16 @@ export function SettingsView({ launchMode = false }: Props) {
 
         {/* ── Plugins ── */}
         <Section title="Plugins" subtitle={SUBTITLES.plugins[flavorLang]}>
-          {plugins.length === 0 ? (
-            <div className="sv-plugins">
-              <Icon name="extension" size={22} className="sv-plugins-icon" />
-              <div>
-                <div className="sv-plugins-title">No plugins installed</div>
-                <p className="sv-plugins-text">Sandboxed (WASM) extensions add import sources and code-block renderers. Built-in plugins load automatically; drop your own into the app's <code>plugins</code> folder.</p>
-              </div>
-            </div>
-          ) : (
-            <div className="sv-plugin-list">
-              {plugins.map((plugin) => (
-                <div key={plugin.id} className="sv-plugin-item">
-                  <Icon name={plugin.kind === 'import_source' ? 'upload_file' : 'code'} size={20} className="sv-plugins-icon" />
-                  <div className="sv-plugin-body">
-                    <div className="sv-plugin-head">
-                      <span className="sv-plugins-title">{plugin.name}</span>
-                      <span className="sv-plugin-version">v{plugin.version}</span>
-                      <span className="sv-plugin-badge">{plugin.source === 'builtin' ? 'Built-in' : 'User'}</span>
-                      <span className="sv-plugin-badge">{plugin.kind === 'import_source' ? 'Import source' : 'Code block'}</span>
-                    </div>
-                    {plugin.description && <p className="sv-plugins-text">{plugin.description}</p>}
-                    {plugin.kind === 'code_block_renderer' && plugin.languages.length > 0 && (
-                      <p className="sv-plugins-text">Languages: {plugin.languages.join(', ')}</p>
-                    )}
-                    {plugin.kind === 'import_source' && plugin.import_extensions.length > 0 && (
-                      <p className="sv-plugins-text">Files: .{plugin.import_extensions.join(', .')}</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <PluginsPanel
+            plugins={plugins}
+            onPluginInstalled={(name) => {
+              flash(`"${name}" installed — restart Syllepsis to load it.`);
+            }}
+            onPluginsChanged={() => {
+              api.listPlugins().then(setPlugins).catch((e) => setError(String(e)));
+            }}
+            onError={setError}
+          />
         </Section>
 
         {/* ── About ── */}
@@ -882,6 +860,97 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (b: boolean
     >
       <span className="sv-toggle-knob" />
     </button>
+  );
+}
+
+// ── Plugins ─────────────────────────────────────────────────────────────────────
+
+function PluginsPanel({ plugins, onPluginInstalled, onPluginsChanged, onError }: {
+  plugins: PluginDescriptor[];
+  onPluginInstalled: (name: string) => void;
+  onPluginsChanged: () => void;
+  onError: (m: string) => void;
+}) {
+  const [installing, setInstalling] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  const addPlugin = useCallback(async () => {
+    const selected = await openDialog({
+      multiple: false,
+      title: 'Select plugin file',
+      filters: [{ name: 'WASM plugin', extensions: ['wasm'] }],
+    });
+    if (!selected || typeof selected !== 'string') return;
+    setInstalling(true);
+    try {
+      const name = await api.installUserPlugin(selected);
+      onPluginInstalled(name);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setInstalling(false);
+    }
+  }, [onPluginInstalled, onError]);
+
+  const togglePlugin = useCallback(async (plugin: PluginDescriptor) => {
+    setTogglingId(plugin.id);
+    try {
+      await api.setPluginEnabled(plugin.id, !plugin.enabled);
+      onPluginsChanged();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setTogglingId(null);
+    }
+  }, [onPluginsChanged, onError]);
+
+  return (
+    <div className="sv-subpanel">
+      {plugins.length === 0 ? (
+        <div className="sv-plugins">
+          <Icon name="extension" size={22} className="sv-plugins-icon" />
+          <div>
+            <div className="sv-plugins-title">No plugins installed</div>
+            <p className="sv-plugins-text">Sandboxed (WASM) extensions add import sources and code-block renderers. Built-in plugins load automatically; install your own with the button below.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="sv-plugin-list">
+          {plugins.map((plugin) => (
+            <div key={plugin.id} className={`sv-plugin-item ${plugin.enabled ? '' : 'sv-plugin-item--disabled'}`}>
+              <Icon name={plugin.kind === 'import_source' ? 'upload_file' : 'code'} size={20} className="sv-plugins-icon" />
+              <div className="sv-plugin-body">
+                <div className="sv-plugin-head">
+                  <span className="sv-plugins-title">{plugin.name}</span>
+                  <span className="sv-plugin-version">v{plugin.version}</span>
+                  <span className="sv-plugin-badge">{plugin.source === 'builtin' ? 'Built-in' : 'User'}</span>
+                  <span className="sv-plugin-badge">{plugin.kind === 'import_source' ? 'Import source' : 'Code block'}</span>
+                  {!plugin.enabled && <span className="sv-plugin-badge sv-plugin-badge--off">Disabled</span>}
+                </div>
+                {plugin.description && <p className="sv-plugins-text">{plugin.description}</p>}
+                {plugin.kind === 'code_block_renderer' && plugin.languages.length > 0 && (
+                  <p className="sv-plugins-text">Languages: {plugin.languages.join(', ')}</p>
+                )}
+                {plugin.kind === 'import_source' && plugin.import_extensions.length > 0 && (
+                  <p className="sv-plugins-text">Files: .{plugin.import_extensions.join(', .')}</p>
+                )}
+              </div>
+              <div className="sv-plugin-actions">
+                <Toggle
+                  checked={plugin.enabled}
+                  onChange={() => togglingId === null && togglePlugin(plugin)}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="sv-savebar">
+        <button className="sv-btn sv-btn-primary" onClick={addPlugin} disabled={installing}>
+          {installing ? 'Installing…' : 'Add plugin…'}
+        </button>
+      </div>
+    </div>
   );
 }
 
