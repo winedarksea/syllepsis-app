@@ -1,6 +1,7 @@
 .gv-root {
   display: flex;
   flex-direction: column;
+  position: relative;
   height: 100%;
   overflow: hidden;
   background: var(--color-bg);
@@ -185,17 +186,14 @@
 }
 
 .gv-provider-note {
-  position: absolute;
-  z-index: 3;
-  top: 112px;
-  right: var(--sp-4);
-  padding: 3px var(--sp-2);
-  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  flex-shrink: 0;
+  padding: 3px var(--sp-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  background: var(--color-surface);
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
+  text-align: right;
   pointer-events: none;
 }
 
@@ -225,8 +223,8 @@
   min-height: 0;
   overflow: hidden;
   background:
-    linear-gradient(to right, color-mix(in srgb, var(--color-graph-grid) 45%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--color-graph-grid) 45%, transparent) 1px, transparent 1px),
+    linear-gradient(to right, color-mix(in srgb, var(--color-border) 45%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-border) 45%, transparent) 1px, transparent 1px),
     var(--color-bg);
   background-size: 48px 48px;
 }
@@ -338,7 +336,7 @@
 }
 
 .gv-node-outlier .gv-node-status-ring {
-  stroke: var(--color-warning);
+  stroke: var(--color-tertiary);
   stroke-dasharray: 3 2;
 }
 
@@ -430,7 +428,7 @@
 .gv-legend-node {
   width: 10px;
   height: 10px;
-  border: 1px dashed var(--color-warning);
+  border: 1px dashed var(--color-tertiary);
   border-radius: 50%;
 }
 
@@ -488,9 +486,6 @@
     color: var(--color-text);
   }
 
-  .gv-provider-note {
-    top: 110px;
-  }
 }
 
 @media (max-width: 560px) {

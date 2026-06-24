@@ -1,4 +1,6 @@
 mod algorithms;
+#[cfg(test)]
+mod tests;
 mod types;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -42,15 +44,16 @@ impl SemanticGraphCorpus {
         notes.sort_by(|left, right| left.id.to_string().cmp(&right.id.to_string()));
         let provider = select_embedder(book.models_root(), &book.config.embedding);
         let provider_id = provider.name().to_string();
-        let fingerprint = corpus_fingerprint(book, &notes, &provider_id)?;
+        let fingerprint = corpus_fingerprint(book, &notes, &embedding_source_cache_key(book))?;
         let vectors = embed_notes(provider.as_ref(), &notes, &book.config.embedding);
-        let centroids: Vec<Embedding> = vectors.into_iter().map(|vectors| vectors.centroid).collect();
+        let centroids: Vec<Embedding> = vectors
+            .into_iter()
+            .map(|vectors| vectors.centroid)
+            .collect();
         let embedded_note_indices = centroids
             .iter()
             .enumerate()
-            .filter_map(|(index, vector)| {
-                (vector.magnitude() > f32::EPSILON).then_some(index)
-            })
+            .filter_map(|(index, vector)| (vector.magnitude() > f32::EPSILON).then_some(index))
             .collect();
         let category_display_names = book
             .store
@@ -110,17 +113,22 @@ impl SemanticGraphCorpus {
                     &embedded_vectors,
                     request.kmeans_k.clamp(2, 12).min(embedded_count.max(1)),
                 );
-                (positions, labels.into_iter().map(Some).collect(), vec![false; embedded_count])
+                (
+                    positions,
+                    labels.into_iter().map(Some).collect(),
+                    vec![false; embedded_count],
+                )
             }
             GraphMode::Communities => {
                 let positions = umap_layout(&embedded_vectors, requested_neighbors)?;
                 let distances = cosine_distance_matrix(&embedded_vectors);
-                let labels = louvain_labels(
-                    &distances,
-                    requested_neighbors,
-                    request.louvain_resolution,
-                );
-                (positions, labels.into_iter().map(Some).collect(), vec![false; embedded_count])
+                let labels =
+                    louvain_labels(&distances, requested_neighbors, request.louvain_resolution);
+                (
+                    positions,
+                    labels.into_iter().map(Some).collect(),
+                    vec![false; embedded_count],
+                )
             }
             GraphMode::Density => {
                 let positions = umap_layout(&embedded_vectors, requested_neighbors)?;
@@ -153,11 +161,8 @@ impl SemanticGraphCorpus {
             &full_labels,
             &self.category_display_names,
         );
-        let semantic_edges = semantic_edges(
-            &self.notes,
-            &self.centroids,
-            &self.embedded_note_indices,
-        );
+        let semantic_edges =
+            semantic_edges(&self.notes, &self.centroids, &self.embedded_note_indices);
         let prior_edges = prior_edges(&self.notes);
         let nodes = self
             .notes
@@ -224,7 +229,10 @@ impl SemanticGraphCorpus {
                 .unwrap_or_else(|| "uncategorized".into());
             let group = category_ids[&key];
             labels.push(Some(group));
-            members_by_group.entry(group).or_default().push(embedded_index);
+            members_by_group
+                .entry(group)
+                .or_default()
+                .push(embedded_index);
             positions.push((0.0, 0.0));
         }
         for (group, members) in members_by_group {
@@ -241,7 +249,11 @@ impl SemanticGraphCorpus {
                 );
             }
         }
-        (normalize_layout(&positions), labels, vec![false; self.embedded_note_indices.len()])
+        (
+            normalize_layout(&positions),
+            labels,
+            vec![false; self.embedded_note_indices.len()],
+        )
     }
 }
 
@@ -253,15 +265,10 @@ pub fn current_corpus_fingerprint(book: &Book) -> CoreResult<String> {
         .filter(|note| note.metadata.is_visible_in_default_views())
         .collect();
     notes.sort_by(|left, right| left.id.to_string().cmp(&right.id.to_string()));
-    let provider = select_embedder(book.models_root(), &book.config.embedding);
-    corpus_fingerprint(book, &notes, provider.name())
+    corpus_fingerprint(book, &notes, &embedding_source_cache_key(book))
 }
 
-pub fn corpus_fingerprint(
-    book: &Book,
-    notes: &[Note],
-    provider_id: &str,
-) -> CoreResult<String> {
+pub fn corpus_fingerprint(book: &Book, notes: &[Note], provider_id: &str) -> CoreResult<String> {
     let categories: Vec<Category> = book.store.categories()?;
     let serialized = serde_json::to_vec(&(
         &book.metadata.book_id,
@@ -286,6 +293,22 @@ pub fn corpus_fingerprint(
     Ok(format!("{:x}", Sha256::digest(serialized)))
 }
 
+fn embedding_source_cache_key(_book: &Book) -> String {
+    #[cfg(feature = "onnx")]
+    {
+        use crate::onnx::{manifest, ModelCache};
+        if let (Some(models_root), Some(model_manifest)) = (
+            _book.models_root(),
+            manifest::builtin(&_book.config.embedding.model_id),
+        ) {
+            if ModelCache::new(models_root).is_cached(&model_manifest) {
+                return format!("cached:{}", model_manifest.id);
+            }
+        }
+    }
+    "hashing-bow".into()
+}
+
 fn semantic_edges(
     notes: &[Note],
     centroids: &[Embedding],
@@ -297,7 +320,12 @@ fn semantic_edges(
             .iter()
             .copied()
             .filter(|target| target != source)
-            .map(|target| (target, centroids[*source].cosine_similarity(&centroids[target])))
+            .map(|target| {
+                (
+                    target,
+                    centroids[*source].cosine_similarity(&centroids[target]),
+                )
+            })
             .filter(|(_, similarity)| *similarity > 0.0)
             .collect();
         ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));

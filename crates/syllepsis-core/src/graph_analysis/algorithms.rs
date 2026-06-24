@@ -66,7 +66,10 @@ pub(super) fn umap_layout(
     let distances = cosine_distance_matrix(vectors);
     let (knn_indices, knn_distances) = exact_knn(&distances, requested_neighbors);
     let neighbor_count = knn_indices[0].len();
-    let flat_data: Vec<f32> = vectors.iter().flat_map(|vector| vector.0.iter().copied()).collect();
+    let flat_data: Vec<f32> = vectors
+        .iter()
+        .flat_map(|vector| vector.0.iter().copied())
+        .collect();
     let flat_indices: Vec<u32> = knn_indices
         .iter()
         .flat_map(|row| row.iter().map(|index| *index as u32))
@@ -128,12 +131,18 @@ pub(super) fn normalize_layout(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
     if points.is_empty() {
         return Vec::new();
     }
-    let min_x = points.iter().map(|point| point.0).fold(f32::INFINITY, f32::min);
+    let min_x = points
+        .iter()
+        .map(|point| point.0)
+        .fold(f32::INFINITY, f32::min);
     let max_x = points
         .iter()
         .map(|point| point.0)
         .fold(f32::NEG_INFINITY, f32::max);
-    let min_y = points.iter().map(|point| point.1).fold(f32::INFINITY, f32::min);
+    let min_y = points
+        .iter()
+        .map(|point| point.1)
+        .fold(f32::INFINITY, f32::min);
     let max_y = points
         .iter()
         .map(|point| point.1)
@@ -227,7 +236,10 @@ pub(super) fn deterministic_kmeans(vectors: &[Embedding], requested_k: usize) ->
 }
 
 fn squared_euclidean(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b).map(|(left, right)| (left - right).powi(2)).sum()
+    a.iter()
+        .zip(b)
+        .map(|(left, right)| (left - right).powi(2))
+        .sum()
 }
 
 struct SimilarityGraph {
@@ -240,7 +252,10 @@ impl Graph for SimilarityGraph {
     }
 
     fn neighbors(&self, node: usize) -> Vec<usize> {
-        self.adjacency[node].iter().map(|(neighbor, _)| *neighbor).collect()
+        self.adjacency[node]
+            .iter()
+            .map(|(neighbor, _)| *neighbor)
+            .collect()
     }
 }
 
@@ -388,5 +403,20 @@ mod tests {
             .iter()
             .all(|(x, y)| x.is_finite() && y.is_finite()));
         assert!(normalized.iter().all(|(x, y)| *x >= 0.1 && *y >= 0.1));
+    }
+
+    #[test]
+    fn hdbscan_marks_a_lonely_point_as_noise() {
+        let vectors = vec![
+            vector(&[1.0, 0.0, 0.0]),
+            vector(&[0.99, 0.01, 0.0]),
+            vector(&[0.98, 0.02, 0.0]),
+            vector(&[0.0, 1.0, 0.0]),
+            vector(&[0.01, 0.99, 0.0]),
+            vector(&[0.02, 0.98, 0.0]),
+            vector(&[0.0, 0.0, 1.0]),
+        ];
+        let labels = hdbscan_labels(&vectors, 3).unwrap();
+        assert!(labels.last().unwrap().is_none());
     }
 }

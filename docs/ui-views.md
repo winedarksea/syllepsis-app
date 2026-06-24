@@ -9,7 +9,14 @@ Sorted notes rendered as a single continuous document. The primary reading and w
 Sorted notes in the main column; unsorted notes linked by shared categories branching off to the side. The side panel scrolls independently from the book column. Requires careful design given potentially many linked unsorted notes.
 
 ### Graph View
-Notes as nodes, categories as edges. The entry point for newly categorized notes. Allows exploration of connections before a full tree or book structure is established.
+Notes as nodes with four organization lenses:
+
+- **Categories** preserves the declared first-category grouping.
+- **Pillars** uses a broad semantic projection and fixed-count clustering to reveal the book's main themes.
+- **Communities** emphasizes local semantic neighborhoods and community detection to reveal tightly connected interests.
+- **Density** identifies well-developed semantic regions while marking isolated notes as outliers.
+
+Semantic-similarity edges are controlled by an interactive threshold; explicit prior relationships remain visible with a distinct stronger line. Cluster regions are exploratory and never rewrite categories or note relationships. The canvas supports pan, zoom, title visibility controls, and advanced tuning for the active analysis mode.
 
 ### Category View
 Starts at the category level rather than the note level. Users browse categories first and drill into notes from there.

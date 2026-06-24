@@ -1,7 +1,7 @@
 //! Global application state threaded through Tauri commands via [`tauri::State`].
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use syllepsis_core::graph_analysis::{
     current_corpus_fingerprint, GraphAnalysisRequest, GraphAnalysisResult, SemanticGraphCorpus,
 };
@@ -18,7 +18,7 @@ struct CachedLlmService {
 
 struct CachedGraphCorpus {
     fingerprint: String,
-    corpus: SemanticGraphCorpus,
+    corpus: Arc<SemanticGraphCorpus>,
 }
 
 /// The single app-level state. The open book is behind a Mutex; `None` means no book
@@ -53,25 +53,31 @@ impl AppState {
         &self,
         request: &GraphAnalysisRequest,
     ) -> Result<GraphAnalysisResult, String> {
-        let book_guard = self.book.lock().unwrap();
-        let book = book_guard
-            .as_ref()
-            .ok_or_else(|| "no book is open".to_string())?;
-        let fingerprint = current_corpus_fingerprint(book).map_err(|error| error.to_string())?;
-        let mut cached = self.graph_corpus.lock().unwrap();
-        if cached.as_ref().map(|entry| entry.fingerprint.as_str()) != Some(fingerprint.as_str()) {
-            let corpus = SemanticGraphCorpus::build(book).map_err(|error| error.to_string())?;
-            *cached = Some(CachedGraphCorpus {
-                fingerprint,
-                corpus,
-            });
-        }
-        cached
-            .as_ref()
-            .expect("graph corpus was initialized")
-            .corpus
-            .analyze(request)
-            .map_err(|error| error.to_string())
+        let corpus = {
+            let book_guard = self.book.lock().unwrap();
+            let book = book_guard
+                .as_ref()
+                .ok_or_else(|| "no book is open".to_string())?;
+            let fingerprint =
+                current_corpus_fingerprint(book).map_err(|error| error.to_string())?;
+            let mut cached = self.graph_corpus.lock().unwrap();
+            if cached.as_ref().map(|entry| entry.fingerprint.as_str()) != Some(fingerprint.as_str())
+            {
+                let corpus =
+                    Arc::new(SemanticGraphCorpus::build(book).map_err(|error| error.to_string())?);
+                *cached = Some(CachedGraphCorpus {
+                    fingerprint,
+                    corpus,
+                });
+            }
+            Arc::clone(
+                &cached
+                    .as_ref()
+                    .expect("graph corpus was initialized")
+                    .corpus,
+            )
+        };
+        corpus.analyze(request).map_err(|error| error.to_string())
     }
 
     /// Run a closure against the long-lived LLM service for `book`, constructing it on first use or

@@ -10,8 +10,8 @@ import './GraphView.css';
 export function GraphView() {
   const store = useStore();
   const [result, setResult] = useState<GraphAnalysisResult | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [completedRequestKey, setCompletedRequestKey] = useState('');
+  const [requestError, setRequestError] = useState<{ key: string; message: string } | null>(null);
   const requestSequence = useRef(0);
 
   const request = useMemo<GraphAnalysisRequest>(() => ({
@@ -35,22 +35,28 @@ export function GraphView() {
     store.graphLouvainResolution,
     store.graphHdbscanMinClusterSize,
   ]);
+  const requestKey = useMemo(() => JSON.stringify(request), [request]);
 
   useEffect(() => {
     const sequence = ++requestSequence.current;
-    setLoading(true);
-    setError(null);
     api.graphAnalysis(request)
       .then((nextResult) => {
-        if (requestSequence.current === sequence) setResult(nextResult);
+        if (requestSequence.current === sequence) {
+          setResult(nextResult);
+          setRequestError(null);
+          setCompletedRequestKey(requestKey);
+        }
       })
       .catch((nextError) => {
-        if (requestSequence.current === sequence) setError(String(nextError));
-      })
-      .finally(() => {
-        if (requestSequence.current === sequence) setLoading(false);
+        if (requestSequence.current === sequence) {
+          setRequestError({ key: requestKey, message: String(nextError) });
+          setCompletedRequestKey(requestKey);
+        }
       });
-  }, [request]);
+  }, [request, requestKey]);
+
+  const loading = completedRequestKey !== requestKey;
+  const error = requestError?.key === requestKey ? requestError.message : null;
 
   const visibleSemanticEdges = useMemo(
     () => filterSemanticEdges(result?.semantic_edges ?? [], store.graphSimilarityThreshold),

@@ -134,6 +134,10 @@ Graph view earns the theme's identity. It should make connected thoughts feel li
 - Nodes should be simple: pale stone discs, clipped rectangles, or hexagons. The edge weave is the ornament; nodes stay quiet.
 - Selected nodes can gain a stronger outline or tonal fill, not a large shadow.
 - Dense graphs should degrade gracefully: simplify edge routing, reduce weave decoration, and preserve legibility.
+- Semantic clusters use low-opacity survey regions with restrained outlines and short labels; they should read as mapped terrain, not nested cards.
+- Prior relationships remain the strongest woven accent lines. Semantic-similarity edges use thinner secondary/moss lines whose opacity reflects strength.
+- Density outliers use a dashed outer ring; notes without semantic signal use a dotted ring. These cues must remain legible without color.
+- Analysis controls should resemble compact survey instruments: segmented modes, a measured threshold scale, and advanced parameters kept behind disclosure.
 
 ### Spatial / Overlay and Map Views: Tundra Grid
 
