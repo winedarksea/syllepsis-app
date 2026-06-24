@@ -384,14 +384,6 @@ export interface CloudLlmProviderDescriptor {
   base_url_required: boolean;
 }
 
-export interface CloudLlmProviderStatus {
-  provider: string;
-  display_name: string;
-  api_key_configured: boolean;
-  base_url_configured: boolean;
-  base_url_required: boolean;
-}
-
 export interface CloudLlmProviderSettings {
   provider: string;
   api_key?: string | null;
@@ -402,6 +394,7 @@ export interface CloudLlmConnectionTestResult {
   provider: string;
   display_name: string;
   model_count: number;
+  authentication_status: 'verified' | 'not_required' | 'not_tested' | 'inconclusive';
 }
 
 export interface BuildInfo {

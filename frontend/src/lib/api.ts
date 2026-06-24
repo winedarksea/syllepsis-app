@@ -8,7 +8,6 @@ import type {
   GraphAnalysisRequest, GraphAnalysisResult,
   LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, CloudLlmPrompt, CloudLlmCompletion,
   CloudLlmConnectionTestResult, CloudLlmProviderDescriptor, CloudLlmProviderSettings,
-  CloudLlmProviderStatus,
   ModelManifest, ModelCacheStatus, ModelDownloadReport,
   BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig,
   GitStatusDto, GitCommandReport, SyncActivityEvent, OperationalActivitySummary, NoteSyncActivity,
@@ -94,12 +93,10 @@ export const api = {
   llmRouteStatuses: () => invoke<LlmRouteStatus[]>('llm_route_statuses'),
   cloudLlmProviderDescriptors: () =>
     invoke<CloudLlmProviderDescriptor[]>('cloud_llm_provider_descriptors'),
-  cloudLlmProviderStatuses: () =>
-    invoke<CloudLlmProviderStatus[]>('cloud_llm_provider_statuses'),
   saveCloudLlmProviderSettings: (settings: CloudLlmProviderSettings) =>
-    invoke<CloudLlmProviderStatus>('save_cloud_llm_provider_settings', { settings }),
+    invoke<void>('save_cloud_llm_provider_settings', { settings }),
   clearCloudLlmProviderSettings: (provider: string) =>
-    invoke<CloudLlmProviderStatus>('clear_cloud_llm_provider_settings', { provider }),
+    invoke<void>('clear_cloud_llm_provider_settings', { provider }),
   testCloudLlmProviderConnection: (settings: CloudLlmProviderSettings) =>
     invoke<CloudLlmConnectionTestResult>('test_cloud_llm_provider_connection', { settings }),
   generateCloudProposal: (noteId: string, task: LlmTask, modelOverride?: ModelRef) =>

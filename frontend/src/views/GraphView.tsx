@@ -7,11 +7,16 @@ import { GraphControls } from './GraphControls';
 import { filterSemanticEdges } from './graphGeometry';
 import './GraphView.css';
 
+const QWEN3_EMBEDDING_MODEL_ID = 'qwen3-embedding-0.6b';
+
 export function GraphView() {
   const store = useStore();
   const [result, setResult] = useState<GraphAnalysisResult | null>(null);
   const [completedRequestKey, setCompletedRequestKey] = useState('');
   const [requestError, setRequestError] = useState<{ key: string; message: string } | null>(null);
+  const [modelDownloadError, setModelDownloadError] = useState<string | null>(null);
+  const [modelDownloadInProgress, setModelDownloadInProgress] = useState(false);
+  const [embeddingModelRevision, setEmbeddingModelRevision] = useState(0);
   const requestSequence = useRef(0);
 
   const request = useMemo<GraphAnalysisRequest>(() => ({
@@ -53,7 +58,20 @@ export function GraphView() {
           setCompletedRequestKey(requestKey);
         }
       });
-  }, [request, requestKey]);
+  }, [request, requestKey, embeddingModelRevision]);
+
+  const downloadEmbeddingModel = async () => {
+    setModelDownloadInProgress(true);
+    setModelDownloadError(null);
+    try {
+      await api.downloadBuiltinModel(QWEN3_EMBEDDING_MODEL_ID);
+      setEmbeddingModelRevision((revision) => revision + 1);
+    } catch (nextError) {
+      setModelDownloadError(String(nextError));
+    } finally {
+      setModelDownloadInProgress(false);
+    }
+  };
 
   const loading = completedRequestKey !== requestKey;
   const error = requestError?.key === requestKey ? requestError.message : null;
@@ -70,11 +88,25 @@ export function GraphView() {
   return (
     <div className="gv-root">
       <GraphControls visibleSemanticEdges={visibleSemanticEdges.length} />
-      {error && <div className="gv-error-banner">{error}</div>}
+      {(error || modelDownloadError) && (
+        <div className="gv-error-banner">{modelDownloadError ?? error}</div>
+      )}
       <div className="gv-provider-note">
         {result.provider.semantic
           ? `Semantic layout · ${result.provider.id}`
-          : 'Lexical fallback · download the embedding model for deeper semantic relationships'}
+          : (
+            <>
+              <span>Lexical fallback · shared words only</span>
+              <button
+                className="gv-model-download"
+                type="button"
+                disabled={modelDownloadInProgress}
+                onClick={downloadEmbeddingModel}
+              >
+                {modelDownloadInProgress ? 'Downloading Qwen3…' : 'Download Qwen3 embedding model'}
+              </button>
+            </>
+          )}
       </div>
       <GraphCanvas
         result={result}

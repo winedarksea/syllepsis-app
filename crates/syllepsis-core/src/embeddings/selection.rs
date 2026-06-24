@@ -43,9 +43,17 @@ fn onnx_embedder(
     if !cache.is_cached(&manifest) {
         return None;
     }
-    OnnxEmbedder::load(&cache, &manifest, cfg)
-        .ok()
-        .map(|e| Box::new(e) as Box<dyn EmbeddingProvider>)
+    match OnnxEmbedder::load(&cache, &manifest, cfg) {
+        Ok(embedder) => Some(Box::new(embedder) as Box<dyn EmbeddingProvider>),
+        Err(error) => {
+            tracing::error!(
+                model = %manifest.id,
+                error = %error,
+                "embedding model failed to load; using hashing fallback"
+            );
+            None
+        }
+    }
 }
 
 #[cfg(test)]

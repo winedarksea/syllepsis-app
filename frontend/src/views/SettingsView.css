@@ -328,6 +328,7 @@ select.sv-input { min-width: 180px; cursor: pointer; }
   line-height: var(--line-height-base);
 }
 .sv-connection-feedback.success { color: var(--color-secondary); }
+.sv-connection-feedback.warning { color: var(--color-accent); }
 .sv-connection-feedback.error { color: var(--color-error); }
 .sv-connection-feedback span {
   overflow-wrap: anywhere;

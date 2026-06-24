@@ -32,15 +32,6 @@ pub struct CloudLlmProviderDescriptor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CloudLlmProviderStatus {
-    pub provider: String,
-    pub display_name: String,
-    pub api_key_configured: bool,
-    pub base_url_configured: bool,
-    pub base_url_required: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CloudLlmProviderSettings {
     pub provider: String,
     /// `None` leaves the existing key unchanged; an empty string clears it.
@@ -54,6 +45,16 @@ pub struct CloudLlmConnectionTestResult {
     pub provider: String,
     pub display_name: String,
     pub model_count: usize,
+    pub authentication_status: CloudLlmAuthenticationStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CloudLlmAuthenticationStatus {
+    Verified,
+    NotRequired,
+    NotTested,
+    Inconclusive,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,26 +119,16 @@ pub fn cloud_llm_provider_descriptors() -> Vec<CloudLlmProviderDescriptor> {
     provider_descriptors()
 }
 
-/// Boolean credential status only; never returns stored secrets.
-#[tauri::command]
-pub fn cloud_llm_provider_statuses() -> Result<Vec<CloudLlmProviderStatus>, String> {
-    statuses(&KeyringCredentialStore)
-}
-
 /// Save or clear provider credentials in the OS keychain.
 #[tauri::command]
-pub fn save_cloud_llm_provider_settings(
-    settings: CloudLlmProviderSettings,
-) -> Result<CloudLlmProviderStatus, String> {
+pub fn save_cloud_llm_provider_settings(settings: CloudLlmProviderSettings) -> Result<(), String> {
     let mut store = KeyringCredentialStore;
     save_settings(&mut store, settings)
 }
 
 /// Clear all credential fields for a provider.
 #[tauri::command]
-pub fn clear_cloud_llm_provider_settings(
-    provider: String,
-) -> Result<CloudLlmProviderStatus, String> {
+pub fn clear_cloud_llm_provider_settings(provider: String) -> Result<(), String> {
     let mut store = KeyringCredentialStore;
     clear_settings(&mut store, &provider)
 }
@@ -189,18 +180,11 @@ fn provider_descriptors() -> Vec<CloudLlmProviderDescriptor> {
     ]
 }
 
-fn statuses(store: &impl CredentialStore) -> Result<Vec<CloudLlmProviderStatus>, String> {
-    provider_descriptors()
-        .into_iter()
-        .map(|descriptor| status_for(store, descriptor))
-        .collect()
-}
-
 fn save_settings(
     store: &mut impl CredentialStore,
     settings: CloudLlmProviderSettings,
-) -> Result<CloudLlmProviderStatus, String> {
-    let descriptor = descriptor_for(&settings.provider)?;
+) -> Result<(), String> {
+    descriptor_for(&settings.provider)?;
     apply_optional_secret(
         store,
         &account(&settings.provider, API_KEY_FIELD),
@@ -211,17 +195,14 @@ fn save_settings(
         &account(&settings.provider, BASE_URL_FIELD),
         settings.base_url,
     )?;
-    status_for(store, descriptor)
+    Ok(())
 }
 
-fn clear_settings(
-    store: &mut impl CredentialStore,
-    provider: &str,
-) -> Result<CloudLlmProviderStatus, String> {
-    let descriptor = descriptor_for(provider)?;
+fn clear_settings(store: &mut impl CredentialStore, provider: &str) -> Result<(), String> {
+    descriptor_for(provider)?;
     store.delete(&account(provider, API_KEY_FIELD))?;
     store.delete(&account(provider, BASE_URL_FIELD))?;
-    status_for(store, descriptor)
+    Ok(())
 }
 
 fn apply_optional_secret(
@@ -234,26 +215,6 @@ fn apply_optional_secret(
         Some(secret) if secret.trim().is_empty() => store.delete(account),
         Some(secret) => store.set(account, secret.trim()),
     }
-}
-
-fn status_for(
-    store: &impl CredentialStore,
-    descriptor: CloudLlmProviderDescriptor,
-) -> Result<CloudLlmProviderStatus, String> {
-    let api_key_configured = store
-        .get(&account(&descriptor.provider, API_KEY_FIELD))?
-        .is_some_and(|secret| !secret.trim().is_empty());
-    let base_url_configured = store
-        .get(&account(&descriptor.provider, BASE_URL_FIELD))?
-        .is_some_and(|secret| !secret.trim().is_empty());
-
-    Ok(CloudLlmProviderStatus {
-        provider: descriptor.provider,
-        display_name: descriptor.display_name,
-        api_key_configured,
-        base_url_configured,
-        base_url_required: descriptor.base_url_required,
-    })
 }
 
 fn descriptor_for(provider: &str) -> Result<CloudLlmProviderDescriptor, String> {
@@ -276,37 +237,30 @@ fn test_connection(
         ))
         .build()
         .map_err(|e| format!("create LLM connection-test client: {e}"))?;
-    let mut builder = client.get(&request.url);
-    for (header, value) in &request.headers {
-        builder = builder.header(header, value);
-    }
-    let response = builder
-        .send()
+    let authenticated_response = send_connection_test_request(&client, &request)
         .map_err(|e| format!("connect to {}: {e}", descriptor.display_name))?;
-    let status = response.status();
-    let body = response
-        .text()
-        .map_err(|e| format!("read {} model-list response: {e}", descriptor.display_name))?;
-    if !status.is_success() {
+    if !authenticated_response.status.is_success() {
         return Err(format!(
             "{} returned HTTP {}: {}",
             descriptor.display_name,
-            status.as_u16(),
-            truncate_for_error(&body)
+            authenticated_response.status.as_u16(),
+            truncate_for_error(&authenticated_response.body)
         ));
     }
-    let json: Value = serde_json::from_str(&body).map_err(|e| {
+    let json: Value = serde_json::from_str(&authenticated_response.body).map_err(|e| {
         format!(
             "parse {} model-list response JSON: {e}",
             descriptor.display_name
         )
     })?;
     let model_count = parse_model_count(&descriptor.display_name, &json)?;
+    let authentication_status = determine_authentication_status(&client, &request, &credentials);
 
     Ok(CloudLlmConnectionTestResult {
         provider: descriptor.provider,
         display_name: descriptor.display_name,
         model_count,
+        authentication_status,
     })
 }
 
@@ -314,14 +268,30 @@ fn credentials_with_draft_overrides(
     store: &impl CredentialStore,
     settings: &CloudLlmProviderSettings,
 ) -> Result<CloudLlmCredentials, String> {
-    let mut credentials = credentials_for(store, &settings.provider)?;
-    if let Some(api_key) = &settings.api_key {
-        credentials.api_key = trimmed_secret(Some(api_key.clone()));
+    descriptor_for(&settings.provider)?;
+    Ok(CloudLlmCredentials {
+        api_key: credential_field_with_draft_override(
+            store,
+            &account(&settings.provider, API_KEY_FIELD),
+            settings.api_key.as_ref(),
+        )?,
+        base_url: credential_field_with_draft_override(
+            store,
+            &account(&settings.provider, BASE_URL_FIELD),
+            settings.base_url.as_ref(),
+        )?,
+    })
+}
+
+fn credential_field_with_draft_override(
+    store: &impl CredentialStore,
+    account: &str,
+    draft_value: Option<&String>,
+) -> Result<Option<String>, String> {
+    match draft_value {
+        Some(value) => Ok(trimmed_secret(Some(value.clone()))),
+        None => Ok(trimmed_secret(store.get(account)?)),
     }
-    if let Some(base_url) = &settings.base_url {
-        credentials.base_url = trimmed_secret(Some(base_url.clone()));
-    }
-    Ok(credentials)
 }
 
 fn build_connection_test_request(
@@ -369,6 +339,66 @@ fn parse_model_count(display_name: &str, response: &Value) -> Result<usize, Stri
         .and_then(Value::as_array)
         .map(Vec::len)
         .ok_or_else(|| format!("{display_name} model-list response did not include a data array"))
+}
+
+struct CloudLlmConnectionTestResponse {
+    status: reqwest::StatusCode,
+    body: String,
+}
+
+fn send_connection_test_request(
+    client: &Client,
+    request: &CloudLlmConnectionTestRequest,
+) -> Result<CloudLlmConnectionTestResponse, String> {
+    let mut builder = client.get(&request.url);
+    for (header, value) in &request.headers {
+        builder = builder.header(header, value);
+    }
+    let response = builder.send().map_err(|e| e.to_string())?;
+    let status = response.status();
+    let body = response.text().map_err(|e| e.to_string())?;
+    Ok(CloudLlmConnectionTestResponse { status, body })
+}
+
+fn determine_authentication_status(
+    client: &Client,
+    authenticated_request: &CloudLlmConnectionTestRequest,
+    credentials: &CloudLlmCredentials,
+) -> CloudLlmAuthenticationStatus {
+    if credentials.api_key.is_none() {
+        return CloudLlmAuthenticationStatus::NotTested;
+    }
+    let unauthenticated_request = CloudLlmConnectionTestRequest {
+        url: authenticated_request.url.clone(),
+        headers: authenticated_request
+            .headers
+            .iter()
+            .filter(|(header, _)| header != "authorization" && header != "x-api-key")
+            .cloned()
+            .collect(),
+    };
+    match send_connection_test_request(client, &unauthenticated_request) {
+        Ok(response) => classify_unauthenticated_response(response.status, &response.body),
+        Err(_) => CloudLlmAuthenticationStatus::Inconclusive,
+    }
+}
+
+fn classify_unauthenticated_response(
+    status: reqwest::StatusCode,
+    body: &str,
+) -> CloudLlmAuthenticationStatus {
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return CloudLlmAuthenticationStatus::Verified;
+    }
+    if status.is_success()
+        && serde_json::from_str::<Value>(body)
+            .ok()
+            .and_then(|json| json.get("data").and_then(Value::as_array).cloned())
+            .is_some()
+    {
+        return CloudLlmAuthenticationStatus::NotRequired;
+    }
+    CloudLlmAuthenticationStatus::Inconclusive
 }
 
 fn execute_cloud_prompt(
@@ -619,24 +649,6 @@ mod tests {
     }
 
     #[test]
-    fn statuses_report_only_presence_not_secret_values() {
-        let mut store = MemoryCredentialStore::default();
-        store
-            .set(&account("anthropic", API_KEY_FIELD), "sk-secret")
-            .unwrap();
-
-        let anthropic = statuses(&store)
-            .unwrap()
-            .into_iter()
-            .find(|status| status.provider == "anthropic")
-            .unwrap();
-
-        assert!(anthropic.api_key_configured);
-        assert!(!anthropic.base_url_configured);
-        assert!(!anthropic.base_url_required);
-    }
-
-    #[test]
     fn save_settings_trims_and_preserves_unspecified_fields() {
         let mut store = MemoryCredentialStore::default();
         save_settings(
@@ -649,7 +661,7 @@ mod tests {
         )
         .unwrap();
 
-        let status = save_settings(
+        save_settings(
             &mut store,
             CloudLlmProviderSettings {
                 provider: "openai_compatible".to_string(),
@@ -659,13 +671,17 @@ mod tests {
         )
         .unwrap();
 
-        assert!(status.api_key_configured);
-        assert!(!status.base_url_configured);
         assert_eq!(
             store
                 .get(&account("openai_compatible", API_KEY_FIELD))
                 .unwrap(),
             Some("key".to_string())
+        );
+        assert_eq!(
+            store
+                .get(&account("openai_compatible", BASE_URL_FIELD))
+                .unwrap(),
+            None
         );
     }
 
@@ -676,10 +692,12 @@ mod tests {
             .set(&account("anthropic", API_KEY_FIELD), "sk-secret")
             .unwrap();
 
-        let status = clear_settings(&mut store, "anthropic").unwrap();
+        clear_settings(&mut store, "anthropic").unwrap();
 
-        assert!(!status.api_key_configured);
-        assert!(!status.base_url_configured);
+        assert_eq!(
+            store.get(&account("anthropic", API_KEY_FIELD)).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -874,6 +892,25 @@ mod tests {
         assert!(parse_model_count("Provider", &json!({ "models": [] }))
             .unwrap_err()
             .contains("did not include a data array"));
+    }
+
+    #[test]
+    fn authentication_status_distinguishes_protected_and_public_model_lists() {
+        assert_eq!(
+            classify_unauthenticated_response(reqwest::StatusCode::UNAUTHORIZED, ""),
+            CloudLlmAuthenticationStatus::Verified
+        );
+        assert_eq!(
+            classify_unauthenticated_response(
+                reqwest::StatusCode::OK,
+                r#"{"data":[{"id":"model-a"}]}"#
+            ),
+            CloudLlmAuthenticationStatus::NotRequired
+        );
+        assert_eq!(
+            classify_unauthenticated_response(reqwest::StatusCode::OK, "<html>sign in</html>"),
+            CloudLlmAuthenticationStatus::Inconclusive
+        );
     }
 
     #[test]

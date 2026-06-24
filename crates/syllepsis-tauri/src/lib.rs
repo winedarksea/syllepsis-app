@@ -97,7 +97,6 @@ pub fn run() {
             llm_status,
             llm_route_statuses,
             cloud_llm_provider_descriptors,
-            cloud_llm_provider_statuses,
             save_cloud_llm_provider_settings,
             clear_cloud_llm_provider_settings,
             test_cloud_llm_provider_connection,

@@ -166,6 +166,7 @@ pub fn download_builtin_model(
         })
         .collect();
     state.invalidate_llm_service();
+    state.invalidate_graph_corpus();
     Ok(ModelDownloadReport {
         model_id,
         downloaded_files: downloaded,

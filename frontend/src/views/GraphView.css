@@ -186,6 +186,10 @@
 }
 
 .gv-provider-note {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
   flex-shrink: 0;
   padding: 3px var(--sp-4);
   border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
@@ -194,7 +198,22 @@
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   text-align: right;
-  pointer-events: none;
+}
+
+.gv-model-download {
+  color: var(--color-accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.gv-model-download:hover:not(:disabled) {
+  color: var(--color-heading);
+}
+
+.gv-model-download:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .gv-error-banner {

@@ -109,10 +109,9 @@ pub struct ExecutionProviderChoice {
 ///
 /// The result is the first provider that is in **all three** of: the model's preference order
 /// (`model_preference`, best first), the platform's candidate set, and the set actually
-/// `available` at runtime. If no accelerated provider survives that intersection, CPU is used —
-/// it is always available, so selection never fails. `model_preference` is honored ahead of the
-/// platform's own ordering so a model that runs best on, say, CUDA is sent there even on a box
-/// that would otherwise default to DirectML.
+/// `available` at runtime. A non-empty model preference is also its accelerated-provider
+/// compatibility allow-list: an unlisted platform accelerator is not tried. An empty preference
+/// delegates to the platform's normal ordering. If no accelerated provider survives, CPU is used.
 pub fn select_execution_provider(
     model_preference: &[ExecutionProvider],
     available: &[ExecutionProvider],
@@ -123,13 +122,11 @@ pub fn select_execution_provider(
         ep != ExecutionProvider::Cpu && candidates.contains(&ep) && available.contains(&ep)
     };
 
-    // Honor the model's preference order first, then fall back to the platform's own ordering
-    // for any accelerated EP the model didn't explicitly rank.
-    let chosen_accelerated = model_preference
-        .iter()
-        .copied()
-        .find(|&ep| is_usable(ep))
-        .or_else(|| candidates.iter().copied().find(|&ep| is_usable(ep)));
+    let chosen_accelerated = if model_preference.is_empty() {
+        candidates.iter().copied().find(|&ep| is_usable(ep))
+    } else {
+        model_preference.iter().copied().find(|&ep| is_usable(ep))
+    };
 
     match chosen_accelerated {
         Some(provider) => ExecutionProviderChoice {
@@ -172,6 +169,13 @@ mod tests {
         let choice = select_execution_provider(&[Cuda, CoreMl], &[Cuda, CoreMl], Platform::MacOs);
         assert_eq!(choice.provider, CoreMl);
         assert!(!choice.used_cpu_fallback);
+    }
+
+    #[test]
+    fn does_not_use_an_accelerator_omitted_from_model_compatibility() {
+        let choice = select_execution_provider(&[Cuda, DirectMl], &[CoreMl, Cpu], Platform::MacOs);
+        assert_eq!(choice.provider, Cpu);
+        assert!(choice.used_cpu_fallback);
     }
 
     #[test]

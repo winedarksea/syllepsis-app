@@ -128,8 +128,9 @@ pub struct ModelManifest {
     pub max_context_tokens: usize,
     /// Approximate RAM needed to load and run; gates the optional larger models behind a check.
     pub min_ram_mb: u32,
-    /// Execution providers this model runs well on, best first; intersected with what the host
+    /// Compatible accelerated execution providers, best first; intersected with what the host
     /// offers in [`select_execution_provider`](super::execution_provider::select_execution_provider).
+    /// Empty delegates to platform defaults. CPU remains the universal fallback.
     pub preferred_execution_providers: Vec<ExecutionProvider>,
     /// How to pool token states into one vector. `Some` for embedders, `None` for LLMs.
     #[serde(default)]
@@ -226,11 +227,7 @@ fn qwen3_embedding_0_6b() -> ModelManifest {
         hidden_size: 1024,
         max_context_tokens: 32_768,
         min_ram_mb: 2_048,
-        preferred_execution_providers: vec![
-            ExecutionProvider::CoreMl,
-            ExecutionProvider::Cuda,
-            ExecutionProvider::DirectMl,
-        ],
+        preferred_execution_providers: vec![ExecutionProvider::Cuda, ExecutionProvider::DirectMl],
         pooling: Some(PoolingStrategy::LastToken),
         // The instruction Qwen3-Embedding recommends for retrieval queries (documents are raw).
         query_instruction: Some(
