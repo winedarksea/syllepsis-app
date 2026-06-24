@@ -7,7 +7,8 @@ import type {
   SearchResults, RelatedNote, EmbeddingDiagnostics,
   GraphAnalysisRequest, GraphAnalysisResult,
   LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, CloudLlmPrompt, CloudLlmCompletion,
-  CloudLlmProviderDescriptor, CloudLlmProviderSettings, CloudLlmProviderStatus,
+  CloudLlmConnectionTestResult, CloudLlmProviderDescriptor, CloudLlmProviderSettings,
+  CloudLlmProviderStatus,
   ModelManifest, ModelCacheStatus, ModelDownloadReport,
   BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig,
   GitStatusDto, GitCommandReport, SyncActivityEvent, OperationalActivitySummary, NoteSyncActivity,
@@ -99,6 +100,8 @@ export const api = {
     invoke<CloudLlmProviderStatus>('save_cloud_llm_provider_settings', { settings }),
   clearCloudLlmProviderSettings: (provider: string) =>
     invoke<CloudLlmProviderStatus>('clear_cloud_llm_provider_settings', { provider }),
+  testCloudLlmProviderConnection: (settings: CloudLlmProviderSettings) =>
+    invoke<CloudLlmConnectionTestResult>('test_cloud_llm_provider_connection', { settings }),
   generateCloudProposal: (noteId: string, task: LlmTask, modelOverride?: ModelRef) =>
     invoke<Proposal>('generate_cloud_proposal', {
       noteId,

@@ -47,8 +47,7 @@ pub fn run() {
                 .app_data_dir()
                 .map(|d| d.join("plugin_prefs.json"))
                 .unwrap_or_default();
-            let runtime =
-                commands::plugins::PluginRuntime::load(builtin_dir, user_dir, prefs_path);
+            let runtime = commands::plugins::PluginRuntime::load(builtin_dir, user_dir, prefs_path);
             app.manage(runtime);
             Ok(())
         })
@@ -101,6 +100,7 @@ pub fn run() {
             cloud_llm_provider_statuses,
             save_cloud_llm_provider_settings,
             clear_cloud_llm_provider_settings,
+            test_cloud_llm_provider_connection,
             generate_cloud_proposal,
             generate_proposal,
             prepare_cloud_prompt,

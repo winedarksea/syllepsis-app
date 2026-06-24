@@ -398,6 +398,12 @@ export interface CloudLlmProviderSettings {
   base_url?: string | null;
 }
 
+export interface CloudLlmConnectionTestResult {
+  provider: string;
+  display_name: string;
+  model_count: number;
+}
+
 export interface BuildInfo {
   version: string;
   build_date: string;

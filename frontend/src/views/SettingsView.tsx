@@ -457,16 +457,23 @@ function CloudProvidersPanel({ descriptors, statuses, onChanged, onError }: {
 }) {
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [urls, setUrls] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<{ provider: string; operation: 'save' | 'clear' | 'test' } | null>(null);
+  const [connectionFeedback, setConnectionFeedback] = useState<Record<string, {
+    kind: 'success' | 'error';
+    message: string;
+  } | undefined>>({});
 
   const statusFor = (provider: string) => statuses.find((s) => s.provider === provider);
+  const clearConnectionFeedback = useCallback((provider: string) => {
+    setConnectionFeedback((current) => ({ ...current, [provider]: undefined }));
+  }, []);
 
   const save = useCallback(async (descriptor: CloudLlmProviderDescriptor) => {
     const provider = descriptor.provider;
     const apiKey = keys[provider]?.trim();
     const baseUrl = urls[provider]?.trim();
     if (!apiKey && !baseUrl) return;
-    setBusy(provider);
+    setBusy({ provider, operation: 'save' });
     try {
       // null leaves the stored value unchanged; only send fields the user actually typed.
       await api.saveCloudLlmProviderSettings({
@@ -476,32 +483,65 @@ function CloudProvidersPanel({ descriptors, statuses, onChanged, onError }: {
       });
       setKeys((k) => ({ ...k, [provider]: '' }));
       setUrls((u) => ({ ...u, [provider]: '' }));
+      clearConnectionFeedback(provider);
       onChanged(`${descriptor.display_name} credentials saved.`);
     } catch (e) {
       onError(String(e));
     } finally {
       setBusy(null);
     }
-  }, [keys, urls, onChanged, onError]);
+  }, [clearConnectionFeedback, keys, urls, onChanged, onError]);
 
   const clear = useCallback(async (descriptor: CloudLlmProviderDescriptor) => {
-    setBusy(descriptor.provider);
+    setBusy({ provider: descriptor.provider, operation: 'clear' });
     try {
       await api.clearCloudLlmProviderSettings(descriptor.provider);
+      clearConnectionFeedback(descriptor.provider);
       onChanged(`${descriptor.display_name} credentials cleared.`);
     } catch (e) {
       onError(String(e));
     } finally {
       setBusy(null);
     }
-  }, [onChanged, onError]);
+  }, [clearConnectionFeedback, onChanged, onError]);
+
+  const testConnection = useCallback(async (descriptor: CloudLlmProviderDescriptor) => {
+    const provider = descriptor.provider;
+    setBusy({ provider, operation: 'test' });
+    clearConnectionFeedback(provider);
+    try {
+      const result = await api.testCloudLlmProviderConnection({
+        provider,
+        api_key: keys[provider]?.trim() || null,
+        base_url: urls[provider]?.trim() || null,
+      });
+      setConnectionFeedback((current) => ({
+        ...current,
+        [provider]: {
+          kind: 'success',
+          message: `Connected · ${result.model_count} model${result.model_count === 1 ? '' : 's'} reported`,
+        },
+      }));
+    } catch (e) {
+      setConnectionFeedback((current) => ({
+        ...current,
+        [provider]: { kind: 'error', message: String(e) },
+      }));
+    } finally {
+      setBusy(null);
+    }
+  }, [clearConnectionFeedback, keys, urls]);
 
   return (
     <div className="sv-providers">
-      <p className="sv-hint">API keys are stored in your operating system keychain, never written to the book or synced. They're shown as configured/not — the keys themselves are never displayed.</p>
+      <p className="sv-hint">API keys are stored in your operating system keychain, never written to the book or synced. Test connection checks the entered or saved credentials by listing models; it does not generate text or consume model tokens.</p>
       {descriptors.map((d) => {
         const status = statusFor(d.provider);
         const configured = status?.api_key_configured || status?.base_url_configured;
+        const testReady = d.base_url_required
+          ? Boolean(urls[d.provider]?.trim() || status?.base_url_configured)
+          : Boolean(keys[d.provider]?.trim() || status?.api_key_configured);
+        const feedback = connectionFeedback[d.provider];
         return (
           <div key={d.provider} className="sv-provider">
             <div className="sv-provider-head">
@@ -516,7 +556,10 @@ function CloudProvidersPanel({ descriptors, statuses, onChanged, onError }: {
                 className="sv-input"
                 placeholder={status?.api_key_configured ? 'API key set — type to replace' : 'API key'}
                 value={keys[d.provider] ?? ''}
-                onChange={(e) => setKeys((k) => ({ ...k, [d.provider]: e.target.value }))}
+                onChange={(e) => {
+                  setKeys((k) => ({ ...k, [d.provider]: e.target.value }));
+                  clearConnectionFeedback(d.provider);
+                }}
               />
               {d.base_url_required && (
                 <input
@@ -524,23 +567,48 @@ function CloudProvidersPanel({ descriptors, statuses, onChanged, onError }: {
                   className="sv-input"
                   placeholder={status?.base_url_configured ? 'Base URL set — type to replace' : 'Base URL (e.g. http://localhost:8080/v1)'}
                   value={urls[d.provider] ?? ''}
-                  onChange={(e) => setUrls((u) => ({ ...u, [d.provider]: e.target.value }))}
+                  onChange={(e) => {
+                    setUrls((u) => ({ ...u, [d.provider]: e.target.value }));
+                    clearConnectionFeedback(d.provider);
+                  }}
                 />
               )}
             </div>
-            <div className="sv-savebar">
-              <button
-                className="sv-btn sv-btn-primary"
-                disabled={busy === d.provider || (!keys[d.provider]?.trim() && !urls[d.provider]?.trim())}
-                onClick={() => save(d)}
+            <div className="sv-provider-footer">
+              <div
+                className={`sv-connection-feedback ${feedback?.kind ?? ''}`}
+                role="status"
+                aria-live="polite"
               >
-                {busy === d.provider ? 'Saving…' : 'Save'}
-              </button>
-              {configured && (
-                <button className="sv-btn" disabled={busy === d.provider} onClick={() => clear(d)}>
-                  Clear
+                {feedback && (
+                  <>
+                    <Icon name={feedback.kind === 'success' ? 'check_circle' : 'error'} size={15} />
+                    <span>{feedback.message}</span>
+                  </>
+                )}
+              </div>
+              <div className="sv-savebar">
+                <button
+                  className="sv-btn sv-btn-test"
+                  disabled={busy !== null || !testReady}
+                  onClick={() => testConnection(d)}
+                >
+                  <Icon name="network_check" size={16} />
+                  {busy?.provider === d.provider && busy.operation === 'test' ? 'Testing…' : 'Test connection'}
                 </button>
-              )}
+                <button
+                  className="sv-btn sv-btn-primary"
+                  disabled={busy !== null || (!keys[d.provider]?.trim() && !urls[d.provider]?.trim())}
+                  onClick={() => save(d)}
+                >
+                  {busy?.provider === d.provider && busy.operation === 'save' ? 'Saving…' : 'Save'}
+                </button>
+                {configured && (
+                  <button className="sv-btn" disabled={busy !== null} onClick={() => clear(d)}>
+                    {busy?.provider === d.provider && busy.operation === 'clear' ? 'Clearing…' : 'Clear'}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         );

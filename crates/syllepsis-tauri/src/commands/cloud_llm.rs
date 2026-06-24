@@ -19,8 +19,10 @@ const KEYCHAIN_SERVICE: &str = "syllepsis.llm";
 const API_KEY_FIELD: &str = "api-key";
 const BASE_URL_FIELD: &str = "base-url";
 const ANTHROPIC_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: u32 = 2048;
+const CONNECTION_TEST_TIMEOUT_SECONDS: u64 = 15;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CloudLlmProviderDescriptor {
@@ -47,10 +49,23 @@ pub struct CloudLlmProviderSettings {
     pub base_url: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloudLlmConnectionTestResult {
+    pub provider: String,
+    pub display_name: String,
+    pub model_count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CloudLlmCredentials {
     api_key: Option<String>,
     base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CloudLlmConnectionTestRequest {
+    url: String,
+    headers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -125,6 +140,14 @@ pub fn clear_cloud_llm_provider_settings(
 ) -> Result<CloudLlmProviderStatus, String> {
     let mut store = KeyringCredentialStore;
     clear_settings(&mut store, &provider)
+}
+
+/// Validate draft or stored credentials with a model-list request that consumes no LLM tokens.
+#[tauri::command]
+pub fn test_cloud_llm_provider_connection(
+    settings: CloudLlmProviderSettings,
+) -> Result<CloudLlmConnectionTestResult, String> {
+    test_connection(&KeyringCredentialStore, settings)
 }
 
 pub(crate) fn cloud_provider_is_configured(provider: &str) -> Result<bool, String> {
@@ -238,6 +261,114 @@ fn descriptor_for(provider: &str) -> Result<CloudLlmProviderDescriptor, String> 
         .into_iter()
         .find(|descriptor| descriptor.provider == provider)
         .ok_or_else(|| format!("unknown cloud LLM provider: {provider}"))
+}
+
+fn test_connection(
+    store: &impl CredentialStore,
+    settings: CloudLlmProviderSettings,
+) -> Result<CloudLlmConnectionTestResult, String> {
+    let descriptor = descriptor_for(&settings.provider)?;
+    let credentials = credentials_with_draft_overrides(store, &settings)?;
+    let request = build_connection_test_request(&settings.provider, &credentials)?;
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            CONNECTION_TEST_TIMEOUT_SECONDS,
+        ))
+        .build()
+        .map_err(|e| format!("create LLM connection-test client: {e}"))?;
+    let mut builder = client.get(&request.url);
+    for (header, value) in &request.headers {
+        builder = builder.header(header, value);
+    }
+    let response = builder
+        .send()
+        .map_err(|e| format!("connect to {}: {e}", descriptor.display_name))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|e| format!("read {} model-list response: {e}", descriptor.display_name))?;
+    if !status.is_success() {
+        return Err(format!(
+            "{} returned HTTP {}: {}",
+            descriptor.display_name,
+            status.as_u16(),
+            truncate_for_error(&body)
+        ));
+    }
+    let json: Value = serde_json::from_str(&body).map_err(|e| {
+        format!(
+            "parse {} model-list response JSON: {e}",
+            descriptor.display_name
+        )
+    })?;
+    let model_count = parse_model_count(&descriptor.display_name, &json)?;
+
+    Ok(CloudLlmConnectionTestResult {
+        provider: descriptor.provider,
+        display_name: descriptor.display_name,
+        model_count,
+    })
+}
+
+fn credentials_with_draft_overrides(
+    store: &impl CredentialStore,
+    settings: &CloudLlmProviderSettings,
+) -> Result<CloudLlmCredentials, String> {
+    let mut credentials = credentials_for(store, &settings.provider)?;
+    if let Some(api_key) = &settings.api_key {
+        credentials.api_key = trimmed_secret(Some(api_key.clone()));
+    }
+    if let Some(base_url) = &settings.base_url {
+        credentials.base_url = trimmed_secret(Some(base_url.clone()));
+    }
+    Ok(credentials)
+}
+
+fn build_connection_test_request(
+    provider: &str,
+    credentials: &CloudLlmCredentials,
+) -> Result<CloudLlmConnectionTestRequest, String> {
+    match provider {
+        "anthropic" => {
+            let api_key = credentials
+                .api_key
+                .as_ref()
+                .ok_or_else(|| "Anthropic API key is not configured".to_string())?;
+            Ok(CloudLlmConnectionTestRequest {
+                url: ANTHROPIC_MODELS_URL.to_string(),
+                headers: vec![
+                    ("x-api-key".to_string(), api_key.clone()),
+                    (
+                        "anthropic-version".to_string(),
+                        ANTHROPIC_VERSION.to_string(),
+                    ),
+                ],
+            })
+        }
+        "openai_compatible" => {
+            let base_url = credentials
+                .base_url
+                .as_ref()
+                .ok_or_else(|| "OpenAI-compatible base URL is not configured".to_string())?;
+            let mut headers = Vec::new();
+            if let Some(api_key) = &credentials.api_key {
+                headers.push(("authorization".to_string(), format!("Bearer {api_key}")));
+            }
+            Ok(CloudLlmConnectionTestRequest {
+                url: openai_models_url(base_url)?,
+                headers,
+            })
+        }
+        provider => Err(format!("unknown cloud LLM provider: {provider}")),
+    }
+}
+
+fn parse_model_count(display_name: &str, response: &Value) -> Result<usize, String> {
+    response
+        .get("data")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .ok_or_else(|| format!("{display_name} model-list response did not include a data array"))
 }
 
 fn execute_cloud_prompt(
@@ -396,6 +527,20 @@ fn openai_chat_completions_url(base_url: &str) -> Result<String, String> {
         Ok(trimmed.to_string())
     } else {
         Ok(format!("{trimmed}/chat/completions"))
+    }
+}
+
+fn openai_models_url(base_url: &str) -> Result<String, String> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err("OpenAI-compatible base URL is not configured".to_string());
+    }
+    if let Some(api_root) = trimmed.strip_suffix("/chat/completions") {
+        Ok(format!("{api_root}/models"))
+    } else if trimmed.ends_with("/models") {
+        Ok(trimmed.to_string())
+    } else {
+        Ok(format!("{trimmed}/models"))
     }
 }
 
@@ -654,6 +799,81 @@ mod tests {
         assert!(request
             .headers
             .contains(&("authorization".to_string(), "Bearer sk-openai".to_string())));
+    }
+
+    #[test]
+    fn connection_test_uses_draft_values_without_mutating_stored_credentials() {
+        let mut store = MemoryCredentialStore::default();
+        store
+            .set(
+                &account("openai_compatible", BASE_URL_FIELD),
+                "https://stored.example/v1",
+            )
+            .unwrap();
+
+        let credentials = credentials_with_draft_overrides(
+            &store,
+            &CloudLlmProviderSettings {
+                provider: "openai_compatible".to_string(),
+                api_key: Some(" draft-key ".to_string()),
+                base_url: Some(" https://draft.example/v1 ".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(credentials.api_key.as_deref(), Some("draft-key"));
+        assert_eq!(
+            credentials.base_url.as_deref(),
+            Some("https://draft.example/v1")
+        );
+        assert_eq!(
+            store
+                .get(&account("openai_compatible", BASE_URL_FIELD))
+                .unwrap()
+                .as_deref(),
+            Some("https://stored.example/v1")
+        );
+    }
+
+    #[test]
+    fn connection_test_requests_model_endpoints_without_generation_bodies() {
+        let anthropic = build_connection_test_request(
+            "anthropic",
+            &CloudLlmCredentials {
+                api_key: Some("sk-ant".to_string()),
+                base_url: None,
+            },
+        )
+        .unwrap();
+        let openai = build_connection_test_request(
+            "openai_compatible",
+            &CloudLlmCredentials {
+                api_key: Some("sk-openai".to_string()),
+                base_url: Some("https://example.test/v1/chat/completions".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(anthropic.url, ANTHROPIC_MODELS_URL);
+        assert_eq!(openai.url, "https://example.test/v1/models");
+        assert!(openai
+            .headers
+            .contains(&("authorization".to_string(), "Bearer sk-openai".to_string())));
+    }
+
+    #[test]
+    fn connection_test_requires_a_model_list_response() {
+        assert_eq!(
+            parse_model_count(
+                "Provider",
+                &json!({ "data": [{ "id": "a" }, { "id": "b" }] })
+            )
+            .unwrap(),
+            2
+        );
+        assert!(parse_model_count("Provider", &json!({ "models": [] }))
+            .unwrap_err()
+            .contains("did not include a data array"));
     }
 
     #[test]

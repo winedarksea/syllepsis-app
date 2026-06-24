@@ -214,7 +214,7 @@
 select.sv-input { min-width: 180px; cursor: pointer; }
 
 /* ── Buttons ── */
-.sv-savebar { display: flex; gap: var(--sp-2); justify-content: flex-end; margin-top: var(--sp-2); }
+.sv-savebar { display: flex; gap: var(--sp-2); justify-content: flex-end; }
 
 .sv-btn {
   font-size: var(--font-size-sm);
@@ -225,6 +225,11 @@ select.sv-input { min-width: 180px; cursor: pointer; }
   border-radius: var(--radius-md);
   padding: var(--sp-2) var(--sp-4);
   cursor: pointer;
+}
+.sv-btn-test {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
 }
 .sv-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
 .sv-btn:disabled { opacity: 0.45; cursor: default; }
@@ -306,6 +311,28 @@ select.sv-input { min-width: 180px; cursor: pointer; }
 .sv-provider-fields { display: flex; flex-direction: column; gap: var(--sp-2); }
 .sv-provider-fields .sv-input { min-width: 0; width: 100%; }
 
+.sv-provider-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+}
+
+.sv-connection-feedback {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-base);
+}
+.sv-connection-feedback.success { color: var(--color-secondary); }
+.sv-connection-feedback.error { color: var(--color-error); }
+.sv-connection-feedback span {
+  overflow-wrap: anywhere;
+}
+
 .sv-badge {
   font-size: var(--font-size-xs);
   font-weight: 600;
@@ -314,6 +341,17 @@ select.sv-input { min-width: 180px; cursor: pointer; }
 }
 .sv-badge.ok { color: var(--color-secondary); background: var(--color-secondary-subtle); }
 .sv-badge.off { color: var(--color-text-tertiary); background: var(--color-surface-raised); }
+
+@media (max-width: 560px) {
+  .sv-provider-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .sv-savebar {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
 
 /* ── Theme family picker ── */
 .sv-themes { display: flex; flex-direction: column; gap: var(--sp-3); padding-top: var(--sp-2); }
