@@ -1,6 +1,10 @@
 {
   "google_drive": {
-    "client_id": "",
+    "client_id": "771586519105-erindc0rl13g2cteb9tdvor5mkmnvtte.apps.googleusercontent.com",
+    "callback_port": 53682
+  },
+  "google_drive_android": {
+    "client_id": "771586519105-erindc0rl13g2cteb9tdvor5mkmnvtte.apps.googleusercontent.com",
     "callback_port": 53682
   },
   "dropbox": {

@@ -5,12 +5,13 @@
 //! read exact/FTS/vector candidates back from that index, then reuse the same RRF/result shaping.
 
 use rusqlite::{params, Connection};
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::embeddings::Embedding;
 use crate::error::{CoreError, CoreResult};
 use crate::search::exact::match_exact;
-use crate::search::results::{FacetCount, SearchHit, SearchResults};
+use crate::search::results::{FacetCount, SearchHit, SearchRankingSignals, SearchResults};
 use crate::search::rrf::reciprocal_rank_fusion;
 use crate::search::SearchEngine;
 
@@ -95,13 +96,26 @@ impl SqliteSearchIndex {
         let exact = ids_only(match_exact(engine.documents(), query));
         let fts = self.fts_ranked_indices(query)?;
         let vector = self.vector_ranked_indices(&engine.query_embedding(query))?;
+        let exact_ranks = rank_map(&exact);
+        let fts_ranks = rank_map(&fts);
+        let vector_ranks = rank_map(&vector);
         let fused = reciprocal_rank_fusion(&[exact, fts, vector], engine.search_config());
         let facets = self.facet_counts(fused.iter().map(|(idx, _)| *idx))?;
         let hits: Vec<SearchHit> = fused
             .into_iter()
             .filter(|(idx, _)| engine.passes_category_filter(*idx, category_filter))
             .take(engine.search_config().result_limit)
-            .map(|(idx, score)| engine.search_hit_for_index(idx, score, query))
+            .map(|(idx, score)| {
+                let ranking_signals = ranking_signals(
+                    idx,
+                    score,
+                    &exact_ranks,
+                    &fts_ranks,
+                    &vector_ranks,
+                    engine.search_config().rrf_k,
+                );
+                engine.search_hit_for_index(idx, score, query, ranking_signals)
+            })
             .collect();
         Ok(SearchResults { hits, facets })
     }
@@ -239,6 +253,42 @@ impl SqliteSearchIndex {
 
 fn ids_only(ranked: Vec<(usize, f32)>) -> Vec<usize> {
     ranked.into_iter().map(|(idx, _)| idx).collect()
+}
+
+fn rank_map(indices: &[usize]) -> HashMap<usize, usize> {
+    indices
+        .iter()
+        .enumerate()
+        .map(|(rank, idx)| (*idx, rank))
+        .collect()
+}
+
+fn ranking_signals(
+    note_index: usize,
+    total: f32,
+    exact_ranks: &HashMap<usize, usize>,
+    bm25_ranks: &HashMap<usize, usize>,
+    vector_ranks: &HashMap<usize, usize>,
+    rrf_k: f32,
+) -> SearchRankingSignals {
+    let exact = exact_ranks
+        .get(&note_index)
+        .map(|rank| 1.0 / (rrf_k + *rank as f32 + 1.0))
+        .unwrap_or(0.0);
+    let bm25 = bm25_ranks
+        .get(&note_index)
+        .map(|rank| 1.0 / (rrf_k + *rank as f32 + 1.0))
+        .unwrap_or(0.0);
+    let vector = vector_ranks
+        .get(&note_index)
+        .map(|rank| 1.0 / (rrf_k + *rank as f32 + 1.0))
+        .unwrap_or(0.0);
+    SearchRankingSignals {
+        exact,
+        bm25,
+        vector,
+        total,
+    }
 }
 
 fn fts_query(query: &str) -> String {

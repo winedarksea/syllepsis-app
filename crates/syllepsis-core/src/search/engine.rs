@@ -8,7 +8,7 @@
 //! POC's book sizes and keeps the engine stateless; persisting the index/vectors to
 //! `_derived/` SQLite/FTS5 persistence is a drop-in optimization behind this same type.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::config::{Config, SearchConfig};
 use crate::embeddings::note::{embed_notes, NoteVectors};
@@ -19,7 +19,7 @@ use crate::search::bm25::Bm25Index;
 use crate::search::exact::match_exact;
 use crate::search::results::{
     BlindSpot, DuplicatePair, EmbeddingDiagnostics, FacetCount, RelatedNote, SearchHit,
-    SearchResults,
+    SearchRankingSignals, SearchResults,
 };
 use crate::search::rrf::reciprocal_rank_fusion;
 use crate::text::tokenize;
@@ -67,6 +67,9 @@ impl SearchEngine {
         let exact = ids_only(match_exact(&self.documents, query));
         let bm25 = ids_only(self.bm25.score(query, &self.search_cfg));
         let vector = ids_only(self.vector_ranking(query));
+        let exact_ranks = rank_map(&exact);
+        let bm25_ranks = rank_map(&bm25);
+        let vector_ranks = rank_map(&vector);
 
         let fused = reciprocal_rank_fusion(&[exact, bm25, vector], &self.search_cfg);
 
@@ -76,7 +79,17 @@ impl SearchEngine {
             .into_iter()
             .filter(|(idx, _)| self.passes_filter(*idx, category_filter))
             .take(self.search_cfg.result_limit)
-            .map(|(idx, score)| self.hit(idx, score, query))
+            .map(|(idx, score)| {
+                let ranking_signals = ranking_signals(
+                    idx,
+                    score,
+                    &exact_ranks,
+                    &bm25_ranks,
+                    &vector_ranks,
+                    self.search_cfg.rrf_k,
+                );
+                self.hit(idx, score, query, ranking_signals)
+            })
             .collect();
 
         SearchResults { hits, facets }
@@ -102,8 +115,14 @@ impl SearchEngine {
         self.provider.embed_query(query)
     }
 
-    pub fn search_hit_for_index(&self, idx: usize, score: f32, query: &str) -> SearchHit {
-        self.hit(idx, score, query)
+    pub fn search_hit_for_index(
+        &self,
+        idx: usize,
+        score: f32,
+        query: &str,
+        ranking_signals: SearchRankingSignals,
+    ) -> SearchHit {
+        self.hit(idx, score, query, ranking_signals)
     }
 
     pub fn passes_category_filter(&self, idx: usize, filter: &[String]) -> bool {
@@ -271,7 +290,13 @@ impl SearchEngine {
         facets
     }
 
-    fn hit(&self, idx: usize, score: f32, query: &str) -> SearchHit {
+    fn hit(
+        &self,
+        idx: usize,
+        score: f32,
+        query: &str,
+        ranking_signals: SearchRankingSignals,
+    ) -> SearchHit {
         let note = &self.notes[idx];
         SearchHit {
             note_id: note.id.to_string(),
@@ -280,7 +305,44 @@ impl SearchEngine {
             snippet: snippet(&note.body, query),
             categories: note.categories.clone(),
             score,
+            ranking_signals,
         }
+    }
+}
+
+fn rank_map(indices: &[usize]) -> HashMap<usize, usize> {
+    indices
+        .iter()
+        .enumerate()
+        .map(|(rank, idx)| (*idx, rank))
+        .collect()
+}
+
+fn ranking_signals(
+    note_index: usize,
+    total: f32,
+    exact_ranks: &HashMap<usize, usize>,
+    bm25_ranks: &HashMap<usize, usize>,
+    vector_ranks: &HashMap<usize, usize>,
+    rrf_k: f32,
+) -> SearchRankingSignals {
+    let exact = exact_ranks
+        .get(&note_index)
+        .map(|rank| 1.0 / (rrf_k + *rank as f32 + 1.0))
+        .unwrap_or(0.0);
+    let bm25 = bm25_ranks
+        .get(&note_index)
+        .map(|rank| 1.0 / (rrf_k + *rank as f32 + 1.0))
+        .unwrap_or(0.0);
+    let vector = vector_ranks
+        .get(&note_index)
+        .map(|rank| 1.0 / (rrf_k + *rank as f32 + 1.0))
+        .unwrap_or(0.0);
+    SearchRankingSignals {
+        exact,
+        bm25,
+        vector,
+        total,
     }
 }
 

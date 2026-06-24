@@ -234,6 +234,14 @@ export interface SearchHit {
   snippet: string;
   categories: string[];
   score: number;
+  ranking_signals: SearchRankingSignals;
+}
+
+export interface SearchRankingSignals {
+  exact: number;
+  bm25: number;
+  vector: number;
+  total: number;
 }
 
 export interface FacetCount {

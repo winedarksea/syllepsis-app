@@ -4,6 +4,19 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Per-retriever contribution to a hit's final reciprocal-rank-fusion score.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchRankingSignals {
+    /// Contribution from exact-match ranking.
+    pub exact: f32,
+    /// Contribution from BM25/FTS ranking.
+    pub bm25: f32,
+    /// Contribution from vector ranking.
+    pub vector: f32,
+    /// Sum of the individual contributions (equal to `SearchHit::score`).
+    pub total: f32,
+}
+
 /// One result row: enough to render a card and open the note, plus its fused relevance score.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchHit {
@@ -15,6 +28,8 @@ pub struct SearchHit {
     pub categories: Vec<String>,
     /// Fused RRF score; only comparable within one result set.
     pub score: f32,
+    /// Subtle explainability metadata for the ranking UI.
+    pub ranking_signals: SearchRankingSignals,
 }
 
 /// How many results fall under a category — the facet sidebar of [`SearchResults`].

@@ -196,37 +196,38 @@ export function TextImportView() {
   return (
     <div className="ti-root">
       <div className="ti-header">
-        <div>
-          <h2 className="ti-title">Note Import</h2>
-          <p className="ti-subtitle">Bring in text from a paste, a file, or an import plugin, preview the split, then import as notes.</p>
-        </div>
-        {source === TEXT_SOURCE ? (
-          <button className="ti-btn" disabled={busy} onClick={chooseFile}>
-            <Icon name="folder_open" size={18} />
-            <span>Choose file</span>
-          </button>
-        ) : (
-          <button className="ti-btn ti-btn-primary" disabled={busy} onClick={choosePluginFile}>
-            <Icon name="folder_open" size={18} />
-            <span>Choose {activePlugin?.name ?? 'file'}</span>
-          </button>
-        )}
+        <h2 className="ti-title">Note Import</h2>
+        <p className="ti-subtitle">Bring in text from a paste, a file, or an import plugin, preview the split, then import as notes.</p>
       </div>
 
       {notice && <div className="ti-notice" onClick={() => setNotice(null)}>{notice}</div>}
       {error && <div className="ti-error" onClick={() => setError(null)}>{error}</div>}
 
-      <section className="ti-panel">
+      <div className="ti-body">
+        <section className="ti-panel ti-controls-pane">
         <label className="ti-field">
           <span>Source</span>
-          <select value={source} onChange={(event) => { setSource(event.target.value); setPreview(null); setItems([]); }}>
-            <option value={TEXT_SOURCE}>Paste or text file</option>
-            {importPlugins.map((plugin) => (
-              <option key={plugin.id} value={plugin.id}>
-                {plugin.name}{plugin.import_extensions.length > 0 ? ` (.${plugin.import_extensions.join(', .')})` : ''}
-              </option>
-            ))}
-          </select>
+          <div className="ti-field-row">
+            <select value={source} onChange={(event) => { setSource(event.target.value); setPreview(null); setItems([]); }}>
+              <option value={TEXT_SOURCE}>Paste or text file</option>
+              {importPlugins.map((plugin) => (
+                <option key={plugin.id} value={plugin.id}>
+                  {plugin.name}{plugin.import_extensions.length > 0 ? ` (.${plugin.import_extensions.join(', .')})` : ''}
+                </option>
+              ))}
+            </select>
+            {source === TEXT_SOURCE ? (
+              <button className="ti-btn" disabled={busy} onClick={chooseFile}>
+                <Icon name="folder_open" size={18} />
+                <span>Choose file</span>
+              </button>
+            ) : (
+              <button className="ti-btn ti-btn-primary" disabled={busy} onClick={choosePluginFile}>
+                <Icon name="folder_open" size={18} />
+                <span>Choose {activePlugin?.name ?? 'file'}</span>
+              </button>
+            )}
+          </div>
         </label>
 
         {source === TEXT_SOURCE ? (
@@ -314,59 +315,67 @@ export function TextImportView() {
             <span>Import {items.length || ''} note{items.length === 1 ? '' : 's'}</span>
           </button>
         </div>
-      </section>
+        </section>
 
-      {preview && (
-        <section className="ti-panel">
-          <div className="ti-preview-header">
-            <div>
-              <h3>Preview</h3>
-              <p>{items.length} note{items.length === 1 ? '' : 's'} ready. {preview.categories.length} detected section{preview.categories.length === 1 ? '' : 's'}.</p>
-            </div>
-          </div>
+        <section className="ti-panel ti-preview-pane">
+          {preview ? (
+            <>
+              <div className="ti-preview-header">
+                <div>
+                  <h3>Preview</h3>
+                  <p>{items.length} note{items.length === 1 ? '' : 's'} ready. {preview.categories.length} detected section{preview.categories.length === 1 ? '' : 's'}.</p>
+                </div>
+              </div>
 
-          {preview.categories.length > 0 && (
-            <div className="ti-category-row">
-              {preview.categories.map((category) => (
-                <span key={category.name} className="ti-chip">#{category.name}</span>
+              {preview.categories.length > 0 && (
+                <div className="ti-category-row">
+                  {preview.categories.map((category) => (
+                    <span key={category.name} className="ti-chip">#{category.name}</span>
+                  ))}
+                </div>
+              )}
+
+              {preview.warnings.map((warning) => (
+                <div key={warning} className="ti-warning">{warning}</div>
               ))}
+
+              <div className="ti-preview-list">
+                {items.map((item, itemNumber) => (
+                  <article key={item.index} className="ti-preview-item">
+                    <div className="ti-preview-item-header">
+                      <span className="ti-item-index">{itemNumber + 1}</span>
+                      <span className={`ti-kind ti-kind-${item.block_kind}`}>{BLOCK_LABEL[item.block_kind]}</span>
+                      {item.category_context && <span className="ti-chip">#{item.category_context}</span>}
+                      {item.intended_prior && <span className="ti-prior">{item.intended_prior.kind}</span>}
+                      <button className="ti-icon-btn" onClick={() => removeItem(item.index)} title="Remove from import">
+                        <Icon name="close" size={17} />
+                      </button>
+                    </div>
+                    <input
+                      className="ti-title-input"
+                      value={item.title}
+                      onChange={(event) => updateItem(item.index, { title: event.target.value })}
+                    />
+                    <textarea
+                      className="ti-body-input"
+                      value={item.body}
+                      onChange={(event) => updateItem(item.index, { body: event.target.value })}
+                    />
+                    {item.warnings.map((warning) => (
+                      <div key={warning} className="ti-warning">{warning}</div>
+                    ))}
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="ti-preview-empty">
+              <Icon name="visibility" size={32} />
+              <p>Preview will appear here once you run an import.</p>
             </div>
           )}
-
-          {preview.warnings.map((warning) => (
-            <div key={warning} className="ti-warning">{warning}</div>
-          ))}
-
-          <div className="ti-preview-list">
-            {items.map((item, itemNumber) => (
-              <article key={item.index} className="ti-preview-item">
-                <div className="ti-preview-item-header">
-                  <span className="ti-item-index">{itemNumber + 1}</span>
-                  <span className={`ti-kind ti-kind-${item.block_kind}`}>{BLOCK_LABEL[item.block_kind]}</span>
-                  {item.category_context && <span className="ti-chip">#{item.category_context}</span>}
-                  {item.intended_prior && <span className="ti-prior">{item.intended_prior.kind}</span>}
-                  <button className="ti-icon-btn" onClick={() => removeItem(item.index)} title="Remove from import">
-                    <Icon name="close" size={17} />
-                  </button>
-                </div>
-                <input
-                  className="ti-title-input"
-                  value={item.title}
-                  onChange={(event) => updateItem(item.index, { title: event.target.value })}
-                />
-                <textarea
-                  className="ti-body-input"
-                  value={item.body}
-                  onChange={(event) => updateItem(item.index, { body: event.target.value })}
-                />
-                {item.warnings.map((warning) => (
-                  <div key={warning} className="ti-warning">{warning}</div>
-                ))}
-              </article>
-            ))}
-          </div>
         </section>
-      )}
+      </div>
     </div>
   );
 }

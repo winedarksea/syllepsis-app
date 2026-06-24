@@ -10,6 +10,10 @@ import type { SearchResults, CrossBookNote } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import './SearchView.css';
 
+function formatScore(score: number): string {
+  return score.toFixed(3);
+}
+
 export function SearchView() {
   const { openEditor } = useStore();
   const [query, setQuery] = useState('');
@@ -114,9 +118,18 @@ export function SearchView() {
               >
                 <div className="sv-hit-header">
                   <span className="sv-hit-title">{hit.title || '(untitled)'}</span>
-                  <button className="sv-hit-open" onClick={(e) => { e.stopPropagation(); openEditor(hit.note_id); }}>
-                    Open
-                  </button>
+                  <div className="sv-hit-meta">
+                    <span
+                      className="sv-hit-score"
+                      title={`RRF total ${formatScore(hit.ranking_signals.total)} = exact ${formatScore(hit.ranking_signals.exact)} + bm25 ${formatScore(hit.ranking_signals.bm25)} + vector ${formatScore(hit.ranking_signals.vector)}`}
+                      aria-label="Ranking score details"
+                    >
+                      {formatScore(hit.ranking_signals.total)}
+                    </span>
+                    <button className="sv-hit-open" onClick={(e) => { e.stopPropagation(); openEditor(hit.note_id); }}>
+                      Open
+                    </button>
+                  </div>
                 </div>
                 {hit.summary && <p className="sv-hit-summary">{hit.summary}</p>}
                 {hit.snippet && <p className="sv-hit-snippet">{hit.snippet}</p>}

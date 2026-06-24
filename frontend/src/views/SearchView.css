@@ -103,6 +103,20 @@
   color: var(--color-heading);
 }
 
+.sv-hit-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.sv-hit-score {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  letter-spacing: 0.01em;
+  opacity: 0.85;
+}
+
 .sv-hit-open {
   font-size: var(--font-size-xs);
   color: var(--color-accent);

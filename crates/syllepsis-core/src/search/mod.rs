@@ -16,6 +16,6 @@ pub mod sqlite_index;
 pub use engine::SearchEngine;
 pub use results::{
     BlindSpot, DuplicatePair, EmbeddingDiagnostics, FacetCount, RelatedNote, SearchHit,
-    SearchResults,
+    SearchRankingSignals, SearchResults,
 };
 pub use sqlite_index::SqliteSearchIndex;
