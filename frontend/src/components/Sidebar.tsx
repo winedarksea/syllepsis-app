@@ -7,6 +7,7 @@ import './Sidebar.css';
 
 interface Props {
   onNewNote: (type?: ObjectType) => void;
+  onImportImage: () => void;
 }
 
 // Object types a user can create directly from the New menu. (Picture/Drawing need asset
@@ -35,7 +36,7 @@ const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[]
   { view: 'diagnostics', icon: 'monitor_heart', label: 'Diagnostics' },
 ];
 
-export function Sidebar({ onNewNote }: Props) {
+export function Sidebar({ onNewNote, onImportImage }: Props) {
   const { view, setView, categories, unsortedCount, hideUnsortedBadge, diagnosticsIssueCount, activeCategory, setActiveCategory, theme, toggleTheme, closeBook } = useStore();
   const [newMenuOpen, setNewMenuOpen] = useState(false);
 
@@ -137,6 +138,12 @@ export function Sidebar({ onNewNote }: Props) {
                   {t.label}
                 </button>
               ))}
+              <button
+                className="sidebar-new-menu-item"
+                onClick={() => { setNewMenuOpen(false); onImportImage(); }}
+              >
+                Import Image…
+              </button>
             </div>
           )}
         </div>

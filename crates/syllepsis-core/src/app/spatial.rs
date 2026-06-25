@@ -13,7 +13,25 @@ use crate::spatial::{
     build_overlay, resolve_token, LookupEntry, Overlay, ResolvedLocation, WorldRegistry,
 };
 use crate::storage::{Book, NoteStore};
-use crate::sync::AssetRegistry;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateImageWorldRequest {
+    pub display_name: String,
+    pub backdrop_asset_uuid: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldDeletionImpact {
+    pub note_references: usize,
+    pub category_references: usize,
+    pub lookup_references: usize,
+}
+
+impl WorldDeletionImpact {
+    pub fn has_references(&self) -> bool {
+        self.note_references > 0 || self.category_references > 0 || self.lookup_references > 0
+    }
+}
 
 /// Build the world registry for a book (its stored worlds plus the implicit `earth`).
 fn registry_for(book: &Book) -> CoreResult<WorldRegistry> {
@@ -36,6 +54,107 @@ pub fn create_world(book: &Book, world: World) -> CoreResult<()> {
     book.store.write_world(&world)
 }
 
+/// Create a validated image-backed world from an existing first-class Picture/Drawing asset.
+pub fn create_image_world(book: &Book, request: CreateImageWorldRequest) -> CoreResult<World> {
+    let display_name = request.display_name.trim();
+    if display_name.is_empty() {
+        return Err(CoreError::parse("world", "display name is required"));
+    }
+    let worlds = registry_for(book)?.worlds().to_vec();
+    if worlds
+        .iter()
+        .any(|world| world.display_name.eq_ignore_ascii_case(display_name))
+    {
+        return Err(CoreError::parse(
+            "world",
+            format!("a world named '{display_name}' already exists"),
+        ));
+    }
+
+    let matching_asset = book
+        .store
+        .read_all_notes()?
+        .into_iter()
+        .filter(|note| {
+            matches!(
+                note.object_type,
+                crate::model::ObjectType::Picture | crate::model::ObjectType::Drawing
+            )
+        })
+        .find_map(|note| {
+            note.asset
+                .filter(|asset| asset.uuid == request.backdrop_asset_uuid)
+        })
+        .ok_or_else(|| {
+            CoreError::NotFound(format!(
+                "Picture/Drawing asset '{}'",
+                request.backdrop_asset_uuid
+            ))
+        })?;
+
+    let Some((actual_object_type, actual_dimensions, _media_type)) =
+        crate::app::image_assets::inspect_tracked_asset(book, &matching_asset.uuid)?
+    else {
+        return Err(CoreError::NotFound(format!(
+            "asset file '{}'",
+            matching_asset.uuid
+        )));
+    };
+    if !matches!(
+        actual_object_type,
+        crate::model::ObjectType::Picture | crate::model::ObjectType::Drawing
+    ) {
+        return Err(CoreError::parse(
+            "world",
+            "backdrop asset is not a supported Picture or Drawing",
+        ));
+    }
+
+    let base_id = world_slug(display_name);
+    let mut id = base_id.clone();
+    let mut suffix = 2_u32;
+    while id == DEFAULT_WORLD_ID || worlds.iter().any(|world| world.id == id) {
+        id = format!("{base_id}-{suffix}");
+        suffix += 1;
+    }
+    let world = World::image(id, display_name, matching_asset.uuid, actual_dimensions);
+    book.store.write_world(&world)?;
+    Ok(world)
+}
+
+/// Count every persisted reference that would become invalid if a world were deleted.
+pub fn world_deletion_impact(book: &Book, id: &str) -> CoreResult<WorldDeletionImpact> {
+    if id == DEFAULT_WORLD_ID {
+        return Err(CoreError::parse("world", "'earth' cannot be deleted"));
+    }
+    // Deletion protection must include archived and pending-deletion notes even though the normal
+    // visual overlay hides them. A hidden reference is still user data that would be orphaned.
+    let notes = book.store.read_all_notes()?;
+    let categories = book.store.categories()?;
+    let registry = registry_for(book)?;
+    let lookup = book.store.read_location_lookup()?;
+    let overlay = build_overlay(id, &notes, &categories, &registry, &lookup)?;
+    let note_references = overlay
+        .pins
+        .iter()
+        .filter(|pin| matches!(pin.target, crate::spatial::SpatialTarget::Note { .. }))
+        .count();
+    let category_point_references = overlay
+        .pins
+        .iter()
+        .filter(|pin| matches!(pin.target, crate::spatial::SpatialTarget::Category { .. }))
+        .count();
+    Ok(WorldDeletionImpact {
+        note_references,
+        category_references: category_point_references + overlay.regions.len(),
+        lookup_references: lookup
+            .entries()
+            .iter()
+            .filter(|entry| entry.world == id)
+            .count(),
+    })
+}
+
 /// Delete a stored world. `earth` is built-in and not deletable.
 pub fn delete_world(book: &Book, id: &str) -> CoreResult<()> {
     if id == DEFAULT_WORLD_ID {
@@ -44,7 +163,39 @@ pub fn delete_world(book: &Book, id: &str) -> CoreResult<()> {
             "'earth' is the built-in default world and cannot be deleted",
         ));
     }
+    let impact = world_deletion_impact(book, id)?;
+    if impact.has_references() {
+        return Err(CoreError::parse(
+            "world",
+            format!(
+                "world '{id}' is still referenced by {} note location(s), {} category location(s), and {} lookup entry/entries",
+                impact.note_references, impact.category_references, impact.lookup_references
+            ),
+        ));
+    }
     book.store.delete_world(id)
+}
+
+fn world_slug(display_name: &str) -> String {
+    let mut slug = String::new();
+    let mut previous_was_separator = false;
+    for character in display_name.chars().flat_map(char::to_lowercase) {
+        if character.is_ascii_alphanumeric() {
+            slug.push(character);
+            previous_was_separator = false;
+        } else if !slug.is_empty() && !previous_was_separator {
+            slug.push('-');
+            previous_was_separator = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "world".to_string()
+    } else {
+        slug
+    }
 }
 
 /// Build the overlay (pins + regions) for one world from the book's visible notes and categories.
@@ -104,32 +255,13 @@ pub fn world_backdrop(book: &Book, world_id: &str) -> CoreResult<Option<Backdrop
     let Some(backdrop_uuid) = world.backdrop else {
         return Ok(None);
     };
-    let registry = AssetRegistry::scan(&book.root)?;
-    let Some(relative_path) = registry.resolve(&backdrop_uuid) else {
+    let Some((absolute, mime)) = crate::app::image_assets::asset_file(book, &backdrop_uuid)? else {
         return Ok(None);
     };
-    let absolute = book.root.join(relative_path);
     Ok(Some(BackdropRef {
-        mime: mime_for_path(relative_path).to_string(),
+        mime,
         path: absolute.to_string_lossy().into_owned(),
     }))
-}
-
-/// MIME type for a backdrop image/drawing from its extension (the kinds `sync::assets` tracks).
-fn mime_for_path(path: &str) -> &'static str {
-    match path
-        .rsplit('.')
-        .next()
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("svg") => "image/svg+xml",
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        _ => "application/octet-stream",
-    }
 }
 
 #[cfg(test)]
@@ -247,7 +379,11 @@ mod tests {
         assert_eq!(world_backdrop(&book, "firstfloor").unwrap(), None);
 
         // Drop a real SVG asset, track it by UUID, and point a world at it.
-        std::fs::write(book.root.join("floorplan.svg"), b"<svg/>").unwrap();
+        std::fs::write(
+            book.root.join("floorplan.svg"),
+            br#"<svg viewBox="0 0 1000 800"/>"#,
+        )
+        .unwrap();
         let uuid = crate::sync::assign_asset_uuid(&book.root, "floorplan.svg").unwrap();
         create_world(
             &book,
@@ -261,5 +397,72 @@ mod tests {
 
         // Unknown world id is an error, not None.
         assert!(world_backdrop(&book, "nope").is_err());
+    }
+
+    #[test]
+    fn validated_image_world_creation_derives_unique_slug_and_dimensions() {
+        let (directory, book) = book();
+        let source = directory.path().join("floor.svg");
+        std::fs::write(
+            &source,
+            r#"<svg viewBox="0 0 900 600"><path id="hall" d="M0 0"/></svg>"#,
+        )
+        .unwrap();
+        let image = crate::app::image_assets::import_image_object(
+            &book,
+            source.to_str().unwrap(),
+            Some("Floor plan"),
+        )
+        .unwrap();
+        let asset_uuid = image.asset.unwrap().uuid;
+
+        let world = create_image_world(
+            &book,
+            CreateImageWorldRequest {
+                display_name: "First Floor".into(),
+                backdrop_asset_uuid: asset_uuid,
+            },
+        )
+        .unwrap();
+        assert_eq!(world.id, "first-floor");
+        assert_eq!(world.intrinsic_dimensions, Some((900, 600)));
+
+        let duplicate_name = create_image_world(
+            &book,
+            CreateImageWorldRequest {
+                display_name: "first floor".into(),
+                backdrop_asset_uuid: world.backdrop.unwrap(),
+            },
+        );
+        assert!(duplicate_name.is_err());
+    }
+
+    #[test]
+    fn deletion_is_blocked_while_locations_reference_world() {
+        let (directory, book) = book();
+        let source = directory.path().join("map.svg");
+        std::fs::write(&source, r#"<svg viewBox="0 0 10 10"/>"#).unwrap();
+        let image = crate::app::image_assets::import_image_object(
+            &book,
+            source.to_str().unwrap(),
+            Some("Map"),
+        )
+        .unwrap();
+        let world = create_image_world(
+            &book,
+            CreateImageWorldRequest {
+                display_name: "Referenced".into(),
+                backdrop_asset_uuid: image.asset.unwrap().uuid,
+            },
+        )
+        .unwrap();
+        let mut note = create_note(&book, ObjectType::Note, "Pinned", None).unwrap();
+        note.location = Some(format!("{}/0.2,0.3", world.id));
+        note.metadata.lifecycle.archived = true;
+        update_note(&book, note).unwrap();
+
+        let impact = world_deletion_impact(&book, &world.id).unwrap();
+        assert_eq!(impact.note_references, 1);
+        assert!(delete_world(&book, &world.id).is_err());
     }
 }

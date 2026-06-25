@@ -113,4 +113,17 @@ mod tests {
         let parsed = parse_note(&crlf).unwrap();
         assert_eq!(parsed.body, "line");
     }
+
+    #[test]
+    fn picture_asset_metadata_round_trips_in_frontmatter() {
+        let mut note = Note::new(ObjectType::Picture, "Photo", "syllepsis_001");
+        note.asset = Some(crate::model::AssetMetadata {
+            uuid: "asset-1".into(),
+            media_type: "image/png".into(),
+            intrinsic_dimensions: (640, 480),
+            original_filename: "photo.png".into(),
+        });
+        let parsed = parse_note(&serialize_note(&note).unwrap()).unwrap();
+        assert_eq!(parsed.asset, note.asset);
+    }
 }

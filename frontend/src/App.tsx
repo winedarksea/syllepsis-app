@@ -402,9 +402,20 @@ function Workspace() {
     openEditor(note.id);
   }, [openEditor]);
 
+  const handleImportImage = useCallback(async () => {
+    const selected = await openDialog({
+      multiple: false,
+      title: 'Import Picture or Drawing',
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }],
+    });
+    if (!selected || typeof selected !== 'string') return;
+    const note = await api.importImageObject(selected);
+    openEditor(note.id);
+  }, [openEditor]);
+
   return (
     <div className="workspace">
-      <Sidebar onNewNote={handleNewNote} />
+      <Sidebar onNewNote={handleNewNote} onImportImage={handleImportImage} />
       <main className="workspace-main">
         {view === 'editor' && editingNoteId ? (
           <Editor noteId={editingNoteId} />

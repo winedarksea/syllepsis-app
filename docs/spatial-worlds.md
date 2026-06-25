@@ -14,10 +14,12 @@ A **world** is a coordinate space notes can be placed in. There are two kinds:
 
 | Kind | Coordinate space | Backdrop | Examples |
 |---|---|---|---|
-| **Geo** | lat / long on a sphere | map tiles (future) | `earth` (default); user-defined fictional planets |
+| **Geo** | lat / long on a sphere | bundled projected SVG | `earth` (default) |
 | **Image-backed (plane)** | 2D plane, normalized `(x, y)` in `0..1` | a [drawing (SVG)](object-types.md#drawings) or [raster image](object-types.md#pictures) | a floorplan of the first floor; a hand-drawn memory palace |
 
-- `earth` is the default geo world. Other geo worlds use the same lat/long math but a different (or no) tile source — this is how fantasy maps and other planets are supported without a special case.
+- `earth` is the default geo world. It uses a bundled, offline **Equal Earth** SVG basemap generated
+  from Natural Earth Admin-0 country geometry. A compact global layer is shown initially and a
+  bundled 1:10m layer is used at continent-level zoom; there are no tiles or runtime downloads.
 - An **image-backed world** is just an image plus a coordinate frame. A floorplan of one floor of a house is a world; a multi-floor house is several worlds (one per floor), optionally grouped.
 - Image-backed worlds store **normalized** coordinates (`0..1` of the image's intrinsic width/height) rather than pixels, so locations survive the backdrop being re-exported at a different resolution.
 
@@ -31,6 +33,11 @@ Each world has a small metadata entry (a markdown/frontmatter file in the book, 
 - For `geo`: an optional `tile_source` URL
 
 The existing **text → coordinate lookup table** ([object-types.md](object-types.md#location-metadata)) resolves named places (`"the kitchen"`, `"job site"`) to coordinates and carries a `world` column, so a plain-text location string keeps working and simply resolves within its world.
+
+The Worlds view creates image worlds from an existing Picture/Drawing object or a newly imported
+backdrop. Rust derives a collision-safe id, verifies the asset UUID and dimensions, and only then
+writes the registry entry. Earth remains immutable. Deletion is blocked while notes, categories,
+regions, or lookup rows still reference the world; the backing image object is retained.
 
 ## Coordinates in markdown (`loc:` syntax)
 
@@ -62,10 +69,14 @@ Any image-backed world renders with an **overlay layer**: pins (points) and regi
   - **SVG / drawing backdrops** (preferred) — a named SVG element (`id="kitchen"`) is itself the region. Imported SVG floorplans get clickable rooms essentially for free.
   - **Raster backdrops** — a region is an app-stored polygon/bbox in normalized coordinates.
 - **Zoom scaling.** Pins and regions are anchored in normalized coordinates so they stay locked to the right spot at any zoom. For SVG this is automatic (vector). **For raster images the overlay must apply an explicit zoom/pan transform** so pins track the backdrop as the user zooms in and out — by default pins hold a constant on-screen size while staying anchored, with a toggle to scale with the content.
+- **Coordinate grid.** Earth can show a numbered adaptive latitude/longitude graticule. Image
+  worlds use normalized X/Y labels. Cursor coordinates use the same convention as `loc:`.
 
-## Map view (future)
+## Earth map
 
-A future **Map view** loads map tiles for geo worlds and shows every geo-tagged note as a pin; clicking a pin opens the note. This is a later extension — **not part of the first pass**. The first pass targets image-backed worlds and overlays (floorplans, mind palaces), which need no tile infrastructure.
+Earth is rendered in the same SVG pan/zoom canvas as image worlds. Equal Earth projection math is
+implemented in Rust and mirrored by tested frontend helpers. The committed map assets contain
+country/coast geometry only: no roads, admin-1 boundaries, rivers, cities, labels, or tile source.
 
 ## Mind palaces
 
@@ -77,7 +88,9 @@ Imported **SVGs are treated as [drawings](object-types.md#drawings)**, and the f
 
 ## Phasing
 
-1. **First pass** *(implemented — see `syllepsis-core::spatial` and the `app::spatial` command surface)* — image-backed worlds from imported SVG (preferred) or raster images; overlay pins and regions; `loc:` inline syntax and note-level `location` metadata; the text→coordinate lookup table generalized with a `world` column. The world registry always supplies the implicit `earth` geo world; a numeric coordinate pair is resolved against its world's kind (lat/long vs normalized x/y) and range-checked. The React **Worlds** view renders the overlay over a normalized coordinate plane, and an image world's backdrop is served from the core (`app::spatial::world_backdrop`, resolving the backdrop UUID through the asset registry) as a self-contained `data:` URL drawn behind the overlay.
-2. **Future** — Map view with tiles for geo worlds; the in-app drawing tool producing SVG worlds; richer multi-floor world grouping.
+1. **Implemented** — first-class Picture/Drawing ingestion; image-world creation; overlay pins and
+   regions; `loc:` syntax; adaptive grids; shared SVG pan/zoom; and the offline Equal Earth map.
+2. **Future** — optional projections, richer geographic layers, the in-app drawing tool, and
+   multi-floor world grouping. Street-level tile navigation remains outside the intended precision.
 
 The authoring of detailed floorplans is **out of scope** for Syllepsis — that lives in the separate `catlin-house` IFC/BIM tooling, which already renders floorplan images. Syllepsis *imports* a floorplan as a world backdrop rather than reimplementing a CAD editor.

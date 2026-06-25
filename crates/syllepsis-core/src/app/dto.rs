@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
 use crate::id::NoteId;
-use crate::model::{Metadata, Note, ObjectType, PriorEdge};
+use crate::model::{AssetMetadata, Metadata, Note, ObjectType, PriorEdge};
 
 /// A note as sent to / received from the UI. Unlike [`Note`], this includes the body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -25,6 +25,8 @@ pub struct NoteDto {
     pub prior: Option<PriorEdge>,
     #[serde(default)]
     pub location: Option<String>,
+    #[serde(default)]
+    pub asset: Option<AssetMetadata>,
     /// Convenience flag for the UI (mirrors `prior.is_some()`).
     pub sorted: bool,
     pub metadata: Metadata,
@@ -42,6 +44,7 @@ impl NoteDto {
             categories: note.categories.clone(),
             prior: note.prior.clone(),
             location: note.location.clone(),
+            asset: note.asset.clone(),
             sorted: note.is_sorted(),
             metadata: note.metadata.clone(),
         }
@@ -59,6 +62,7 @@ impl NoteDto {
             categories: self.categories,
             prior: self.prior,
             location: self.location,
+            asset: self.asset,
             metadata: self.metadata,
         })
     }

@@ -47,7 +47,11 @@ _cache/ or _derived/ for ephemerals, gitignored and possibly not cloud synced
 Stored as CSV with YAML frontmatter. Special subtypes: **decision matrices** and **pro/con tables**.
 
 ### Pictures
-Captions and other metadata are stored in XMP metadata using the same markdown format as text notes. Supported formats: PNG, JPEG, GIF, SVG, WebP.
+Pictures are first-class note objects. Captions, description, categories, location, and the stable
+asset reference live in the normal Markdown/frontmatter file. The imported binary is kept unchanged
+under `assets/` with an adjacent UUID sidecar, so moving or renaming it does not break references.
+Supported raster formats are PNG, JPEG, GIF, and WebP. XMP may be imported or exported later, but
+it is not canonical storage.
 
 Pictures do not have an archive option — only delete (implemented as "mark for deletion," then permanent removal after a configurable delay, default 30 days).
 
@@ -59,7 +63,10 @@ A raster image can serve as the backdrop for an [image-backed world](spatial-wor
 A special text type. **Mermaid** diagrams (including Venn diagrams) are a special subtype that can render inline.
 
 ### Drawings (SVG)
-An object type for vector drawings, stored as **SVG**. Includes built-in render-to-image so a drawing can be embedded wherever a static image is expected (and used for book covers).
+An object type for vector drawings, stored as an unchanged imported **SVG** plus the same Markdown
+metadata and UUID sidecar used by pictures. Imported SVG is validated before ingestion: scripts,
+active foreign content, event handlers, and external references are rejected, while safe element
+IDs are preserved for world regions.
 
 **Imported SVGs are treated as drawings** — there is no separate "imported vector image" type. The future in-app drawing tool will also emit SVG, so a hand-drawn graphic and an imported one are handled identically.
 

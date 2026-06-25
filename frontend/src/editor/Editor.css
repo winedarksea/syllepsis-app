@@ -800,3 +800,49 @@ pre.plugin-block {
 .plugin-block .tok-comment { color: #9ca0a4; font-style: italic; }
 .plugin-block .tok-number { color: #986801; }
 .plugin-block-fallback { opacity: 0.85; }
+
+/* ── First-class picture/drawing objects ───────────────────────────────────── */
+.editor-image-object {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-5);
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+}
+
+.editor-image-preview {
+  min-height: 240px;
+  max-height: 58vh;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  overflow: hidden;
+}
+
+.editor-image-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 58vh;
+  object-fit: contain;
+}
+
+.editor-image-missing,
+.editor-image-facts {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.editor-image-description {
+  min-height: 140px;
+  resize: vertical;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+}

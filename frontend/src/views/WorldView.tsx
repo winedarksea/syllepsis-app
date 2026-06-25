@@ -1,182 +1,257 @@
-// Spatial overlay view (Phase 5). Renders a world's pins and regions over its backdrop. Image
-// worlds (floorplans, mind palaces) are the first-pass target; geo worlds fall back to a simple
-// equirectangular projection until the map-tile view lands (a later phase).
-//
-// The backdrop image/SVG is fetched from the core as a self-contained data URL and drawn behind
-// the overlay; pins and regions are anchored by their normalized 0..1 coordinates so they sit
-// correctly over it. When a world has no backdrop on disk yet, a labeled placeholder is shown.
-
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
-import type { Overlay, Pin, OverlayRegion, World, WorldPoint } from '../types';
+import type { NoteDto, Overlay, World } from '../types';
+import { WorldStage } from './WorldStage';
 import './WorldView.css';
 
-/** Project any world coordinate into a normalized (x, y) in 0..1 for absolute positioning. */
-function project(point: WorldPoint): { x: number; y: number } {
-  if (point.kind === 'plane') return { x: point.x, y: point.y };
-  // Equirectangular projection for geo points (north-up).
-  return { x: (point.lon + 180) / 360, y: (90 - point.lat) / 180 };
-}
-
-function pct(n: number): string {
-  return `${(n * 100).toFixed(3)}%`;
-}
+const IMAGE_FILTER = [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }];
 
 export function WorldView() {
-  const { activeWorld, setActiveWorld, openEditor, setActiveCategory, setView } = useStore();
+  const {
+    activeWorld, setActiveWorld, openEditor, setActiveCategory, setView, book,
+  } = useStore();
   const [worlds, setWorlds] = useState<World[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
-  const [backdropByWorld, setBackdropByWorld] = useState<{ worldId: string; data: string | null } | null>(null);
+  const [backdrop, setBackdrop] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the world list once; default the active world to the first image world (or earth).
-  useEffect(() => {
-    api.listWorlds()
-      .then((ws) => {
-        setWorlds(ws);
-        if (!activeWorld && ws.length > 0) {
-          const preferred = ws.find((w) => w.kind === 'image') ?? ws[0];
-          setActiveWorld(preferred.id);
-        }
-      })
-      .catch((e) => setError(String(e)));
+  const reloadWorlds = useCallback(async (preferredWorldId?: string) => {
+    const loadedWorlds = await api.listWorlds();
+    setWorlds(loadedWorlds);
+    const nextWorld = preferredWorldId
+      ?? activeWorld
+      ?? loadedWorlds.find((world) => world.kind === 'image')?.id
+      ?? loadedWorlds[0]?.id
+      ?? null;
+    if (nextWorld) setActiveWorld(nextWorld);
   }, [activeWorld, setActiveWorld]);
 
-  // Load the overlay and backdrop whenever the active world changes.
+  useEffect(() => {
+    // Initial asynchronous load for the selected book.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    reloadWorlds().catch((caught) => setError(String(caught)));
+  }, [reloadWorlds]);
+
   useEffect(() => {
     if (!activeWorld) return;
-    api.worldOverlay(activeWorld)
-      .then((o) => { setOverlay(o); setError(null); })
-      .catch((e) => setError(String(e)));
-    api.worldBackdrop(activeWorld)
-      .then((data) => setBackdropByWorld({ worldId: activeWorld, data }))
-      .catch(() => setBackdropByWorld({ worldId: activeWorld, data: null }));
+    // Clear stale geometry before the new world arrives.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOverlay(null);
+    Promise.all([api.worldOverlay(activeWorld), api.worldBackdrop(activeWorld)])
+      .then(([loadedOverlay, loadedBackdrop]) => {
+        setOverlay(loadedOverlay);
+        setBackdrop(loadedBackdrop);
+        setError(null);
+      })
+      .catch((caught) => setError(String(caught)));
   }, [activeWorld]);
 
-  const openCategory = useCallback((name: string) => {
+  const selectedWorld = worlds.find((world) => world.id === activeWorld);
+  const gridStorageKey = book && activeWorld
+    ? `syllepsis.worldGrid.${book.path}.${activeWorld}`
+    : null;
+  const [showGrid, setShowGrid] = useState(false);
+  useEffect(() => {
+    // Grid preference is external persisted state keyed by book/world.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setShowGrid(gridStorageKey ? localStorage.getItem(gridStorageKey) === 'true' : false);
+  }, [gridStorageKey]);
+
+  const toggleGrid = () => {
+    const next = !showGrid;
+    setShowGrid(next);
+    if (gridStorageKey) localStorage.setItem(gridStorageKey, String(next));
+  };
+
+  const openCategory = (name: string) => {
     setActiveCategory(name);
     setView('category');
-  }, [setActiveCategory, setView]);
+  };
 
-  if (error) return <div className="wv-state wv-error">{error}</div>;
-  if (worlds.length === 0) return <div className="wv-state">No worlds defined yet.</div>;
-
-  const world = overlay?.world;
-  const isImage = world?.kind === 'image';
-  // Keep the plane's aspect ratio to the backdrop's intrinsic size when known.
-  const aspect = world?.intrinsic_dimensions
-    ? world.intrinsic_dimensions[0] / world.intrinsic_dimensions[1]
-    : 16 / 9;
-  const backdrop = backdropByWorld?.worldId === activeWorld ? backdropByWorld.data : null;
+  const deleteSelectedWorld = async () => {
+    if (!selectedWorld || selectedWorld.id === 'earth') return;
+    try {
+      const impact = await api.worldDeletionImpact(selectedWorld.id);
+      const references = impact.note_references + impact.category_references + impact.lookup_references;
+      if (references > 0) {
+        setError(`Cannot delete ${selectedWorld.display_name}: ${references} saved location reference(s) still use it.`);
+        return;
+      }
+      if (!window.confirm(`Delete world “${selectedWorld.display_name}”? The image object will be kept.`)) return;
+      await api.deleteWorld(selectedWorld.id);
+      setActiveWorld('earth');
+      await reloadWorlds('earth');
+    } catch (caught) {
+      setError(String(caught));
+    }
+  };
 
   return (
     <div className="wv-root">
-      <div className="wv-header">
-        <h2 className="wv-title">Worlds</h2>
+      <header className="wv-header">
+        <div className="wv-heading-row">
+          <h2 className="wv-title">Worlds</h2>
+          <div className="wv-header-actions">
+            <button onClick={toggleGrid} className={showGrid ? 'active' : ''}>
+              <Icon name="grid_on" size={17} /> Grid
+            </button>
+            {selectedWorld?.id !== 'earth' && (
+              <button onClick={deleteSelectedWorld} title="Delete selected world">
+                <Icon name="delete" size={17} />
+              </button>
+            )}
+            <button className="wv-create-button" onClick={() => setShowCreate(true)}>
+              <Icon name="add" size={17} /> New world
+            </button>
+          </div>
+        </div>
         <div className="wv-world-tabs">
-          {worlds.map((w) => (
+          {worlds.map((world) => (
             <button
-              key={w.id}
-              className={`wv-world-tab ${activeWorld === w.id ? 'active' : ''}`}
-              onClick={() => setActiveWorld(w.id)}
+              key={world.id}
+              className={`wv-world-tab ${activeWorld === world.id ? 'active' : ''}`}
+              onClick={() => setActiveWorld(world.id)}
             >
-              <Icon className="wv-world-kind" name={w.kind === 'image' ? 'map' : 'public'} size={16} />
-              {w.display_name}
+              <Icon name={world.kind === 'image' ? 'map' : 'public'} size={16} />
+              {world.display_name}
             </button>
           ))}
         </div>
-      </div>
+      </header>
 
-      {overlay && (
-        <div className="wv-stage-wrap">
-          <div
-            className="wv-stage"
-            style={{ aspectRatio: String(aspect) }}
-            data-kind={world?.kind}
-          >
-            {backdrop ? (
-              <img className="wv-backdrop-img" src={backdrop} alt={`${world?.display_name ?? ''} backdrop`} />
-            ) : (
-              <div className="wv-backdrop-note">
-                {isImage
-                  ? `backdrop: ${world?.backdrop ?? '(none set)'} — no image asset on disk yet`
-                  : 'geo world — equirectangular projection (map tiles are a later phase)'}
-              </div>
-            )}
+      {error && <div className="wv-error-banner" onClick={() => setError(null)}>{error}</div>}
+      {overlay ? (
+        <WorldStage
+          overlay={overlay}
+          backdrop={backdrop}
+          showGrid={showGrid}
+          onOpenNote={openEditor}
+          onOpenCategory={openCategory}
+        />
+      ) : (
+        <div className="wv-state">Loading world…</div>
+      )}
 
-            {overlay.regions.map((r, i) => (
-              <RegionMark key={`r-${i}`} region={r} onOpen={() => openCategory(r.category)} />
-            ))}
-
-            {overlay.pins.map((p, i) => (
-              <PinMark
-                key={`p-${i}`}
-                pin={p}
-                onOpen={() =>
-                  p.target.kind === 'note'
-                    ? openEditor(p.target.id)
-                    : openCategory(p.target.name)
-                }
-              />
-            ))}
-          </div>
-
-          <div className="wv-legend">
-            {overlay.pins.length} pin{overlay.pins.length !== 1 ? 's' : ''} ·{' '}
-            {overlay.regions.length} region{overlay.regions.length !== 1 ? 's' : ''}
-            {overlay.pins.length === 0 && overlay.regions.length === 0 && (
-              <span className="wv-empty"> — tag notes with a <code>loc:</code> token to place them here.</span>
-            )}
-          </div>
-        </div>
+      {showCreate && (
+        <CreateWorldDialog
+          onCancel={() => setShowCreate(false)}
+          onCreated={async (world) => {
+            setShowCreate(false);
+            await reloadWorlds(world.id);
+          }}
+        />
       )}
     </div>
   );
 }
 
-function PinMark({ pin, onOpen }: { pin: Pin; onOpen: () => void }) {
-  const { x, y } = project(pin.point);
-  const label = pin.target.kind === 'note' ? pin.target.title : `#${pin.target.name}`;
-  return (
-    <button
-      className={`wv-pin wv-pin-${pin.target.kind}`}
-      style={{ left: pct(x), top: pct(y) }}
-      onClick={onOpen}
-      title={label}
-    >
-      <span className="wv-pin-dot" />
-      <span className="wv-pin-label">{label || '(untitled)'}</span>
-    </button>
-  );
-}
+function CreateWorldDialog({ onCancel, onCreated }: {
+  onCancel: () => void;
+  onCreated: (world: World) => Promise<void>;
+}) {
+  const [displayName, setDisplayName] = useState('');
+  const [images, setImages] = useState<NoteDto[]>([]);
+  const [selectedAssetUuid, setSelectedAssetUuid] = useState('');
+  const [preview, setPreview] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-function RegionMark({ region, onOpen }: { region: OverlayRegion; onOpen: () => void }) {
-  const r = region.region;
-  if (r.shape === 'bounding_box') {
-    return (
-      <button
-        className="wv-region"
-        style={{ left: pct(r.x), top: pct(r.y), width: pct(r.width), height: pct(r.height) }}
-        onClick={onOpen}
-        title={`#${region.category}`}
-      >
-        <span className="wv-region-label">#{region.category}</span>
-      </button>
-    );
-  }
-  // SVG-element and polygon regions have no drawable box here (the SVG/raster geometry lives in the
-  // backdrop); anchor a clickable marker at the category's anchor point instead.
-  const { x, y } = project(region.anchor);
+  const reloadImages = useCallback(async () => {
+    const notes = await api.listNotes();
+    setImages(notes.filter((note) => (note.type === 'picture' || note.type === 'drawing') && note.asset));
+  }, []);
+
+  useEffect(() => {
+    // Initial asynchronous load for the dialog.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    reloadImages().catch((caught) => setError(String(caught)));
+  }, [reloadImages]);
+
+  const selectedImage = useMemo(
+    () => images.find((image) => image.asset?.uuid === selectedAssetUuid),
+    [images, selectedAssetUuid],
+  );
+
+  useEffect(() => {
+    // Avoid showing the previously selected asset while the next preview loads.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPreview(null);
+    if (!selectedAssetUuid) return;
+    api.assetData(selectedAssetUuid).then(setPreview).catch((caught) => setError(String(caught)));
+  }, [selectedAssetUuid]);
+
+  const importImage = async () => {
+    const selected = await openDialog({ multiple: false, title: 'Choose world backdrop', filters: IMAGE_FILTER });
+    if (!selected || typeof selected !== 'string') return;
+    setBusy(true);
+    try {
+      const note = await api.importImageObject(selected);
+      await reloadImages();
+      setSelectedAssetUuid(note.asset?.uuid ?? '');
+      if (!displayName.trim()) setDisplayName(note.title);
+    } catch (caught) {
+      setError(String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const create = async () => {
+    if (!displayName.trim() || !selectedAssetUuid) return;
+    setBusy(true);
+    try {
+      const world = await api.createImageWorld({
+        display_name: displayName.trim(),
+        backdrop_asset_uuid: selectedAssetUuid,
+      });
+      await onCreated(world);
+    } catch (caught) {
+      setError(String(caught));
+      setBusy(false);
+    }
+  };
+
   return (
-    <button
-      className="wv-region wv-region-marker"
-      style={{ left: pct(x), top: pct(y) }}
-      onClick={onOpen}
-      title={`#${region.category} (${r.shape === 'svg_element' ? r.element_id : 'polygon'})`}
-    >
-      <span className="wv-region-label">#{region.category}</span>
-    </button>
+    <div className="wv-dialog-backdrop">
+      <section className="wv-dialog" role="dialog" aria-modal="true" aria-labelledby="wv-create-title">
+        <div className="wv-dialog-heading">
+          <h3 id="wv-create-title">Create image world</h3>
+          <button onClick={onCancel} aria-label="Close">×</button>
+        </div>
+        {error && <div className="wv-error-banner">{error}</div>}
+        <label>
+          Display name
+          <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoFocus />
+        </label>
+        <label>
+          Backdrop image
+          <select value={selectedAssetUuid} onChange={(event) => setSelectedAssetUuid(event.target.value)}>
+            <option value="">Choose a Picture or Drawing…</option>
+            {images.map((image) => (
+              <option key={image.id} value={image.asset?.uuid}>{image.title || image.asset?.original_filename}</option>
+            ))}
+          </select>
+        </label>
+        <button className="wv-import-button" onClick={importImage} disabled={busy}>
+          Import a new image…
+        </button>
+        {selectedImage?.asset && (
+          <div className="wv-create-preview">
+            {preview && <img src={preview} alt="" />}
+            <span>{selectedImage.asset.intrinsic_dimensions[0]} × {selectedImage.asset.intrinsic_dimensions[1]}</span>
+          </div>
+        )}
+        <div className="wv-dialog-actions">
+          <button onClick={onCancel}>Cancel</button>
+          <button className="wv-create-button" onClick={create} disabled={busy || !displayName.trim() || !selectedAssetUuid}>
+            {busy ? 'Working…' : 'Create world'}
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }

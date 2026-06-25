@@ -18,7 +18,7 @@ pub use metadata::{
     Authorship, DateMetadata, FlexDate, ForkInfo, Kanban, Lifecycle, LockMode, Metadata,
     PackMembership,
 };
-pub use note::{Note, SummaryWarning};
+pub use note::{AssetMetadata, Note, SummaryWarning};
 pub use object_type::ObjectType;
 pub use prior::{PriorEdge, PriorKind, PriorRef};
 pub use style_card::StyleCard;

@@ -170,6 +170,7 @@ export function Editor({ noteId }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [noteActivity, setNoteActivity] = useState<NoteSyncActivity | null>(null);
+  const [imageData, setImageData] = useState<string | null>(null);
 
   useEffect(() => {
     setNote(null);
@@ -198,6 +199,14 @@ export function Editor({ noteId }: Props) {
     setNoteActivity(null);
     api.noteSyncActivity(noteId).then(setNoteActivity).catch(() => {});
   }, [noteId]);
+
+  useEffect(() => {
+    // Reset stale preview immediately while the replacement asset loads.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setImageData(null);
+    if (!note?.asset) return;
+    api.assetData(note.asset.uuid).then(setImageData).catch((e) => setError(String(e)));
+  }, [note?.asset]);
 
   const markDirty = useCallback(() => {
     setDirty(true);
@@ -402,6 +411,7 @@ export function Editor({ noteId }: Props) {
   }
 
   const isTable = note.type === 'table';
+  const isImageObject = note.type === 'picture' || note.type === 'drawing';
   const colCount = rows[0]?.length ?? 0;
   const rawToggleLabel = rawMode ? 'Rich text' : (isTable ? 'CSV' : 'Raw');
   const rawToggleTitle = rawMode
@@ -476,13 +486,41 @@ export function Editor({ noteId }: Props) {
 
       {/* ── Body / Data area ── */}
       <div className="editor-body-header">
-        <span className="editor-body-label">{isTable ? 'Data' : 'Body'}</span>
-        <button className="editor-raw-toggle" onClick={toggleRaw} title={rawToggleTitle}>
-          {rawToggleLabel}
-        </button>
+        <span className="editor-body-label">{isTable ? 'Data' : (isImageObject ? 'Description' : 'Body')}</span>
+        {!isImageObject && (
+          <button className="editor-raw-toggle" onClick={toggleRaw} title={rawToggleTitle}>
+            {rawToggleLabel}
+          </button>
+        )}
       </div>
 
-      {isTable && !rawMode ? (
+      {isImageObject ? (
+        <div className="editor-image-object">
+          <div className="editor-image-preview">
+            {imageData ? (
+              <img src={imageData} alt={title || note.asset?.original_filename || 'Imported image'} />
+            ) : (
+              <div className="editor-image-missing">Image asset is missing.</div>
+            )}
+          </div>
+          {note.asset && (
+            <div className="editor-image-facts">
+              {note.asset.media_type} · {note.asset.intrinsic_dimensions[0]} × {note.asset.intrinsic_dimensions[1]} · {note.asset.original_filename}
+            </div>
+          )}
+          <textarea
+            className="editor-image-description"
+            value={body}
+            onChange={(event) => {
+              const value = event.target.value;
+              setBody(value);
+              getCurrentBody.current = () => value;
+              markDirty();
+            }}
+            placeholder="Caption, provenance, or description…"
+          />
+        </div>
+      ) : isTable && !rawMode ? (
         // Table: spreadsheet grid
         <div className="table-editor-area">
           <div className="table-editor-controls">

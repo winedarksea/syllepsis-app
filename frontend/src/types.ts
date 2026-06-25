@@ -112,8 +112,16 @@ export interface NoteDto {
   categories: string[];
   prior?: PriorEdge;
   location?: string;
+  asset?: AssetMetadata;
   sorted: boolean;
   metadata: Metadata;
+}
+
+export interface AssetMetadata {
+  uuid: string;
+  media_type: string;
+  intrinsic_dimensions: [number, number];
+  original_filename: string;
 }
 
 export interface Category {
@@ -139,6 +147,17 @@ export interface World {
   /** Intrinsic backdrop pixel size as [width, height] (image worlds). */
   intrinsic_dimensions?: [number, number];
   tile_source?: string;
+}
+
+export interface CreateImageWorldRequest {
+  display_name: string;
+  backdrop_asset_uuid: string;
+}
+
+export interface WorldDeletionImpact {
+  note_references: number;
+  category_references: number;
+  lookup_references: number;
 }
 
 export type SpatialRegion =

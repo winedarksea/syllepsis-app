@@ -23,6 +23,8 @@ umap-rs = { workspace = true }
 graphops = { workspace = true }
 hdbscan = { workspace = true }
 rand = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+roxmltree = "0.20"
 
 # Heavy native ML dependencies for the real local-model path live behind the `onnx` feature so
 # the default build/test stays fast. `ort` is the ONNX Runtime; `tokenizers` is the Hugging Face

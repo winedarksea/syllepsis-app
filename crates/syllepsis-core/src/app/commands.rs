@@ -257,21 +257,10 @@ pub fn create_category(book: &Book, category: Category) -> CoreResult<()> {
     book.store.write_category(&category)
 }
 
-/// Copy an external file (e.g. an image) into the book's `assets/` directory and return the
-/// book-relative path. Notes reference assets by this relative path (e.g. a markdown
-/// `![](assets/…)` image), so the reference stays valid when the book is moved or synced.
+/// Validate and import an image into the book's tracked `assets/` directory, returning the
+/// book-relative path for an inline Markdown image reference.
 pub fn import_asset(book: &Book, source_path: &str) -> CoreResult<String> {
-    let source = std::path::Path::new(source_path);
-    let ext = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .unwrap_or_else(|| "bin".to_string());
-    let file_name = format!("{}.{}", ulid::Ulid::new(), ext);
-    let assets_dir = book.root.join("assets");
-    std::fs::create_dir_all(&assets_dir)?;
-    std::fs::copy(source, assets_dir.join(&file_name))?;
-    Ok(format!("assets/{file_name}"))
+    Ok(crate::app::image_assets::import_tracked_asset(book, source_path)?.relative_path)
 }
 
 /// Read the CSV companion file for a Table note. Returns an empty 5×3 grid if absent.

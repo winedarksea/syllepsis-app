@@ -1,6 +1,4 @@
 # TODO
-
-# Big Items
 Device storage vs app storage for the app (like Obsidian, able to choose with more permissions for the book)
 
 Need to make a GitHub Actions flow that publishes to syllepsis.org (our domain) a landing page as well as the built installer binaries available for download (likely all hosted on Cloudflare Pages). May also need to build the wasm bundles for the built in plugins.
@@ -13,8 +11,10 @@ Fact-checking as a first-class workflow: Infrastructure exists but no dedicated 
 
 
 No support for images yet.
-Worlds needs support for creating new worlds.
-Earth map should maybe get a very simple placeholder basemap using an Equal Earth or orthographic projection or similar SVG based (rather than basemap tile based) projection. The goal is being as detailed as possible while still being very lightweight.
+Worlds page needs support for creating new worlds.
+Earth map should maybe get a starter basemap using an Equal Earth or orthographic projection or similar SVG based (rather than basemap tile based) projection. The goal is being as detailed as possible while still being very lightweight.
+If reasonable, our plan was to use something like a 1:10 million scale map, with Rust handling the heavier math with the `georust` library of crates, and if necessary d3-geo or react-simple-maps for frontend
+Use case examples: a user might have a map of every place they've visited around the world, so country level markers. A user might plan a roadtrip across the US, and then we need a nice zoom in of the continent level North America to see that. A high quality continent level view (ie all of Western Europe in the view field) is the highest precision we need to support, and smaller just gets too heavy.
 
 Existing pack notes do not preserve prior. They should.
 

@@ -135,6 +135,44 @@ pub fn import_asset(state: State<AppState>, source_path: String) -> Result<Strin
     })
 }
 
+/// Import a raster image or SVG as a first-class Picture/Drawing note.
+#[tauri::command]
+pub fn import_image_object(
+    state: State<AppState>,
+    source_path: String,
+    title: Option<String>,
+) -> Result<NoteDto, String> {
+    with_book!(state, book, {
+        let imported = syllepsis_core::app::image_assets::import_image_object(
+            book,
+            &source_path,
+            title.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+        state.invalidate_graph_corpus();
+        Ok(imported)
+    })
+}
+
+/// Serve a tracked image asset as a self-contained data URL.
+#[tauri::command]
+pub fn asset_data(state: State<AppState>, asset_uuid: String) -> Result<Option<String>, String> {
+    with_book!(state, book, {
+        let Some((path, media_type)) =
+            syllepsis_core::app::image_assets::asset_file(book, &asset_uuid)
+                .map_err(|e| e.to_string())?
+        else {
+            return Ok(None);
+        };
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        use base64::Engine as _;
+        Ok(Some(format!(
+            "data:{media_type};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )))
+    })
+}
+
 /// Read the CSV companion file for a Table note. Returns an empty 5×3 grid if absent.
 #[tauri::command]
 pub fn read_table_data(

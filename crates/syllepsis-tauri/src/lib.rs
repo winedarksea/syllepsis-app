@@ -94,6 +94,8 @@ pub fn run() {
             export_markdown_to_file,
             book_stats,
             import_asset,
+            import_image_object,
+            asset_data,
             read_table_data,
             save_table_data,
             // categories
@@ -148,7 +150,8 @@ pub fn run() {
             delete_current_book,
             // spatial worlds (Phase 5)
             list_worlds,
-            create_world,
+            create_image_world,
+            world_deletion_impact,
             delete_world,
             world_overlay,
             world_backdrop,

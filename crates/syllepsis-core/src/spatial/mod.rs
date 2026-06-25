@@ -17,11 +17,13 @@
 pub mod location;
 pub mod lookup;
 pub mod overlay;
+pub mod projection;
 pub mod registry;
 pub mod resolve;
 
 pub use location::{parse_location, LocationValue, ParsedLocation, ResolvedLocation, WorldPoint};
 pub use lookup::{LocationLookup, LookupEntry};
 pub use overlay::{build_overlay, Overlay, OverlayRegion, Pin, SpatialTarget};
+pub use projection::{equal_earth_forward, equal_earth_inverse, equal_earth_normalized};
 pub use registry::WorldRegistry;
 pub use resolve::{resolve, resolve_token};

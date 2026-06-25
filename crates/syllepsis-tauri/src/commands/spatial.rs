@@ -4,6 +4,7 @@
 use tauri::State;
 
 use syllepsis_core::app::spatial as app;
+use syllepsis_core::app::spatial::{CreateImageWorldRequest, WorldDeletionImpact};
 use syllepsis_core::model::World;
 use syllepsis_core::spatial::{LookupEntry, Overlay, ResolvedLocation};
 
@@ -27,11 +28,23 @@ pub fn list_worlds(state: State<AppState>) -> Result<Vec<World>, String> {
     })
 }
 
-/// Create or overwrite a world (the built-in `earth` cannot be redefined).
 #[tauri::command]
-pub fn create_world(state: State<AppState>, world: World) -> Result<(), String> {
+pub fn create_image_world(
+    state: State<AppState>,
+    request: CreateImageWorldRequest,
+) -> Result<World, String> {
     with_book!(state, book, {
-        app::create_world(book, world).map_err(|e| e.to_string())
+        app::create_image_world(book, request).map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
+pub fn world_deletion_impact(
+    state: State<AppState>,
+    id: String,
+) -> Result<WorldDeletionImpact, String> {
+    with_book!(state, book, {
+        app::world_deletion_impact(book, &id).map_err(|e| e.to_string())
     })
 }
 

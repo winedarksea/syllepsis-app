@@ -38,8 +38,14 @@ A visual "star chart" style display. Zooming into a cluster reveals a "solar sys
 ### Spatial / Overlay View
 Renders an [image-backed world](spatial-worlds.md#worlds) — a floorplan, a drawing, or any imported image — with an overlay of pins and clickable regions for notes and categories placed in it. Clicking a region (e.g. the `#kitchen` area of a floorplan) opens the linked notes or runs the category's [filtered sorted view](core-concepts.md#filtered-sorted-view). This is the primary lens for **mind palaces** and floorplan-tagged house books. Like the timeline, it is a view over location metadata, not a data type. Available in the first pass for image-backed worlds.
 
-### Map View (future)
-A future view that loads map tiles for **geo worlds** (Earth and user-defined planets) and shows every geo-tagged note as a pin; clicking a pin opens the note. Deferred to a later pass — it needs tile infrastructure, whereas the Spatial/Overlay view above does not. See [spatial-worlds.md](spatial-worlds.md#map-view-future).
+The same view renders Earth with a bundled Equal Earth country map. Earth and image worlds share
+wheel zoom, drag pan, fit/reset, stable-size pins, cursor coordinates, and an optional numbered
+grid. The header creates image worlds from existing or newly imported Picture/Drawing objects.
+
+### Richer geographic maps (future)
+Earth already supports offline country/world/continent views without tiles. Future work may add
+optional projections or more physical/cultural layers, but street-level tile navigation remains
+outside the intended precision. See [spatial-worlds.md](spatial-worlds.md#earth-map).
 
 ### Timeline View (future)
 A future view that lays notes out along their date metadata. It is a UI view, not a data type — it renders the dates already stored on notes (see [object-types.md](object-types.md#date-metadata)).

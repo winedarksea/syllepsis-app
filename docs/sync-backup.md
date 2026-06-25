@@ -81,6 +81,9 @@ Known POC limitations: concurrent *frontmatter* (metadata) edits last-writer-win
 
 - **Geometry** (the SVG/drawing itself) is synced as a **file with a UUID sidecar**, like images — not in the live CRDT document. Because it is text, it still diffs cleanly at Git commit boundaries.
 - **Overlay anchors** (which note/category links to which point or region, and the coordinates) live in note metadata and the worlds registry, which **are** CRDT-tracked. This keeps the merge-sensitive, small, structured data in the CRDT layer and the heavy geometry in file sync.
+- **Picture/Drawing metadata** is canonical in the object's Markdown note. The unchanged raster or
+  SVG payload and adjacent `.uuid` sidecar are ordinary file-synced assets, so changing a caption
+  never rewrites the user's image binary.
 
 Open door: because app-authored drawings have a structure the app controls, simple in-app drawings *could* later be CRDT-tracked; imported third-party SVGs stay file-synced. See [open-questions.md](open-questions.md).
 

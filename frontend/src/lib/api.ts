@@ -14,7 +14,7 @@ import type {
   GitStatusDto, GitCommandReport, SyncActivityEvent, OperationalActivitySummary, NoteSyncActivity,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, CloudSyncConnectStart, CloudBookSummary,
   ManagedCloudReport, DeleteCurrentBookReport,
-  World, Overlay, LookupEntry, ResolvedLocation,
+  World, Overlay, LookupEntry, ResolvedLocation, CreateImageWorldRequest, WorldDeletionImpact,
   LockMode, PolicyOverview,
   ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
   PublishReport, GitignoreReport,
@@ -79,6 +79,9 @@ export const api = {
   exportMarkdownToFile: (path: string) => invoke<void>('export_markdown_to_file', { path }),
   bookStats: () => invoke<BookStats>('book_stats'),
   importAsset: (sourcePath: string) => invoke<string>('import_asset', { sourcePath }),
+  importImageObject: (sourcePath: string, title?: string) =>
+    invoke<NoteDto>('import_image_object', { sourcePath, title: title ?? null }),
+  assetData: (assetUuid: string) => invoke<string | null>('asset_data', { assetUuid }),
   readTableData: (noteId: string) => invoke<string[][]>('read_table_data', { noteId }),
   saveTableData: (noteId: string, rows: string[][]) =>
     invoke<void>('save_table_data', { noteId, rows }),
@@ -144,7 +147,10 @@ export const api = {
 
   // Spatial worlds & overlays (Phase 5)
   listWorlds: () => invoke<World[]>('list_worlds'),
-  createWorld: (world: World) => invoke<void>('create_world', { world }),
+  createImageWorld: (request: CreateImageWorldRequest) =>
+    invoke<World>('create_image_world', { request }),
+  worldDeletionImpact: (id: string) =>
+    invoke<WorldDeletionImpact>('world_deletion_impact', { id }),
   deleteWorld: (id: string) => invoke<void>('delete_world', { id }),
   worldOverlay: (worldId: string) => invoke<Overlay>('world_overlay', { worldId }),
   worldBackdrop: (worldId: string) => invoke<string | null>('world_backdrop', { worldId }),

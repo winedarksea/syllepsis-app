@@ -277,6 +277,7 @@ fn new_pack_note(book: &Book, id: NoteId, pack_note: &PackNote) -> Note {
         categories: Vec::new(),
         prior: None,
         location: None,
+        asset: None,
         metadata: Metadata::now(),
     }
 }

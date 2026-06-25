@@ -14,6 +14,18 @@ use crate::model::object_type::ObjectType;
 use crate::model::prior::PriorEdge;
 use serde::{Deserialize, Serialize};
 
+/// Stable reference and display metadata for a Picture or Drawing payload.
+///
+/// The imported file remains untouched. This small record is canonical and travels with the
+/// Markdown note while the UUID sidecar lets the file be renamed or moved independently.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssetMetadata {
+    pub uuid: String,
+    pub media_type: String,
+    pub intrinsic_dimensions: (u32, u32),
+    pub original_filename: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Note {
     pub id: NoteId,
@@ -39,6 +51,9 @@ pub struct Note {
     /// Optional note-level location token pinning the whole note to a coordinate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
+    /// Present for first-class Picture and Drawing objects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<AssetMetadata>,
     pub metadata: Metadata,
 }
 
@@ -74,6 +89,7 @@ impl Note {
             categories: Vec::new(),
             prior: None,
             location: None,
+            asset: None,
             metadata: Metadata::now(),
         }
     }
