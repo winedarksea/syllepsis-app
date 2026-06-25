@@ -4,6 +4,7 @@ use serde::Serialize;
 use tauri::State;
 
 use syllepsis_core::app::search as search_app;
+use syllepsis_core::storage::NoteStore;
 
 use crate::local_ai::{LocalAiDevicePolicy, LocalAiWorkerStatus};
 use crate::state::AppState;
@@ -67,5 +68,15 @@ pub fn note_editing_finished(state: State<AppState>, note_id: String) -> Result<
     let book = guard
         .as_ref()
         .ok_or_else(|| "no book is open".to_string())?;
-    state.local_ai.enqueue_note(book, note_id, true)
+    let id = syllepsis_core::id::NoteId::parse(&note_id).map_err(|error| error.to_string())?;
+    let note = book
+        .store
+        .read_note(&id)
+        .map_err(|error| error.to_string())?;
+    if syllepsis_core::embeddings::note_embedding_is_stale(book, &note)
+        .map_err(|error| error.to_string())?
+    {
+        state.local_ai.enqueue_note(book, note_id, true)?;
+    }
+    Ok(())
 }

@@ -5,6 +5,7 @@ use tauri::State;
 use syllepsis_core::app::{commands as app, dto::NoteDto, plugin as app_plugin};
 use syllepsis_core::model::{ObjectType, PriorEdge};
 use syllepsis_core::sort::RenderItem;
+use syllepsis_core::storage::NoteStore;
 
 use crate::commands::plugins::PluginRuntime;
 use crate::state::AppState;
