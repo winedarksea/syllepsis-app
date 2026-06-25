@@ -102,7 +102,10 @@ export function StatsView() {
   return (
     <div className="stats-root">
       <div className="stats-header">
-        <h2 className="stats-title">Book Statistics</h2>
+        <div className="stats-header-top">
+          <h2 className="stats-title">Book Statistics</h2>
+          <button className="stats-refresh-btn" onClick={load}>Refresh</button>
+        </div>
         <div className="stats-tabs">
           {(Object.keys(TAB_LABELS) as StatsTab[]).map((t) => (
             <button
@@ -114,7 +117,6 @@ export function StatsView() {
             </button>
           ))}
         </div>
-        <button className="stats-refresh-btn" onClick={load}>Refresh</button>
       </div>
 
       {tab === 'overview' && (

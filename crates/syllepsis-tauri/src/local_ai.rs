@@ -37,7 +37,7 @@ impl Default for LocalAiDevicePolicy {
     fn default() -> Self {
         LocalAiDevicePolicy {
             generate_note_embeddings: !cfg!(mobile),
-            pause_note_embeddings_on_battery: true,
+            pause_note_embeddings_on_battery: false,
             note_embedding_debounce_seconds: 60,
             model_idle_unload_seconds: 30,
         }
