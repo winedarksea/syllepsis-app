@@ -22,7 +22,7 @@ Embeddings run locally on the **same ONNX Runtime stack as the bundled LLM** (se
 [`ort`](https://github.com/pykeio/ort) (ONNX Runtime) native on desktop, and `onnxruntime-web` / Transformers.js
 with WebGPU in the PWA. **One ML runtime end-to-end, not two**: Candle was evaluated and dropped — once the LLM
 forced ONNX Runtime in, a second ML stack bought nothing. The embedding model reuses the LLM's shared
-**config-driven model manifest, sha256 first-run download, execution-provider selection, and diagnostics**
+**config-driven model manifest, sha256 verification, execution-provider selection, and diagnostics**
 (embedding models are small relative to the LLM, so this is nearly free). Adding or swapping an embedding model
 is a manifest entry, not a code change.
 
@@ -74,7 +74,10 @@ is runtime-agnostic. (Burn and Candle were evaluated and rejected: the `onnx-com
 export depends on ORT *contrib* ops — `MatMulNBits` int4, `GroupQueryAttention` which carries the
 KV-cache, and `RotaryEmbedding` — that standard-ONNX importers cannot ingest.)
 
-**Packaging.** Neither model is shipped in the installer — they are sha256-verified **first-run downloads**
+**Packaging.** EmbeddingGemma is staged and sha256-verified during release builds, shipped in the
+installer, and copied into the writable shared model cache on first launch. Development builds
+automatically download the same pinned files when the bundled resource is absent. The larger local
+LLM remains a sha256-verified **first-run download**
 to an OS app-data models directory shared across books, driven by config-driven model manifests (id, repo,
 files, quantization, hash, size, required execution providers). The LLM and embedder share the same
 download/cache/verify/EP-selection infrastructure behind the `onnx` Cargo feature. ORT picks the best

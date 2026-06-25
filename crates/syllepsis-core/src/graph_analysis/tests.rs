@@ -105,6 +105,11 @@ fn every_mode_returns_nodes_edges_and_finite_coordinates() {
             .nodes
             .iter()
             .all(|node| node.x.is_finite() && node.y.is_finite()));
+        assert!(result.nodes.iter().all(|node| node.timeline_date.is_none()));
+        assert!(serde_json::to_value(&result.nodes[0])
+            .unwrap()
+            .get("timeline_date")
+            .is_none());
         assert!(!result.semantic_edges.is_empty());
     }
 }
@@ -228,6 +233,25 @@ fn timeline_positions_notes_in_chronological_order() {
     let x_of = |title: &str| result.nodes.iter().find(|n| n.title == title).unwrap().x;
     assert!(x_of("Jan") < x_of("Jun"));
     assert!(x_of("Jun") < x_of("Dec"));
+    assert!(result.nodes.iter().all(|node| {
+        let date = node.timeline_date.as_ref().unwrap();
+        date.source_field == TimelineDateField::Created && !date.used_fallback && !date.date_only
+    }));
+    let january_date = result
+        .nodes
+        .iter()
+        .find(|node| node.title == "Jan")
+        .unwrap()
+        .timeline_date
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        january_date.at_ms,
+        chrono::Utc
+            .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+            .unwrap()
+            .timestamp_millis()
+    );
 }
 
 #[test]
@@ -258,6 +282,24 @@ fn timeline_falls_back_and_parks_undated_notes() {
         })
         .unwrap();
     assert_eq!(with_fallback.timeline.unwrap().undated_count, 0);
+    let fallback_node = with_fallback
+        .nodes
+        .iter()
+        .find(|node| node.title == "Open")
+        .unwrap();
+    let fallback_date = fallback_node.timeline_date.as_ref().unwrap();
+    assert_eq!(fallback_date.source_field, TimelineDateField::Created);
+    assert!(fallback_date.used_fallback);
+    assert!(!fallback_date.date_only);
+    let completed_node = with_fallback
+        .nodes
+        .iter()
+        .find(|node| node.title == "Done")
+        .unwrap();
+    let completed_date = completed_node.timeline_date.as_ref().unwrap();
+    assert_eq!(completed_date.source_field, TimelineDateField::Completed);
+    assert!(!completed_date.used_fallback);
+    assert!(completed_date.date_only);
 
     // Without a fallback the note lacking a completed date is undated.
     let no_fallback = corpus
@@ -275,6 +317,7 @@ fn timeline_falls_back_and_parks_undated_notes() {
         .find(|n| n.title == "Open")
         .unwrap();
     assert!(open_node.no_semantic_signal);
+    assert!(open_node.timeline_date.is_none());
 }
 
 #[test]

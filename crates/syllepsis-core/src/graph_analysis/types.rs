@@ -81,6 +81,16 @@ pub struct GraphAnalysisNode {
     pub cluster_id: Option<usize>,
     pub outlier: bool,
     pub no_semantic_signal: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline_date: Option<GraphTimelineNodeDate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphTimelineNodeDate {
+    pub at_ms: i64,
+    pub source_field: TimelineDateField,
+    pub used_fallback: bool,
+    pub date_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

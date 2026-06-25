@@ -49,8 +49,8 @@ docs/                  design docs + implementation plan
 **Phase 1 core complete and tested** (note model, markdown dialect, file storage, sort/book-render, application command layer).
 
 **Phase 2 & 3 implementation is in place** (core/Tauri/frontend builds pass, `clippy -D warnings` clean):
-shared ONNX Runtime infrastructure (model manifests, sha256-verified first-run download, execution-provider
-selection, session builder) shared by the EmbeddingGemma 300M Q4 embedder (Phase 2) and the Gemma 4 E2B
+shared ONNX Runtime infrastructure (model manifests, sha256-verified bundled/downloaded assets,
+execution-provider selection, session builder) shared by the EmbeddingGemma 300M Q4 embedder (Phase 2) and the Gemma 4 E2B
 local LLM (Phase 3). Canonical note vectors are persisted in synced `_embeddings/` sidecars and projected
 into local SQLite; search degrades to exact + BM25 when query inference is unavailable. Real ONNX inference has gated ignored tests that require
 `SYLLEPSIS_MODEL_CACHE` to point at a populated model cache.

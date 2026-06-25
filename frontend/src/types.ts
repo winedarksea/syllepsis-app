@@ -310,6 +310,14 @@ export interface GraphAnalysisNode {
   cluster_id?: number;
   outlier: boolean;
   no_semantic_signal: boolean;
+  timeline_date?: GraphTimelineNodeDate;
+}
+
+export interface GraphTimelineNodeDate {
+  at_ms: number;
+  source_field: TimelineDateField;
+  used_fallback: boolean;
+  date_only: boolean;
 }
 
 export interface GraphCluster {

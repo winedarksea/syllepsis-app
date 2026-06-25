@@ -29,7 +29,7 @@ fn require_cached(cache: &ModelCache, model_id: &str) {
 
 #[test]
 #[ignore = "requires SYLLEPSIS_MODEL_CACHE with EmbeddingGemma files downloaded"]
-fn qwen3_embedding_onnx_runs_real_inference() {
+fn embeddinggemma_onnx_runs_real_inference() {
     let cache = live_cache();
     require_cached(&cache, EMBEDDINGGEMMA_ID);
     let manifest = builtin(EMBEDDINGGEMMA_ID).unwrap();
@@ -38,8 +38,8 @@ fn qwen3_embedding_onnx_runs_real_inference() {
     let document = embedder.embed("Local-first notes need reliable vector search.");
     let query = embedder.embed_query("vector search for local notes");
 
-    assert_eq!(document.len(), manifest.hidden_size);
-    assert_eq!(query.len(), manifest.hidden_size);
+    assert_eq!(document.len(), 256);
+    assert_eq!(query.len(), 256);
     assert!(document.magnitude() > 0.99);
     assert!(query.magnitude() > 0.99);
     assert!(document.cosine_similarity(&query).is_finite());

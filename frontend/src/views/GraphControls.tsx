@@ -188,6 +188,19 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
               Cluster
             </button>
           </div>
+          <label className="gv-timeline-switch-control">
+            <span>Prior relationships</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={store.showTimelinePriorRelationships}
+              className={`gv-switch${store.showTimelinePriorRelationships ? ' on' : ''}`}
+              onClick={() =>
+                store.setShowTimelinePriorRelationships(!store.showTimelinePriorRelationships)}
+            >
+              <span className="gv-switch-knob" />
+            </button>
+          </label>
         </div>
       ) : (
         <div className="gv-toolbar-secondary">

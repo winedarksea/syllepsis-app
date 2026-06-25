@@ -122,6 +122,8 @@ interface AppStore {
   setTimelineGranularity: (granularity: TimelineGranularity) => void;
   timelineColorBy: TimelineColorBy;
   setTimelineColorBy: (colorBy: TimelineColorBy) => void;
+  showTimelinePriorRelationships: boolean;
+  setShowTimelinePriorRelationships: (show: boolean) => void;
 
   // Fenced-code languages claimed by code-block-renderer plugins (lower-cased). Loaded once at
   // startup; the editor maps these languages to a rendered PluginBlockNode instead of plain code.
@@ -234,6 +236,9 @@ export const useStore = create<AppStore>((set) => ({
   setTimelineGranularity: (timelineGranularity) => set({ timelineGranularity }),
   timelineColorBy: 'category',
   setTimelineColorBy: (timelineColorBy) => set({ timelineColorBy }),
+  showTimelinePriorRelationships: false,
+  setShowTimelinePriorRelationships: (showTimelinePriorRelationships) =>
+    set({ showTimelinePriorRelationships }),
 
   pluginRenderLanguages: [],
   setPluginRenderLanguages: (pluginRenderLanguages) => set({ pluginRenderLanguages }),

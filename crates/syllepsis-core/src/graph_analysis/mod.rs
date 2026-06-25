@@ -23,7 +23,8 @@ use layout::{
 pub use types::{
     GraphAnalysisNode, GraphAnalysisRequest, GraphAnalysisResult, GraphAnalysisSummary,
     GraphCluster, GraphMode, GraphPriorEdge, GraphProviderMetadata, GraphSemanticEdge,
-    GraphTimelineMeta, GraphTimelineTick, TimelineColorBy, TimelineDateField, TimelineGranularity,
+    GraphTimelineMeta, GraphTimelineNodeDate, GraphTimelineTick, TimelineColorBy,
+    TimelineDateField, TimelineGranularity,
 };
 
 const MAX_SEMANTIC_NEIGHBORS: usize = 30;
@@ -226,6 +227,7 @@ impl SemanticGraphCorpus {
                 cluster_id: full_labels[index],
                 outlier: full_outliers[index],
                 no_semantic_signal: self.centroids[index].magnitude() <= f32::EPSILON,
+                timeline_date: None,
             })
             .collect();
         let outlier_count = full_outliers.iter().filter(|outlier| **outlier).count();
@@ -273,6 +275,7 @@ impl SemanticGraphCorpus {
                 cluster_id: labels[index],
                 outlier: outliers[index],
                 no_semantic_signal: self.centroids[index].magnitude() <= f32::EPSILON,
+                timeline_date: None,
             })
             .collect();
         let semantic_edges =
@@ -303,16 +306,14 @@ impl SemanticGraphCorpus {
     /// so it is dispatched before the embedding pipeline in `analyze`.
     fn timeline_analysis(&self, request: &GraphAnalysisRequest) -> GraphAnalysisResult {
         let note_count = self.notes.len();
-        let resolved_ms: Vec<Option<i64>> = self
+        let resolved_dates: Vec<Option<GraphTimelineNodeDate>> = self
             .notes
             .iter()
-            .map(|note| {
-                resolve_note_ms(note, request.timeline_primary_date).or_else(|| {
-                    request
-                        .timeline_fallback_date
-                        .and_then(|field| resolve_note_ms(note, field))
-                })
-            })
+            .map(|note| resolve_timeline_date(note, request))
+            .collect();
+        let resolved_ms: Vec<Option<i64>> = resolved_dates
+            .iter()
+            .map(|resolved| resolved.as_ref().map(|date| date.at_ms))
             .collect();
         let undated_count = resolved_ms.iter().filter(|ms| ms.is_none()).count();
         let dated: Vec<i64> = resolved_ms.iter().filter_map(|ms| *ms).collect();
@@ -458,6 +459,7 @@ impl SemanticGraphCorpus {
                 outlier: false,
                 // Reuse the "no signal" flag/styling to mark notes parked in the undated lane.
                 no_semantic_signal: resolved_ms[index].is_none(),
+                timeline_date: resolved_dates[index].clone(),
             })
             .collect();
 
@@ -741,6 +743,35 @@ fn resolve_note_ms(note: &Note, field: TimelineDateField) -> Option<i64> {
         TimelineDateField::Scheduled => flex_date_ms(dates.scheduled.as_ref()),
         TimelineDateField::Completed => flex_date_ms(dates.completed.as_ref()),
     }
+}
+
+fn resolve_timeline_date(
+    note: &Note,
+    request: &GraphAnalysisRequest,
+) -> Option<GraphTimelineNodeDate> {
+    if let Some(at_ms) = resolve_note_ms(note, request.timeline_primary_date) {
+        return Some(GraphTimelineNodeDate {
+            at_ms,
+            source_field: request.timeline_primary_date,
+            used_fallback: false,
+            date_only: is_date_only_field(request.timeline_primary_date),
+        });
+    }
+    let source_field = request.timeline_fallback_date?;
+    let at_ms = resolve_note_ms(note, source_field)?;
+    Some(GraphTimelineNodeDate {
+        at_ms,
+        source_field,
+        used_fallback: true,
+        date_only: is_date_only_field(source_field),
+    })
+}
+
+fn is_date_only_field(field: TimelineDateField) -> bool {
+    matches!(
+        field,
+        TimelineDateField::Scheduled | TimelineDateField::Completed
+    )
 }
 
 fn flex_date_ms(flex: Option<&crate::model::FlexDate>) -> Option<i64> {

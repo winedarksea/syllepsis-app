@@ -140,6 +140,7 @@ export function GraphView() {
         <TimelineCanvas
           result={result}
           showAllTitles={store.showAllGraphTitles}
+          showPriorRelationships={store.showTimelinePriorRelationships}
           colorBy={store.timelineColorBy}
           loading={loading}
           onOpenNote={store.openEditor}
