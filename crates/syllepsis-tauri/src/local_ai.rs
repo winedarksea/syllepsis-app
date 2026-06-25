@@ -194,6 +194,7 @@ impl LocalAiWorker {
             },
         );
         state.blocked_note_jobs.remove(&key);
+        state.note_block_reason = None;
         self.shared.wake.notify_all();
         Ok(())
     }
@@ -222,6 +223,7 @@ impl LocalAiWorker {
             },
         );
         state.blocked_note_jobs.remove(&key);
+        state.note_block_reason = None;
         self.shared.wake.notify_all();
     }
 
