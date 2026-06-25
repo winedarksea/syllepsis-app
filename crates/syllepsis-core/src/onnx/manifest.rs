@@ -184,13 +184,22 @@ pub fn builtin_manifests() -> Vec<ModelManifest> {
 
 /// Look up a built-in manifest by its [`ModelManifest::id`].
 pub fn builtin(id: &str) -> Option<ModelManifest> {
-    builtin_manifests().into_iter().find(|m| m.id == id)
+    let canonical_id = match id {
+        LEGACY_QWEN3_EMBEDDING_ID => EMBEDDINGGEMMA_ID,
+        _ => id,
+    };
+    builtin_manifests()
+        .into_iter()
+        .find(|manifest| manifest.id == canonical_id)
 }
 
 /// Stable id of the bundled local LLM (Phase 3).
 pub const BUNDLED_LLM_ID: &str = "gemma-4-e2b";
 /// Stable id of the default ONNX embedder (Phase 2).
 pub const EMBEDDINGGEMMA_ID: &str = "embeddinggemma-300m";
+/// Previous default retained only as a read-time alias so an old book never loses search/graph
+/// functionality before its config migration is persisted.
+pub const LEGACY_QWEN3_EMBEDDING_ID: &str = "qwen3-embedding-0.6b";
 
 /// EmbeddingGemma 300M Q4: 768 native dimensions, 2k context, direct sentence-vector output, and
 /// Matryoshka truncation to the configured 256 dimensions.
@@ -334,6 +343,10 @@ mod tests {
         let m = builtin(BUNDLED_LLM_ID).expect("bundled llm present");
         assert_eq!(m.kind, ModelKind::Llm);
         assert_eq!(m.quantization, Quantization::Q4);
+        assert_eq!(
+            builtin(LEGACY_QWEN3_EMBEDDING_ID).unwrap().id,
+            EMBEDDINGGEMMA_ID
+        );
         assert!(builtin("no-such-model").is_none());
     }
 

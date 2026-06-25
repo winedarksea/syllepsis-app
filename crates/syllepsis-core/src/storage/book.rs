@@ -173,7 +173,10 @@ impl Book {
         if should_persist_metadata && layout::book_meta_path(&root).exists() {
             write_book_meta(&root, &metadata)?;
         }
-        let config = read_config(&root)?.unwrap_or_default();
+        let mut config = read_config(&root)?.unwrap_or_default();
+        if config.migrate_legacy_values() {
+            write_config(&root, &config)?;
+        }
         let store = FsNoteStore::open(&root)?;
         let registry = IdRegistry::from_ids(store.note_ids()?.iter());
         Ok(Book {
@@ -340,6 +343,30 @@ mod tests {
         assert_eq!(reopened.metadata.name, "My Book");
         assert_eq!(reopened.config.markdown.dialect_version, "syllepsis_001");
         assert_eq!(reopened.open_warning, None);
+    }
+
+    #[test]
+    fn open_migrates_legacy_qwen_embedding_config_to_embeddinggemma() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = Book::create(dir.path(), "B").unwrap();
+        drop(book);
+
+        let config_path = layout::config_path(dir.path());
+        let legacy_config = std::fs::read_to_string(&config_path).unwrap().replace(
+            "model_id: embeddinggemma-300m",
+            "model_id: qwen3-embedding-0.6b",
+        );
+        std::fs::write(&config_path, legacy_config).unwrap();
+
+        let opened = Book::open(dir.path()).unwrap();
+        assert_eq!(
+            opened.config.embedding.model_id,
+            crate::onnx::manifest::EMBEDDINGGEMMA_ID
+        );
+        assert_eq!(opened.config.embedding.matryoshka_dims, Some(256));
+        let persisted = std::fs::read_to_string(config_path).unwrap();
+        assert!(persisted.contains("model_id: embeddinggemma-300m"));
+        assert!(!persisted.contains("qwen3-embedding-0.6b"));
     }
 
     #[test]

@@ -7,6 +7,36 @@ pub enum GraphMode {
     Pillars,
     Communities,
     Density,
+    Timeline,
+}
+
+/// Which metadata date drives a note's position on the timeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimelineDateField {
+    Created,
+    Updated,
+    Scheduled,
+    Completed,
+}
+
+/// Time-bucket granularity for the timeline. `Auto` is resolved from the date span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimelineGranularity {
+    Auto,
+    Hour,
+    Day,
+    Month,
+    Year,
+}
+
+/// How timeline nodes are colored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimelineColorBy {
+    Category,
+    Cluster,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -17,6 +47,10 @@ pub struct GraphAnalysisRequest {
     pub kmeans_k: usize,
     pub louvain_resolution: f64,
     pub hdbscan_min_cluster_size: usize,
+    pub timeline_primary_date: TimelineDateField,
+    pub timeline_fallback_date: Option<TimelineDateField>,
+    pub timeline_granularity: TimelineGranularity,
+    pub timeline_color_by: TimelineColorBy,
 }
 
 impl Default for GraphAnalysisRequest {
@@ -27,6 +61,10 @@ impl Default for GraphAnalysisRequest {
             kmeans_k: 5,
             louvain_resolution: 1.0,
             hdbscan_min_cluster_size: 5,
+            timeline_primary_date: TimelineDateField::Created,
+            timeline_fallback_date: Some(TimelineDateField::Created),
+            timeline_granularity: TimelineGranularity::Auto,
+            timeline_color_by: TimelineColorBy::Category,
         }
     }
 }
@@ -79,6 +117,32 @@ pub struct GraphAnalysisSummary {
     pub semantic_edge_candidate_count: usize,
 }
 
+/// Axis metadata for the timeline mode. `None` for every other mode.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GraphTimelineMeta {
+    /// Epoch millis of the true axis start (earliest dated note's bucket).
+    pub start_ms: i64,
+    /// Epoch millis of the true axis end (latest dated note's bucket).
+    pub end_ms: i64,
+    /// Normalized x (same scale as `node.x`) of ~the 1st percentile — initial camera left.
+    pub focus_start_x: f32,
+    /// Normalized x of ~the 99th percentile — initial camera right.
+    pub focus_end_x: f32,
+    /// Granularity actually used (`Auto` resolved to a concrete bucket size).
+    pub granularity: TimelineGranularity,
+    pub ticks: Vec<GraphTimelineTick>,
+    /// Notes with no resolvable date, parked in the left "undated" lane.
+    pub undated_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GraphTimelineTick {
+    pub at_ms: i64,
+    pub label: String,
+    /// Normalized x on the same scale as `node.x`.
+    pub x: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphAnalysisResult {
     pub mode: GraphMode,
@@ -88,4 +152,6 @@ pub struct GraphAnalysisResult {
     pub prior_edges: Vec<GraphPriorEdge>,
     pub provider: GraphProviderMetadata,
     pub summary: GraphAnalysisSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline: Option<GraphTimelineMeta>,
 }

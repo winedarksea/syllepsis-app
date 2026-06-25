@@ -15,7 +15,7 @@ import type { ThemePref } from '../lib/store';
 import type {
   BuildInfo, BookConfig, CloudLlmProviderDescriptor,
   PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, ModelRef,
-  EmbeddingConfig, LocalAiDevicePolicy,
+  EmbeddingConfig, LocalAiDevicePolicy, ModelManifest,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, PluginDescriptor,
   DeleteCurrentBookReport,
 } from '../types';
@@ -67,6 +67,7 @@ export function SettingsView({ launchMode = false }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [localAiPolicy, setLocalAiPolicy] = useState<LocalAiDevicePolicy | null>(null);
+  const [embeddingModels, setEmbeddingModels] = useState<ModelManifest[]>([]);
 
   const loadCloud = useCallback(async () => {
     setDescriptors(await api.cloudLlmProviderDescriptors());
@@ -77,6 +78,9 @@ export function SettingsView({ launchMode = false }: Props) {
     loadCloud().catch((e) => setError(String(e)));
     api.listPlugins().then(setPlugins).catch((e) => setError(String(e)));
     api.getLocalAiDevicePolicy().then(setLocalAiPolicy).catch((e) => setError(String(e)));
+    api.builtinModelManifests()
+      .then((manifests) => setEmbeddingModels(manifests.filter((manifest) => manifest.kind === 'embedding')))
+      .catch((e) => setError(String(e)));
   }, [loadCloud]);
 
   useEffect(() => {
@@ -197,6 +201,7 @@ export function SettingsView({ launchMode = false }: Props) {
                     />
                     <EmbeddingPanel
                       value={config.embedding}
+                      models={embeddingModels}
                       onSaved={(embedding) => {
                         setConfig((p) => p && { ...p, embedding });
                         flash('Embedding configuration saved.');
@@ -946,8 +951,9 @@ function DeviceEmbeddingPanel({ value, onSaved, onError }: {
 
 // ── Advanced: embedding model ────────────────────────────────────────────────────
 
-function EmbeddingPanel({ value, onSaved, onError }: {
+function EmbeddingPanel({ value, models, onSaved, onError }: {
   value: EmbeddingConfig;
+  models: ModelManifest[];
   onSaved: (value: EmbeddingConfig) => void;
   onError: (message: string) => void;
 }) {
@@ -962,12 +968,19 @@ function EmbeddingPanel({ value, onSaved, onError }: {
   return (
     <div className="sv-subpanel">
       <h4 className="sv-subhead">Embedding model</h4>
-      <Field label="Model ID">
-        <input
-          className="sv-input"
+      <Field
+        label="Model"
+        hint="Changing models invalidates existing vectors. Only fully supported embedding manifests are listed."
+      >
+        <select
+          className="sv-select"
           value={draft.model_id}
           onChange={(event) => setDraft({ ...draft, model_id: event.target.value })}
-        />
+        >
+          {models.map((model) => (
+            <option key={model.id} value={model.id}>{model.display_name}</option>
+          ))}
+        </select>
       </Field>
       <Field label="MRL dimensions">
         <NumberInput

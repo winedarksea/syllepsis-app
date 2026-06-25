@@ -52,8 +52,8 @@ pub fn try_select_embedder(
                 model.id
             )));
         }
-        return OnnxEmbedder::load(&cache, &model, cfg)
-            .map(|provider| Box::new(provider) as Box<dyn EmbeddingProvider>);
+        OnnxEmbedder::load(&cache, &model, cfg)
+            .map(|provider| Box::new(provider) as Box<dyn EmbeddingProvider>)
     }
     #[cfg(not(feature = "onnx"))]
     {

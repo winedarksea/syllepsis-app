@@ -21,6 +21,15 @@ pub struct Config {
     pub sync: SyncConfig,
 }
 
+impl Config {
+    /// Replace configuration values that were valid in older builds but no longer identify a
+    /// canonical model. Returning whether anything changed lets book loading persist the
+    /// migration once instead of repeatedly interpreting legacy values at every call site.
+    pub fn migrate_legacy_values(&mut self) -> bool {
+        self.embedding.migrate_legacy_model_id()
+    }
+}
+
 /// The markdown dialect identifier written to every file's frontmatter so files read
 /// outside the app can be traced back to their origin format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,6 +136,47 @@ impl Default for EmbeddingConfig {
             model_id: crate::onnx::manifest::EMBEDDINGGEMMA_ID.to_string(),
             matryoshka_dims: Some(256),
         }
+    }
+}
+
+impl EmbeddingConfig {
+    pub fn migrate_legacy_model_id(&mut self) -> bool {
+        if self.model_id == crate::onnx::manifest::LEGACY_QWEN3_EMBEDDING_ID {
+            self.model_id = crate::onnx::manifest::EMBEDDINGGEMMA_ID.to_string();
+            self.dimensions = 256;
+            self.matryoshka_dims = Some(256);
+            return true;
+        }
+        false
+    }
+}
+
+#[cfg(test)]
+mod embedding_config_tests {
+    use super::*;
+
+    #[test]
+    fn default_embedding_model_is_embeddinggemma_at_256_dimensions() {
+        let config = EmbeddingConfig::default();
+        assert_eq!(config.model_id, crate::onnx::manifest::EMBEDDINGGEMMA_ID);
+        assert_eq!(config.dimensions, 256);
+        assert_eq!(config.matryoshka_dims, Some(256));
+    }
+
+    #[test]
+    fn legacy_qwen_model_id_migrates_to_embeddinggemma() {
+        let mut config = EmbeddingConfig {
+            model_id: crate::onnx::manifest::LEGACY_QWEN3_EMBEDDING_ID.to_string(),
+            dimensions: 1_024,
+            matryoshka_dims: Some(1_024),
+            ..EmbeddingConfig::default()
+        };
+
+        assert!(config.migrate_legacy_model_id());
+        assert_eq!(config.model_id, crate::onnx::manifest::EMBEDDINGGEMMA_ID);
+        assert_eq!(config.dimensions, 256);
+        assert_eq!(config.matryoshka_dims, Some(256));
+        assert!(!config.migrate_legacy_model_id());
     }
 }
 

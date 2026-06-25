@@ -4,6 +4,7 @@ import { useStore } from '../lib/store';
 import type { GraphAnalysisRequest, GraphAnalysisResult } from '../types';
 import { GraphCanvas } from './GraphCanvas';
 import { GraphControls } from './GraphControls';
+import { TimelineCanvas } from './TimelineCanvas';
 import { filterSemanticEdges } from './graphGeometry';
 import './GraphView.css';
 
@@ -31,6 +32,10 @@ export function GraphView() {
     kmeans_k: store.graphKmeansK,
     louvain_resolution: store.graphLouvainResolution,
     hdbscan_min_cluster_size: store.graphHdbscanMinClusterSize,
+    timeline_primary_date: store.timelinePrimaryDate,
+    timeline_fallback_date: store.timelineFallbackDate,
+    timeline_granularity: store.timelineGranularity,
+    timeline_color_by: store.timelineColorBy,
   }), [
     store.graphMode,
     store.graphPillarsNeighbors,
@@ -39,6 +44,10 @@ export function GraphView() {
     store.graphKmeansK,
     store.graphLouvainResolution,
     store.graphHdbscanMinClusterSize,
+    store.timelinePrimaryDate,
+    store.timelineFallbackDate,
+    store.timelineGranularity,
+    store.timelineColorBy,
   ]);
   const requestKey = useMemo(() => JSON.stringify(request), [request]);
 
@@ -108,13 +117,23 @@ export function GraphView() {
             </>
           )}
       </div>
-      <GraphCanvas
-        result={result}
-        semanticEdges={visibleSemanticEdges}
-        showAllTitles={store.showAllGraphTitles}
-        loading={loading}
-        onOpenNote={store.openEditor}
-      />
+      {result.mode === 'timeline' ? (
+        <TimelineCanvas
+          result={result}
+          showAllTitles={store.showAllGraphTitles}
+          colorBy={store.timelineColorBy}
+          loading={loading}
+          onOpenNote={store.openEditor}
+        />
+      ) : (
+        <GraphCanvas
+          result={result}
+          semanticEdges={visibleSemanticEdges}
+          showAllTitles={store.showAllGraphTitles}
+          loading={loading}
+          onOpenNote={store.openEditor}
+        />
+      )}
     </div>
   );
 }

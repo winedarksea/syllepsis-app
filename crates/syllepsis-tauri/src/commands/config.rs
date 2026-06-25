@@ -12,6 +12,7 @@ use tauri::State;
 use syllepsis_core::config::{
     CleanupConfig, Config, EmbeddingConfig, LlmConfig, PrivacyConfig, SearchConfig, SyncConfig,
 };
+use syllepsis_core::onnx::{self, ModelKind};
 
 use crate::state::AppState;
 
@@ -59,8 +60,24 @@ pub fn update_llm_config(state: State<AppState>, llm: LlmConfig) -> Result<Confi
 #[tauri::command]
 pub fn update_embedding_config(
     state: State<AppState>,
-    embedding: EmbeddingConfig,
+    mut embedding: EmbeddingConfig,
 ) -> Result<Config, String> {
+    embedding.migrate_legacy_model_id();
+    let manifest = onnx::builtin(&embedding.model_id)
+        .ok_or_else(|| format!("unknown embedding model {}", embedding.model_id))?;
+    if manifest.kind != ModelKind::Embedding {
+        return Err(format!(
+            "model {} is not an embedding model",
+            embedding.model_id
+        ));
+    }
+    let requested_dimensions = embedding.matryoshka_dims.unwrap_or(manifest.hidden_size);
+    if requested_dimensions == 0 || requested_dimensions > manifest.hidden_size {
+        return Err(format!(
+            "embedding dimensions must be between 1 and {}",
+            manifest.hidden_size
+        ));
+    }
     let updated = update_book_config(&state, |config| config.embedding = embedding, false)?;
     state.invalidate_graph_corpus();
     let guard = state.book.lock().unwrap();

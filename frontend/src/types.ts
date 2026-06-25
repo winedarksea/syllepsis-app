@@ -282,7 +282,11 @@ export interface EmbeddingDiagnostics {
   blind_spots: BlindSpot[];
 }
 
-export type GraphMode = 'categories' | 'pillars' | 'communities' | 'density';
+export type GraphMode = 'categories' | 'pillars' | 'communities' | 'density' | 'timeline';
+
+export type TimelineDateField = 'created' | 'updated' | 'scheduled' | 'completed';
+export type TimelineGranularity = 'auto' | 'hour' | 'day' | 'month' | 'year';
+export type TimelineColorBy = 'category' | 'cluster';
 
 export interface GraphAnalysisRequest {
   mode: GraphMode;
@@ -290,6 +294,10 @@ export interface GraphAnalysisRequest {
   kmeans_k: number;
   louvain_resolution: number;
   hdbscan_min_cluster_size: number;
+  timeline_primary_date: TimelineDateField;
+  timeline_fallback_date: TimelineDateField | null;
+  timeline_granularity: TimelineGranularity;
+  timeline_color_by: TimelineColorBy;
 }
 
 export interface GraphAnalysisNode {
@@ -334,6 +342,22 @@ export interface GraphAnalysisSummary {
   semantic_edge_candidate_count: number;
 }
 
+export interface GraphTimelineTick {
+  at_ms: number;
+  label: string;
+  x: number;
+}
+
+export interface GraphTimelineMeta {
+  start_ms: number;
+  end_ms: number;
+  focus_start_x: number;
+  focus_end_x: number;
+  granularity: TimelineGranularity;
+  ticks: GraphTimelineTick[];
+  undated_count: number;
+}
+
 export interface GraphAnalysisResult {
   mode: GraphMode;
   nodes: GraphAnalysisNode[];
@@ -342,6 +366,7 @@ export interface GraphAnalysisResult {
   prior_edges: GraphPriorEdge[];
   provider: GraphProviderMetadata;
   summary: GraphAnalysisSummary;
+  timeline?: GraphTimelineMeta;
 }
 
 // ── LLM (mirrors syllepsis_core::llm and syllepsis_core::app::llm) ──

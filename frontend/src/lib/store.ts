@@ -1,7 +1,11 @@
 // Global app state via Zustand.
 
 import { create } from 'zustand';
-import type { BookInfo, Category, GraphMode } from '../types';
+import type {
+  BookInfo, Category, GraphMode, TimelineColorBy, TimelineDateField, TimelineGranularity,
+} from '../types';
+
+export type ClustersPreset = 'pillars' | 'communities' | 'density';
 import type { Theme } from '../theme/themes';
 import { DEFAULT_THEME_ID, themeById } from '../theme/themes';
 
@@ -104,6 +108,18 @@ interface AppStore {
   setGraphLouvainResolution: (resolution: number) => void;
   graphHdbscanMinClusterSize: number;
   setGraphHdbscanMinClusterSize: (size: number) => void;
+  // Which clustering algorithm the "Clusters" top-level mode resolves to.
+  clustersPreset: ClustersPreset;
+  setClustersPreset: (preset: ClustersPreset) => void;
+  // Timeline mode preferences.
+  timelinePrimaryDate: TimelineDateField;
+  setTimelinePrimaryDate: (field: TimelineDateField) => void;
+  timelineFallbackDate: TimelineDateField | null;
+  setTimelineFallbackDate: (field: TimelineDateField | null) => void;
+  timelineGranularity: TimelineGranularity;
+  setTimelineGranularity: (granularity: TimelineGranularity) => void;
+  timelineColorBy: TimelineColorBy;
+  setTimelineColorBy: (colorBy: TimelineColorBy) => void;
 
   // Fenced-code languages claimed by code-block-renderer plugins (lower-cased). Loaded once at
   // startup; the editor maps these languages to a rendered PluginBlockNode instead of plain code.
@@ -203,6 +219,16 @@ export const useStore = create<AppStore>((set) => ({
   graphHdbscanMinClusterSize: 5,
   setGraphHdbscanMinClusterSize: (graphHdbscanMinClusterSize) =>
     set({ graphHdbscanMinClusterSize }),
+  clustersPreset: 'pillars',
+  setClustersPreset: (clustersPreset) => set({ clustersPreset }),
+  timelinePrimaryDate: 'created',
+  setTimelinePrimaryDate: (timelinePrimaryDate) => set({ timelinePrimaryDate }),
+  timelineFallbackDate: 'created',
+  setTimelineFallbackDate: (timelineFallbackDate) => set({ timelineFallbackDate }),
+  timelineGranularity: 'auto',
+  setTimelineGranularity: (timelineGranularity) => set({ timelineGranularity }),
+  timelineColorBy: 'category',
+  setTimelineColorBy: (timelineColorBy) => set({ timelineColorBy }),
 
   pluginRenderLanguages: [],
   setPluginRenderLanguages: (pluginRenderLanguages) => set({ pluginRenderLanguages }),

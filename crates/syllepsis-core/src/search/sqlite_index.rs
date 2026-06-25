@@ -319,7 +319,7 @@ fn embedding_to_blob(embedding: &Embedding) -> Vec<u8> {
 }
 
 fn embedding_from_blob(bytes: &[u8]) -> CoreResult<Embedding> {
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err(CoreError::parse(
             "SQLite embedding",
             "BLOB length is not divisible by four",

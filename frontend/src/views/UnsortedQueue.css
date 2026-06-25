@@ -50,6 +50,39 @@
   font-weight: 500;
 }
 
+.uq-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.uq-sort-select {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-heading);
+  font-size: var(--font-size-sm);
+}
+
+.uq-sort-dir {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+.uq-sort-dir:hover {
+  color: var(--color-accent);
+  background: var(--color-surface-raised);
+}
+
 .uq-add-btn {
   padding: var(--sp-2) var(--sp-4);
   background: var(--color-accent);

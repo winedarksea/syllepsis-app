@@ -97,6 +97,7 @@ fn every_mode_returns_nodes_edges_and_finite_coordinates() {
                 kmeans_k: 2,
                 louvain_resolution: 1.0,
                 hdbscan_min_cluster_size: 2,
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(result.nodes.len(), 8);
@@ -122,8 +123,190 @@ fn empty_notes_are_marked_as_having_no_semantic_signal() {
 fn request_and_result_shapes_serialize() {
     let request_json = serde_json::to_string(&GraphAnalysisRequest::default()).unwrap();
     assert!(request_json.contains("\"mode\":\"categories\""));
+    assert!(request_json.contains("\"timeline_primary_date\":\"created\""));
 
     let result = empty_result(GraphMode::Density, "hashing-bow");
     let result_json = serde_json::to_string(&result).unwrap();
     assert!(result_json.contains("\"semantic\":false"));
+    // `timeline` is None for non-timeline modes and skipped.
+    assert!(!result_json.contains("\"timeline\""));
+}
+
+fn add_note_created(book: &Book, title: &str, created: chrono::DateTime<chrono::Utc>) -> String {
+    let mut note = book.new_note(ObjectType::Note, title).unwrap();
+    note.categories = vec!["log".into()];
+    note.metadata.dates.created = created;
+    note.metadata.dates.updated = created;
+    book.save_note(&note).unwrap();
+    note.id.to_string()
+}
+
+#[test]
+fn timeline_positions_notes_in_chronological_order() {
+    use chrono::TimeZone;
+    let (_directory, book) = test_book();
+    add_note_created(
+        &book,
+        "Jan",
+        chrono::Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+    );
+    add_note_created(
+        &book,
+        "Jun",
+        chrono::Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap(),
+    );
+    add_note_created(
+        &book,
+        "Dec",
+        chrono::Utc.with_ymd_and_hms(2024, 12, 1, 0, 0, 0).unwrap(),
+    );
+
+    let corpus = SemanticGraphCorpus::build(&book).unwrap();
+    let result = corpus
+        .analyze(&GraphAnalysisRequest {
+            mode: GraphMode::Timeline,
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(result.nodes.len(), 3);
+    assert!(result.semantic_edges.is_empty());
+    let meta = result.timeline.expect("timeline meta present");
+    assert_eq!(meta.undated_count, 0);
+    assert!(!meta.ticks.is_empty());
+    assert!(meta.focus_start_x.is_finite() && meta.focus_end_x.is_finite());
+    assert!(result
+        .nodes
+        .iter()
+        .all(|node| (0.0..=1.0).contains(&node.x) && node.x.is_finite() && node.y.is_finite()));
+    let x_of = |title: &str| result.nodes.iter().find(|n| n.title == title).unwrap().x;
+    assert!(x_of("Jan") < x_of("Jun"));
+    assert!(x_of("Jun") < x_of("Dec"));
+}
+
+#[test]
+fn timeline_falls_back_and_parks_undated_notes() {
+    use chrono::{NaiveDate, TimeZone};
+    let (_directory, book) = test_book();
+
+    let mut done = book.new_note(ObjectType::Note, "Done").unwrap();
+    done.metadata.dates.completed = Some(crate::model::FlexDate {
+        date: Some(NaiveDate::from_ymd_opt(2024, 5, 10).unwrap()),
+        ..Default::default()
+    });
+    book.save_note(&done).unwrap();
+
+    let mut open = book.new_note(ObjectType::Note, "Open").unwrap();
+    open.metadata.dates.created = chrono::Utc.with_ymd_and_hms(2024, 5, 1, 0, 0, 0).unwrap();
+    book.save_note(&open).unwrap();
+
+    let corpus = SemanticGraphCorpus::build(&book).unwrap();
+
+    // With a Created fallback both notes are placed.
+    let with_fallback = corpus
+        .analyze(&GraphAnalysisRequest {
+            mode: GraphMode::Timeline,
+            timeline_primary_date: TimelineDateField::Completed,
+            timeline_fallback_date: Some(TimelineDateField::Created),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(with_fallback.timeline.unwrap().undated_count, 0);
+
+    // Without a fallback the note lacking a completed date is undated.
+    let no_fallback = corpus
+        .analyze(&GraphAnalysisRequest {
+            mode: GraphMode::Timeline,
+            timeline_primary_date: TimelineDateField::Completed,
+            timeline_fallback_date: None,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(no_fallback.timeline.unwrap().undated_count, 1);
+    let open_node = no_fallback
+        .nodes
+        .iter()
+        .find(|n| n.title == "Open")
+        .unwrap();
+    assert!(open_node.no_semantic_signal);
+}
+
+#[test]
+fn timeline_granularity_autoselects_from_span() {
+    assert_eq!(
+        resolve_granularity(TimelineGranularity::Auto, 0, MS_PER_HOUR),
+        TimelineGranularity::Hour
+    );
+    assert_eq!(
+        resolve_granularity(TimelineGranularity::Auto, 0, 10 * MS_PER_DAY),
+        TimelineGranularity::Day
+    );
+    assert_eq!(
+        resolve_granularity(TimelineGranularity::Auto, 0, 200 * MS_PER_DAY),
+        TimelineGranularity::Month
+    );
+    assert_eq!(
+        resolve_granularity(TimelineGranularity::Auto, 0, 4000 * MS_PER_DAY),
+        TimelineGranularity::Year
+    );
+}
+
+#[test]
+fn timeline_buckets_are_calendar_aware() {
+    use chrono::TimeZone;
+    let ms = |y, m, d| {
+        chrono::Utc
+            .with_ymd_and_hms(y, m, d, 0, 0, 0)
+            .unwrap()
+            .timestamp_millis()
+    };
+    let mid_march = chrono::Utc
+        .with_ymd_and_hms(2024, 3, 15, 12, 30, 0)
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(
+        floor_to_bucket(mid_march, TimelineGranularity::Month),
+        ms(2024, 3, 1)
+    );
+    assert_eq!(
+        next_bucket(ms(2024, 3, 1), TimelineGranularity::Month),
+        ms(2024, 4, 1)
+    );
+    assert_eq!(
+        next_bucket(ms(2024, 12, 1), TimelineGranularity::Month),
+        ms(2025, 1, 1)
+    );
+    assert_eq!(
+        floor_to_bucket(ms(2024, 12, 5), TimelineGranularity::Year),
+        ms(2024, 1, 1)
+    );
+    assert_eq!(
+        next_bucket(ms(2024, 1, 1), TimelineGranularity::Year),
+        ms(2025, 1, 1)
+    );
+}
+
+#[test]
+fn timeline_with_no_dated_notes_parks_everyone() {
+    let (_directory, book) = test_book();
+    let mut note = book.new_note(ObjectType::Note, "Floating").unwrap();
+    note.body = "no resolvable date".into();
+    book.save_note(&note).unwrap();
+
+    let corpus = SemanticGraphCorpus::build(&book).unwrap();
+    let result = corpus
+        .analyze(&GraphAnalysisRequest {
+            mode: GraphMode::Timeline,
+            timeline_primary_date: TimelineDateField::Scheduled,
+            timeline_fallback_date: None,
+            ..Default::default()
+        })
+        .unwrap();
+    let meta = result.timeline.unwrap();
+    assert_eq!(meta.undated_count, 1);
+    assert!(meta.ticks.is_empty());
+    assert!(result
+        .nodes
+        .iter()
+        .all(|node| node.x.is_finite() && node.y.is_finite()));
 }

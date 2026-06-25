@@ -330,7 +330,7 @@ enum RuntimeCache {
     },
     Llm {
         key: String,
-        service: LlmService,
+        service: Box<LlmService>,
     },
 }
 
@@ -446,7 +446,7 @@ fn process_llm_job(runtime: &mut RuntimeCache, job: &LlmJob) -> Result<Proposal,
             select_llm_provider(book.models_root(), &book.config.llm).map_err(|e| e.to_string())?;
         *runtime = RuntimeCache::Llm {
             key: key.clone(),
-            service: LlmService::new(provider, book.config.llm.routing.clone()),
+            service: Box::new(LlmService::new(provider, book.config.llm.routing.clone())),
         };
     }
     let RuntimeCache::Llm { service, .. } = runtime else {
@@ -454,7 +454,7 @@ fn process_llm_job(runtime: &mut RuntimeCache, job: &LlmJob) -> Result<Proposal,
     };
     app::llm::generate_proposal_with_service(
         &book,
-        service,
+        service.as_ref(),
         &job.note_id,
         job.task,
         job.model_override.clone(),

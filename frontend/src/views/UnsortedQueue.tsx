@@ -1,13 +1,35 @@
 // Notebox — capture surface showing unsorted notes by default, with an "All notes" toggle.
 // The sidebar badge always reflects the unsorted-only count regardless of the filter.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
-import type { NoteDto } from '../types';
+import type { NoteDto, TimelineDateField } from '../types';
 import './UnsortedQueue.css';
+
+const SORT_FIELDS: { id: TimelineDateField; label: string }[] = [
+  { id: 'created', label: 'Created' },
+  { id: 'updated', label: 'Updated' },
+  { id: 'scheduled', label: 'Scheduled' },
+  { id: 'completed', label: 'Completed' },
+];
+
+// Sort key (epoch ms) for a note on the chosen date field; null when the date is absent.
+function noteSortKey(note: NoteDto, field: TimelineDateField): number | null {
+  const dates = note.metadata.dates;
+  const raw = field === 'created'
+    ? dates.created
+    : field === 'updated'
+      ? dates.updated
+      : field === 'scheduled'
+        ? dates.scheduled?.date
+        : dates.completed?.date;
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? null : parsed;
+}
 
 interface NewNoteFormProps {
   onCreate: (note: NoteDto) => void;
@@ -55,6 +77,8 @@ export function UnsortedQueue() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [sortField, setSortField] = useState<TimelineDateField>('created');
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -85,6 +109,19 @@ export function UnsortedQueue() {
     openEditor(note.id);
   }, [openEditor, setUnsortedCount, notes.length]);
 
+  const sortedNotes = useMemo(() => {
+    const direction = sortDir === 'asc' ? 1 : -1;
+    return [...notes].sort((a, b) => {
+      const ka = noteSortKey(a, sortField);
+      const kb = noteSortKey(b, sortField);
+      // Notes missing the chosen date sort to the end regardless of direction.
+      if (ka === null && kb === null) return 0;
+      if (ka === null) return 1;
+      if (kb === null) return -1;
+      return (ka - kb) * direction;
+    });
+  }, [notes, sortField, sortDir]);
+
   if (loading) return <div className="uq-state">Loading…</div>;
   if (error) return <div className="uq-state uq-error">{error}</div>;
 
@@ -107,6 +144,25 @@ export function UnsortedQueue() {
               All notes
             </button>
           </div>
+          <label className="uq-sort">
+            <span className="uq-sort-label">Sort</span>
+            <select
+              className="uq-sort-select"
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value as TimelineDateField)}
+            >
+              {SORT_FIELDS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+            </select>
+            <button
+              className="uq-sort-dir"
+              type="button"
+              title={sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
+              aria-label={sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
+              onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
+            >
+              <Icon name={sortDir === 'desc' ? 'arrow_downward' : 'arrow_upward'} size={16} />
+            </button>
+          </label>
           <button className="uq-add-btn" onClick={() => setShowForm((s) => !s)}>
             {showForm ? 'Cancel' : '+ New Note'}
           </button>
@@ -128,7 +184,7 @@ export function UnsortedQueue() {
         </div>
       ) : (
         <div className="uq-list">
-          {notes.map((note) => (
+          {sortedNotes.map((note) => (
             <div
               key={note.id}
               className="uq-card selectable"

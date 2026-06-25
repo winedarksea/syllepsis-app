@@ -19,6 +19,7 @@ use algorithms::{
 pub use types::{
     GraphAnalysisNode, GraphAnalysisRequest, GraphAnalysisResult, GraphAnalysisSummary,
     GraphCluster, GraphMode, GraphPriorEdge, GraphProviderMetadata, GraphSemanticEdge,
+    GraphTimelineMeta, GraphTimelineTick, TimelineColorBy, TimelineDateField, TimelineGranularity,
 };
 
 const MAX_SEMANTIC_NEIGHBORS: usize = 30;
@@ -87,6 +88,9 @@ impl SemanticGraphCorpus {
         if self.notes.is_empty() {
             return Ok(empty_result(request.mode, &self.provider_id));
         }
+        if request.mode == GraphMode::Timeline {
+            return Ok(self.timeline_analysis(request));
+        }
         let embedded_vectors: Vec<Embedding> = self
             .embedded_note_indices
             .iter()
@@ -97,7 +101,7 @@ impl SemanticGraphCorpus {
             GraphMode::Pillars => 50,
             GraphMode::Communities => 8,
             GraphMode::Density => 15,
-            GraphMode::Categories => request.umap_neighbors,
+            GraphMode::Categories | GraphMode::Timeline => request.umap_neighbors,
         };
         let requested_neighbors = if request.umap_neighbors == 0 {
             default_neighbors
@@ -140,6 +144,7 @@ impl SemanticGraphCorpus {
                 let outliers = labels.iter().map(Option::is_none).collect();
                 (positions, labels, outliers)
             }
+            GraphMode::Timeline => unreachable!("timeline mode is handled before this match"),
         };
 
         let mut full_positions = vec![(0.0, 0.0); self.notes.len()];
@@ -204,6 +209,7 @@ impl SemanticGraphCorpus {
                 no_signal_count,
                 semantic_edge_candidate_count: semantic_edges.len(),
             },
+            timeline: None,
         })
     }
 
@@ -255,6 +261,245 @@ impl SemanticGraphCorpus {
             labels,
             vec![false; self.embedded_note_indices.len()],
         )
+    }
+
+    /// Lay notes along a horizontal time axis. Needs only dates + categories (no embeddings),
+    /// so it is dispatched before the embedding pipeline in `analyze`.
+    fn timeline_analysis(&self, request: &GraphAnalysisRequest) -> GraphAnalysisResult {
+        let note_count = self.notes.len();
+        let resolved_ms: Vec<Option<i64>> = self
+            .notes
+            .iter()
+            .map(|note| {
+                resolve_note_ms(note, request.timeline_primary_date).or_else(|| {
+                    request
+                        .timeline_fallback_date
+                        .and_then(|field| resolve_note_ms(note, field))
+                })
+            })
+            .collect();
+        let undated_count = resolved_ms.iter().filter(|ms| ms.is_none()).count();
+        let dated: Vec<i64> = resolved_ms.iter().filter_map(|ms| *ms).collect();
+
+        let (labels, clusters) = self.timeline_cluster_labels(request);
+
+        let mut xs = vec![0.0_f32; note_count];
+        let mut ys = vec![0.0_f32; note_count];
+
+        // Reserve a left lane for undated notes only when some exist.
+        let time_x_start: f32 = if undated_count > 0 { 0.10 } else { 0.0 };
+        const TIME_X_END: f32 = 1.0;
+        const LANE_X: f32 = 0.025;
+
+        let timeline_meta = if dated.is_empty() {
+            // Degenerate corpus: nothing has a resolvable date. Stack everyone in the lane.
+            place_stack(&mut xs, &mut ys, LANE_X, (0..note_count).collect());
+            GraphTimelineMeta {
+                start_ms: 0,
+                end_ms: 0,
+                focus_start_x: 0.0,
+                focus_end_x: 1.0,
+                granularity: TimelineGranularity::Day,
+                ticks: Vec::new(),
+                undated_count,
+            }
+        } else {
+            let min_ms = *dated.iter().min().unwrap();
+            let max_ms = *dated.iter().max().unwrap();
+            let granularity = resolve_granularity(request.timeline_granularity, min_ms, max_ms);
+            let start_ms = floor_to_bucket(min_ms, granularity);
+            let max_bucket = floor_to_bucket(max_ms, granularity);
+            let end_ms = next_bucket(max_bucket, granularity);
+            let span = (end_ms - start_ms).max(1) as f32;
+            let map_x = |ms: i64| -> f32 {
+                (time_x_start + (ms - start_ms) as f32 / span * (TIME_X_END - time_x_start))
+                    .clamp(0.0, 1.0)
+            };
+
+            // Group dated notes by bucket so same-bucket notes share an x and stack vertically.
+            let mut buckets: BTreeMap<i64, Vec<usize>> = BTreeMap::new();
+            for (index, ms) in resolved_ms.iter().enumerate() {
+                if let Some(ms) = ms {
+                    buckets
+                        .entry(floor_to_bucket(*ms, granularity))
+                        .or_default()
+                        .push(index);
+                }
+            }
+            for (bucket_start, mut members) in buckets {
+                members.sort_by(|a, b| {
+                    resolved_ms[*a].cmp(&resolved_ms[*b]).then_with(|| {
+                        self.notes[*a]
+                            .id
+                            .to_string()
+                            .cmp(&self.notes[*b].id.to_string())
+                    })
+                });
+                let bucket_center =
+                    bucket_start + (next_bucket(bucket_start, granularity) - bucket_start) / 2;
+                place_stack(&mut xs, &mut ys, map_x(bucket_center), members);
+            }
+
+            // Undated lane stacked at the far left.
+            let undated: Vec<usize> = resolved_ms
+                .iter()
+                .enumerate()
+                .filter_map(|(index, ms)| ms.is_none().then_some(index))
+                .collect();
+            if !undated.is_empty() {
+                place_stack(&mut xs, &mut ys, LANE_X, undated);
+            }
+
+            // Axis ticks at bucket centers, thinned so labels never crowd.
+            let mut boundaries = Vec::new();
+            let mut cursor = start_ms;
+            while cursor <= max_bucket {
+                boundaries.push(cursor);
+                cursor = next_bucket(cursor, granularity);
+            }
+            let stride = (boundaries.len() / 24).max(1);
+            let ticks = boundaries
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| index % stride == 0)
+                .map(|(_, bucket_start)| {
+                    let center =
+                        bucket_start + (next_bucket(*bucket_start, granularity) - bucket_start) / 2;
+                    GraphTimelineTick {
+                        at_ms: *bucket_start,
+                        label: format_tick(*bucket_start, granularity),
+                        x: map_x(center),
+                    }
+                })
+                .collect();
+
+            // Initial camera frames the 1st–99th percentile of dated notes (plus the lane).
+            let mut sorted = dated.clone();
+            sorted.sort_unstable();
+            let percentile = |q: f32| -> i64 {
+                let idx = ((sorted.len() - 1) as f32 * q).round() as usize;
+                sorted[idx]
+            };
+            let raw_lo = map_x(percentile(0.01));
+            let raw_hi = map_x(percentile(0.99));
+            let pad = ((raw_hi - raw_lo) * 0.04).max(0.01);
+            let mut focus_start_x = (raw_lo - pad).max(0.0);
+            let mut focus_end_x = (raw_hi + pad).min(1.0);
+            if focus_end_x - focus_start_x < 0.05 {
+                focus_start_x = 0.0;
+                focus_end_x = 1.0;
+            }
+            if undated_count > 0 {
+                focus_start_x = 0.0; // keep the undated lane in view
+            }
+
+            GraphTimelineMeta {
+                start_ms,
+                end_ms,
+                focus_start_x,
+                focus_end_x,
+                granularity,
+                ticks,
+                undated_count,
+            }
+        };
+
+        let nodes = self
+            .notes
+            .iter()
+            .enumerate()
+            .map(|(index, note)| GraphAnalysisNode {
+                id: note.id.to_string(),
+                title: if note.title.trim().is_empty() {
+                    "(untitled)".into()
+                } else {
+                    note.title.clone()
+                },
+                categories: note.categories.clone(),
+                x: xs[index],
+                y: ys[index],
+                cluster_id: labels[index],
+                outlier: false,
+                // Reuse the "no signal" flag/styling to mark notes parked in the undated lane.
+                no_semantic_signal: resolved_ms[index].is_none(),
+            })
+            .collect();
+
+        GraphAnalysisResult {
+            mode: GraphMode::Timeline,
+            nodes,
+            clusters: clusters.clone(),
+            semantic_edges: Vec::new(),
+            prior_edges: prior_edges(&self.notes),
+            provider: GraphProviderMetadata {
+                id: self.provider_id.clone(),
+                semantic: self.provider_id != "hashing-bow",
+            },
+            summary: GraphAnalysisSummary {
+                note_count,
+                embedded_note_count: self.embedded_note_indices.len(),
+                cluster_count: clusters.len(),
+                outlier_count: 0,
+                no_signal_count: undated_count,
+                semantic_edge_candidate_count: 0,
+            },
+            timeline: Some(timeline_meta),
+        }
+    }
+
+    /// Cluster- id + descriptions for timeline coloring. `Category` indexes the first category;
+    /// `Cluster` reuses k-means over the existing embeddings (falling back to categories when no
+    /// embeddings exist).
+    fn timeline_cluster_labels(
+        &self,
+        request: &GraphAnalysisRequest,
+    ) -> (Vec<Option<usize>>, Vec<GraphCluster>) {
+        let category_labels = || {
+            let mut category_ids: BTreeMap<String, usize> = BTreeMap::new();
+            let labels: Vec<Option<usize>> = self
+                .notes
+                .iter()
+                .map(|note| {
+                    let key = note
+                        .categories
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "uncategorized".into());
+                    let next = category_ids.len();
+                    Some(*category_ids.entry(key).or_insert(next))
+                })
+                .collect();
+            labels
+        };
+
+        let labels = match request.timeline_color_by {
+            TimelineColorBy::Category => category_labels(),
+            TimelineColorBy::Cluster if !self.embedded_note_indices.is_empty() => {
+                let embedded_vectors: Vec<Embedding> = self
+                    .embedded_note_indices
+                    .iter()
+                    .map(|index| self.centroids[*index].clone())
+                    .collect();
+                let k = request
+                    .kmeans_k
+                    .clamp(2, 12)
+                    .min(embedded_vectors.len().max(1));
+                let embedded_labels = deterministic_kmeans(&embedded_vectors, k);
+                let mut labels = vec![None; self.notes.len()];
+                for (embedded_index, note_index) in self.embedded_note_indices.iter().enumerate() {
+                    labels[*note_index] = Some(embedded_labels[embedded_index]);
+                }
+                labels
+            }
+            TimelineColorBy::Cluster => category_labels(),
+        };
+        let clusters = cluster_descriptions(
+            GraphMode::Timeline,
+            &self.notes,
+            &labels,
+            &self.category_display_names,
+        );
+        (labels, clusters)
     }
 }
 
@@ -414,7 +659,7 @@ fn cluster_descriptions(
                 })
                 .collect();
             let fallback = match mode {
-                GraphMode::Categories => "Category",
+                GraphMode::Categories | GraphMode::Timeline => "Category",
                 GraphMode::Pillars => "Pillar",
                 GraphMode::Communities => "Community",
                 GraphMode::Density => "Dense region",
@@ -446,6 +691,134 @@ fn place_no_signal_notes(
     }
 }
 
+const MS_PER_HOUR: i64 = 3_600_000;
+const MS_PER_DAY: i64 = 86_400_000;
+
+/// Resolve a note's timestamp for the chosen date field. `created`/`updated` are always present;
+/// `scheduled`/`completed` resolve from the absolute `FlexDate.date` only (relative dates are a
+/// follow-up — they need anchor-note lookup — and count as undated for now).
+fn resolve_note_ms(note: &Note, field: TimelineDateField) -> Option<i64> {
+    let dates = &note.metadata.dates;
+    match field {
+        TimelineDateField::Created => Some(dates.created.timestamp_millis()),
+        TimelineDateField::Updated => Some(dates.updated.timestamp_millis()),
+        TimelineDateField::Scheduled => flex_date_ms(dates.scheduled.as_ref()),
+        TimelineDateField::Completed => flex_date_ms(dates.completed.as_ref()),
+    }
+}
+
+fn flex_date_ms(flex: Option<&crate::model::FlexDate>) -> Option<i64> {
+    use chrono::TimeZone;
+    let date = flex?.date?;
+    let naive = date.and_hms_opt(0, 0, 0)?;
+    Some(chrono::Utc.from_utc_datetime(&naive).timestamp_millis())
+}
+
+/// Stack a set of notes in a single vertical column at `x`, compressing the row step so even a
+/// tall column stays within the canvas.
+fn place_stack(xs: &mut [f32], ys: &mut [f32], x: f32, members: Vec<usize>) {
+    const Y_TOP: f32 = 0.08;
+    const Y_BOTTOM: f32 = 0.95;
+    const Y_STEP_MAX: f32 = 0.045;
+    let step = if members.len() <= 1 {
+        0.0
+    } else {
+        ((Y_BOTTOM - Y_TOP) / (members.len() as f32 - 1.0)).min(Y_STEP_MAX)
+    };
+    for (offset, index) in members.into_iter().enumerate() {
+        xs[index] = x;
+        ys[index] = Y_TOP + offset as f32 * step;
+    }
+}
+
+fn resolve_granularity(
+    requested: TimelineGranularity,
+    min_ms: i64,
+    max_ms: i64,
+) -> TimelineGranularity {
+    match requested {
+        TimelineGranularity::Auto => {
+            let span = max_ms - min_ms;
+            if span < 2 * MS_PER_DAY {
+                TimelineGranularity::Hour
+            } else if span < 90 * MS_PER_DAY {
+                TimelineGranularity::Day
+            } else if span < 5 * 365 * MS_PER_DAY {
+                TimelineGranularity::Month
+            } else {
+                TimelineGranularity::Year
+            }
+        }
+        concrete => concrete,
+    }
+}
+
+/// Floor a timestamp to the start of its bucket (UTC).
+fn floor_to_bucket(ms: i64, granularity: TimelineGranularity) -> i64 {
+    use chrono::{Datelike, TimeZone};
+    match granularity {
+        TimelineGranularity::Hour => ms - ms.rem_euclid(MS_PER_HOUR),
+        TimelineGranularity::Day => ms - ms.rem_euclid(MS_PER_DAY),
+        TimelineGranularity::Month => {
+            let dt = chrono::DateTime::from_timestamp_millis(ms).unwrap_or_default();
+            chrono::Utc
+                .with_ymd_and_hms(dt.year(), dt.month(), 1, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        }
+        TimelineGranularity::Year => {
+            let dt = chrono::DateTime::from_timestamp_millis(ms).unwrap_or_default();
+            chrono::Utc
+                .with_ymd_and_hms(dt.year(), 1, 1, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        }
+        TimelineGranularity::Auto => ms,
+    }
+}
+
+/// The start of the bucket immediately after `bucket_start`.
+fn next_bucket(bucket_start: i64, granularity: TimelineGranularity) -> i64 {
+    use chrono::{Datelike, TimeZone};
+    match granularity {
+        TimelineGranularity::Hour => bucket_start + MS_PER_HOUR,
+        TimelineGranularity::Day => bucket_start + MS_PER_DAY,
+        TimelineGranularity::Month => {
+            let dt = chrono::DateTime::from_timestamp_millis(bucket_start).unwrap_or_default();
+            let (year, month) = if dt.month() == 12 {
+                (dt.year() + 1, 1)
+            } else {
+                (dt.year(), dt.month() + 1)
+            };
+            chrono::Utc
+                .with_ymd_and_hms(year, month, 1, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        }
+        TimelineGranularity::Year => {
+            let dt = chrono::DateTime::from_timestamp_millis(bucket_start).unwrap_or_default();
+            chrono::Utc
+                .with_ymd_and_hms(dt.year() + 1, 1, 1, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        }
+        TimelineGranularity::Auto => bucket_start + MS_PER_DAY,
+    }
+}
+
+fn format_tick(bucket_start: i64, granularity: TimelineGranularity) -> String {
+    let Some(dt) = chrono::DateTime::from_timestamp_millis(bucket_start) else {
+        return String::new();
+    };
+    match granularity {
+        TimelineGranularity::Hour => dt.format("%-d %b %H:%M").to_string(),
+        TimelineGranularity::Day => dt.format("%-d %b").to_string(),
+        TimelineGranularity::Month => dt.format("%b %Y").to_string(),
+        TimelineGranularity::Year => dt.format("%Y").to_string(),
+        TimelineGranularity::Auto => dt.format("%-d %b").to_string(),
+    }
+}
+
 fn empty_result(mode: GraphMode, provider_id: &str) -> GraphAnalysisResult {
     GraphAnalysisResult {
         mode,
@@ -465,6 +838,7 @@ fn empty_result(mode: GraphMode, provider_id: &str) -> GraphAnalysisResult {
             no_signal_count: 0,
             semantic_edge_candidate_count: 0,
         },
+        timeline: None,
     }
 }
 
