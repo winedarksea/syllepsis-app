@@ -21,8 +21,8 @@ use syllepsis_core::id::NoteId;
 use syllepsis_core::llm::{select_llm_provider, LlmService, LlmTask, Proposal};
 use syllepsis_core::storage::{Book, NoteStore};
 
-pub use power::PowerSource;
 use power::detect_power_source;
+pub use power::PowerSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

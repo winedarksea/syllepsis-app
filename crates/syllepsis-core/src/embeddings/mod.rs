@@ -28,8 +28,8 @@ pub use note::{category_vector, embed_note, embed_notes, NoteVectors};
 pub use provider::{EmbeddingProvider, ProviderInfo};
 pub use repository::{
     configured_model_fingerprint, generate_note_sidecar, load_embedding_corpus,
-    note_embedding_is_stale, sidecar_preference_rank, stale_or_missing_note_ids,
-    EmbeddingCoverage, LoadedEmbeddingCorpus,
+    note_embedding_is_stale, sidecar_preference_rank, stale_or_missing_note_ids, EmbeddingCoverage,
+    LoadedEmbeddingCorpus,
 };
 pub use selection::{select_embedder, try_select_embedder};
 pub use sidecar::{

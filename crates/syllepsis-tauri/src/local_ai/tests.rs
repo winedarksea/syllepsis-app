@@ -14,8 +14,5 @@ fn battery_policy_is_configurable() {
     let mut policy = LocalAiDevicePolicy::default();
     assert!(note_generation_blocked(&policy, &PowerSource::Battery));
     policy.pause_note_embeddings_on_battery = false;
-    assert!(!note_generation_blocked(
-        &policy,
-        &PowerSource::Battery
-    ));
+    assert!(!note_generation_blocked(&policy, &PowerSource::Battery));
 }

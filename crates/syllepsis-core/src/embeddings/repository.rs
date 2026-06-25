@@ -175,15 +175,11 @@ pub fn sidecar_preference_rank(book: &Book, bytes: &[u8]) -> (bool, u8, i64, Str
     let compatible = configured_model_fingerprint(&book.config.embedding)
         .map(|expected| sidecar.is_compatible_with(&expected))
         .unwrap_or(false);
-    let note = book
-        .store
-        .read_all_notes()
-        .ok()
-        .and_then(|notes| {
-            notes
-                .into_iter()
-                .find(|note| note.id.ulid() == sidecar.note_ulid)
-        });
+    let note = book.store.read_all_notes().ok().and_then(|notes| {
+        notes
+            .into_iter()
+            .find(|note| note.id.ulid() == sidecar.note_ulid)
+    });
     let fresh_fields = note
         .as_ref()
         .map(|note| {

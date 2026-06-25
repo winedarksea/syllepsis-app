@@ -72,7 +72,6 @@ impl AppState {
         };
         corpus.analyze(request).map_err(|error| error.to_string())
     }
-
 }
 
 impl Default for AppState {

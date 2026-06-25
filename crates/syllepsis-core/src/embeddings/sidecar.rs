@@ -57,15 +57,15 @@ impl NoteEmbeddingSidecar {
             summary: summary.map(|mut vector| {
                 vector.normalize();
                 StoredEmbedding {
-                source_hash: summary_source_hash(note),
-                vector,
+                    source_hash: summary_source_hash(note),
+                    vector,
                 }
             }),
             full_note: full_note.map(|mut vector| {
                 vector.normalize();
                 StoredEmbedding {
-                source_hash: full_note_source_hash(note),
-                vector,
+                    source_hash: full_note_source_hash(note),
+                    vector,
                 }
             }),
         }

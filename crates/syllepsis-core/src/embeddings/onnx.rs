@@ -343,10 +343,7 @@ impl EmbeddingProvider for OnnxEmbedder {
     }
 
     fn embed_note_fields(&self, note: &Note) -> CoreResult<(Option<Embedding>, Option<Embedding>)> {
-        Ok((
-            self.embed_note_summary(note)?,
-            self.embed_full_note(note)?,
-        ))
+        Ok((self.embed_note_summary(note)?, self.embed_full_note(note)?))
     }
 
     fn embed_note_summary(&self, note: &Note) -> CoreResult<Option<Embedding>> {
