@@ -101,6 +101,7 @@ pub fn run() {
             // categories
             all_categories,
             create_category,
+            category_embedding_stats,
             // search & embeddings
             search,
             related_notes,

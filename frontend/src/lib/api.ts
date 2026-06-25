@@ -4,7 +4,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   BookInfo, TrackedBookInfo, Category, NoteDto, ObjectType, PriorEdge, RenderItem,
-  SearchResults, RelatedNote, EmbeddingDiagnostics,
+  SearchResults, RelatedNote, EmbeddingDiagnostics, CategoryEmbeddingStats,
   GraphAnalysisRequest, GraphAnalysisResult,
   LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, CloudLlmPrompt, CloudLlmCompletion,
   CloudLlmConnectionTestResult, CloudLlmProviderDescriptor, CloudLlmProviderSettings,
@@ -88,6 +88,7 @@ export const api = {
 
   allCategories: () => invoke<Category[]>('all_categories'),
   createCategory: (category: Category) => invoke<void>('create_category', { category }),
+  categoryEmbeddingStats: (name: string) => invoke<CategoryEmbeddingStats>('category_embedding_stats', { name }),
 
   // Search & embeddings
   search: (query: string, categoryFilter: string[] = []) =>

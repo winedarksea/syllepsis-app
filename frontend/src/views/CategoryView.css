@@ -32,6 +32,14 @@
   color: var(--color-text-tertiary);
 }
 
+.cv-hashtag {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  margin-top: var(--sp-1);
+  display: block;
+}
+
 .cv-heading-level {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
@@ -40,6 +48,13 @@
   border-radius: var(--radius-sm);
   margin-top: var(--sp-1);
   display: inline-block;
+}
+
+.cv-embedding-stats {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin-top: var(--sp-1);
+  display: block;
 }
 
 .cv-state {
@@ -186,6 +201,18 @@
 }
 .cv-edit-field input:focus,
 .cv-edit-field select:focus { border-color: var(--color-accent); outline: none; }
+
+.cv-edit-readonly {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  max-width: 280px;
+  user-select: text;
+}
 
 .cv-edit-icon-preview {
   font-size: var(--font-size-2xl);

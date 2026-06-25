@@ -98,15 +98,18 @@ function BookNoteBody({ body, claimed }: { body: string; claimed: Set<string> })
 
 // ── HeadingTag ───────────────────────────────────────────────────────────────
 
-function HeadingTag({ level, text, id }: { level: number; text: string; id: string }) {
+function HeadingTag({ level, text, id, onClick }: { level: number; text: string; id: string; onClick?: () => void }) {
   const l = Math.min(Math.max(level, 1), 6);
-  const cls = `bv-heading bv-h${l}`;
-  if (l === 1) return <h1 id={id} className={cls}>{text}</h1>;
-  if (l === 2) return <h2 id={id} className={cls}>{text}</h2>;
-  if (l === 3) return <h3 id={id} className={cls}>{text}</h3>;
-  if (l === 4) return <h4 id={id} className={cls}>{text}</h4>;
-  if (l === 5) return <h5 id={id} className={cls}>{text}</h5>;
-  return <h6 id={id} className={cls}>{text}</h6>;
+  const cls = `bv-heading bv-h${l}${onClick ? ' bv-heading-link' : ''}`;
+  const inner = onClick
+    ? <span className="bv-heading-text" onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onClick()}>{text}</span>
+    : text;
+  if (l === 1) return <h1 id={id} className={cls}>{inner}</h1>;
+  if (l === 2) return <h2 id={id} className={cls}>{inner}</h2>;
+  if (l === 3) return <h3 id={id} className={cls}>{inner}</h3>;
+  if (l === 4) return <h4 id={id} className={cls}>{inner}</h4>;
+  if (l === 5) return <h5 id={id} className={cls}>{inner}</h5>;
+  return <h6 id={id} className={cls}>{inner}</h6>;
 }
 
 // ── headingId — stable DOM id for a heading ──────────────────────────────────
@@ -146,7 +149,7 @@ function BookToc({ headings }: { headings: TocEntry[] }) {
 // ── BookView ─────────────────────────────────────────────────────────────────
 
 export function BookView() {
-  const { openEditor, book, pluginRenderLanguages } = useStore();
+  const { openEditor, book, pluginRenderLanguages, setActiveCategory, setView } = useStore();
   const claimed = useMemo(() => new Set(pluginRenderLanguages), [pluginRenderLanguages]);
   const [items, setItems] = useState<RenderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -217,7 +220,15 @@ export function BookView() {
         <div className="bv-document">
           {items.map((item, i) => {
             if (item.kind === 'heading') {
-              return <HeadingTag key={i} id={headingId(item.category, i)} level={item.level} text={item.text} />;
+              return (
+                <HeadingTag
+                  key={i}
+                  id={headingId(item.category, i)}
+                  level={item.level}
+                  text={item.text}
+                  onClick={item.category ? () => { setActiveCategory(item.category); setView('category'); } : undefined}
+                />
+              );
             }
 
             const note = item;

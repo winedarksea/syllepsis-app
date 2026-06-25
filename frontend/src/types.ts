@@ -995,6 +995,14 @@ export interface StyleCard {
   source_urls: string[];
 }
 
+// ── Category embedding stats ──
+
+export interface CategoryEmbeddingStats {
+  total_notes: number;
+  embedded_notes: number;
+  has_vector: boolean;
+}
+
 // ── Publishing & serving (mirrors syllepsis_core::app::publish) ──
 
 export interface PublishReport {

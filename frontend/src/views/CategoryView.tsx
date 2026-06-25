@@ -1,13 +1,12 @@
-// Shows all notes assigned to a single category. Reads unsorted notes filtered client-side
-// so the category header details (long_name, icon) are immediately available.
-// Includes an inline category editor for icon, long name, and heading level.
+// Shows all notes assigned to a single category. Reads all visible notes filtered client-side.
+// Includes an inline category editor for icon, long name, heading level, and location.
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
-import type { NoteDto, Category } from '../types';
+import type { NoteDto, Category, CategoryEmbeddingStats } from '../types';
 import './CategoryView.css';
 
 const HEADING_LEVELS = [1, 2, 3, 4, 5, 6];
@@ -16,12 +15,19 @@ function CategoryEditor({ cat, onSave, onCancel }: { cat: Category; onSave: (upd
   const [longName, setLongName] = useState(cat.long_name || '');
   const [icon, setIcon] = useState(cat.icon || '');
   const [headingLevel, setHeadingLevel] = useState(cat.heading_level || 2);
+  const [location, setLocation] = useState(cat.location || '');
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     setBusy(true);
     try {
-      const updated: Category = { ...cat, long_name: longName.trim() || cat.name, icon: icon.trim() || undefined, heading_level: headingLevel };
+      const updated: Category = {
+        ...cat,
+        long_name: longName.trim() || cat.name,
+        icon: icon.trim() || undefined,
+        heading_level: headingLevel,
+        location: location.trim() || undefined,
+      };
       await api.createCategory(updated);
       onSave(updated);
     } finally {
@@ -32,6 +38,10 @@ function CategoryEditor({ cat, onSave, onCancel }: { cat: Category; onSave: (upd
   return (
     <div className="cv-edit-panel">
       <h3 className="cv-edit-title">Edit category</h3>
+      <div className="cv-edit-field">
+        <span>Hashtag name (read-only)</span>
+        <div className="cv-edit-readonly">#{cat.name}</div>
+      </div>
       <label className="cv-edit-field">
         <span>Display name</span>
         <input value={longName} onChange={(e) => setLongName(e.target.value)} placeholder={cat.name} />
@@ -46,6 +56,14 @@ function CategoryEditor({ cat, onSave, onCancel }: { cat: Category; onSave: (upd
         <select value={headingLevel} onChange={(e) => setHeadingLevel(Number(e.target.value))}>
           {HEADING_LEVELS.map((l) => <option key={l} value={l}>H{l}</option>)}
         </select>
+      </label>
+      <label className="cv-edit-field">
+        <span>Location token</span>
+        <input
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          placeholder="e.g. earth/47.6,-122.3"
+        />
       </label>
       <div className="cv-edit-actions">
         <button className="cv-edit-btn" onClick={onCancel} disabled={busy}>Cancel</button>
@@ -63,14 +81,15 @@ export function CategoryView() {
   const [loadedForCategory, setLoadedForCategory] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [embeddingStats, setEmbeddingStats] = useState<CategoryEmbeddingStats | null>(null);
 
   const cat = categories.find((c) => c.name === activeCategory) ?? null;
 
   const refresh = useCallback(() => {
     if (!activeCategory) return;
-    api.unsortedNotes()
-      .then((unsorted) => {
-        const filtered = unsorted.filter((n) => n.categories.includes(activeCategory));
+    api.listNotes()
+      .then((all) => {
+        const filtered = all.filter((n) => n.categories.includes(activeCategory));
         setNotes(filtered.sort((a, b) =>
           b.metadata.dates.updated.localeCompare(a.metadata.dates.updated)
         ));
@@ -85,6 +104,13 @@ export function CategoryView() {
 
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { setEditing(false); }, [activeCategory]);
+
+  useEffect(() => {
+    if (!activeCategory) { setEmbeddingStats(null); return; }
+    api.categoryEmbeddingStats(activeCategory)
+      .then(setEmbeddingStats)
+      .catch(() => setEmbeddingStats(null));
+  }, [activeCategory]);
 
   const loading = !!activeCategory && loadedForCategory !== activeCategory;
 
@@ -101,6 +127,12 @@ export function CategoryView() {
   if (loading) return <div className="cv-state">Loading…</div>;
   if (error) return <div className="cv-state cv-error">{error}</div>;
 
+  const embeddingLabel = embeddingStats
+    ? embeddingStats.total_notes === 0
+      ? '0/0 notes embedded'
+      : `${embeddingStats.embedded_notes}/${embeddingStats.total_notes} notes embedded · vector ${embeddingStats.has_vector ? '✓' : '✗'}`
+    : null;
+
   return (
     <div className="cv-root">
       <div className="cv-header">
@@ -112,8 +144,12 @@ export function CategoryView() {
             <Icon name={editing ? 'close' : 'edit'} size={15} />
           </button>
         </div>
+        <span className="cv-hashtag">#{activeCategory}</span>
         {cat?.heading_level && !editing && (
           <span className="cv-heading-level">H{cat.heading_level}</span>
+        )}
+        {embeddingLabel && (
+          <span className="cv-embedding-stats">{embeddingLabel}</span>
         )}
       </div>
 

@@ -6,7 +6,9 @@
 //! SQLite/FTS5 storage before querying; related/diagnostics reuse the same engine
 //! snapshot directly.
 
-use crate::embeddings::{load_embedding_corpus, try_select_embedder, Embedding, EmbeddingCoverage};
+use serde::{Deserialize, Serialize};
+
+use crate::embeddings::{category_vector, load_embedding_corpus, try_select_embedder, Embedding, EmbeddingCoverage, NoteVectors};
 use crate::error::CoreResult;
 use crate::model::Note;
 use crate::search::{
@@ -74,6 +76,46 @@ pub fn embedding_diagnostics(book: &Book) -> CoreResult<EmbeddingDiagnostics> {
 
 pub fn embedding_coverage(book: &Book) -> CoreResult<EmbeddingCoverage> {
     Ok(engine_for(book)?.1)
+}
+
+/// Embedding coverage for a single category.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CategoryEmbeddingStats {
+    pub total_notes: usize,
+    pub embedded_notes: usize,
+    pub has_vector: bool,
+}
+
+pub fn category_embedding_stats(book: &Book, name: &str) -> CoreResult<CategoryEmbeddingStats> {
+    let notes: Vec<Note> = book
+        .store
+        .read_all_notes()?
+        .into_iter()
+        .filter(|n| n.metadata.is_visible_in_default_views() && n.categories.iter().any(|c| c == name))
+        .collect();
+
+    let corpus = load_embedding_corpus(book, &notes)?;
+
+    let embedded_notes = corpus
+        .vectors
+        .iter()
+        .filter(|v| v.centroid.magnitude() > f32::EPSILON)
+        .count();
+
+    let cat = book.store.categories()?.into_iter().find(|c| c.name == name);
+    let has_vector = if let Some(cat) = cat {
+        let pairs: Vec<(&Note, &NoteVectors)> =
+            notes.iter().zip(corpus.vectors.iter()).collect();
+        category_vector(&cat, &pairs).is_some()
+    } else {
+        false
+    };
+
+    Ok(CategoryEmbeddingStats {
+        total_notes: notes.len(),
+        embedded_notes,
+        has_vector,
+    })
 }
 
 #[cfg(test)]

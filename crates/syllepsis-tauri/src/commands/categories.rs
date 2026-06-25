@@ -3,6 +3,7 @@
 use tauri::State;
 
 use syllepsis_core::app::commands as app;
+use syllepsis_core::app::search::{self, CategoryEmbeddingStats};
 use syllepsis_core::model::Category;
 
 use crate::state::AppState;
@@ -30,5 +31,13 @@ pub fn all_categories(state: State<AppState>) -> Result<Vec<Category>, String> {
 pub fn create_category(state: State<AppState>, category: Category) -> Result<(), String> {
     with_book!(state, book, {
         app::create_category(book, category).map_err(|e| e.to_string())
+    })
+}
+
+/// Embedding coverage stats for a single category.
+#[tauri::command]
+pub fn category_embedding_stats(state: State<AppState>, name: String) -> Result<CategoryEmbeddingStats, String> {
+    with_book!(state, book, {
+        search::category_embedding_stats(book, &name).map_err(|e| e.to_string())
     })
 }

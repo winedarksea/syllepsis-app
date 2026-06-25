@@ -129,6 +129,9 @@
 .bv-h3 { font-size: var(--font-size-lg); }
 .bv-h4, .bv-h5, .bv-h6 { font-size: var(--font-size-base); }
 
+.bv-heading-link .bv-heading-text { cursor: pointer; }
+.bv-heading-link .bv-heading-text:hover { text-decoration: underline; text-decoration-color: var(--color-accent); }
+
 /* Chapter rule: divider style driven by data-divider on the app root. Default: dotdash. */
 .bv-h1, .bv-h2 {
   margin-top: calc(var(--sp-8) * 1.5);
