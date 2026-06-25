@@ -60,13 +60,44 @@ impl SearchEngine {
         }
     }
 
+    /// Build from canonical vectors loaded from synced sidecars. No corpus inference occurs.
+    pub fn build_from_vectors(
+        notes: Vec<Note>,
+        vectors: Vec<NoteVectors>,
+        config: &Config,
+    ) -> SearchEngine {
+        debug_assert_eq!(notes.len(), vectors.len());
+        let documents: Vec<String> = notes.iter().map(document_text).collect();
+        let bm25 = Bm25Index::build(&documents);
+        SearchEngine {
+            notes,
+            documents,
+            bm25,
+            vectors,
+            provider: Box::new(crate::embeddings::HashingEmbedder::new(0)),
+            search_cfg: config.search.clone(),
+        }
+    }
+
     /// Run exact + BM25 + vector retrieval, fuse with RRF, and return hits plus category facets.
     /// `category_filter` (if non-empty) keeps only hits in one of those categories; the facet
     /// counts always reflect the unfiltered matches so the UI can show every available facet.
     pub fn search(&self, query: &str, category_filter: &[String]) -> SearchResults {
+        let query_embedding = self.query_embedding(query);
+        self.search_with_query_embedding(query, category_filter, Some(&query_embedding))
+    }
+
+    pub fn search_with_query_embedding(
+        &self,
+        query: &str,
+        category_filter: &[String],
+        query_embedding: Option<&crate::embeddings::Embedding>,
+    ) -> SearchResults {
         let exact = ids_only(match_exact(&self.documents, query));
         let bm25 = ids_only(self.bm25.score(query, &self.search_cfg));
-        let vector = ids_only(self.vector_ranking(query));
+        let vector = query_embedding
+            .map(|embedding| ids_only(self.vector_ranking_embedding(embedding)))
+            .unwrap_or_default();
         let exact_ranks = rank_map(&exact);
         let bm25_ranks = rank_map(&bm25);
         let vector_ranks = rank_map(&vector);
@@ -242,16 +273,18 @@ impl SearchEngine {
     /// Vector ranking: best passage similarity per note against the embedded query. The query
     /// goes through [`embed_query`](EmbeddingProvider::embed_query) so an asymmetric model applies
     /// its retrieval-instruction prefix; the corpus was embedded with plain `embed`.
-    fn vector_ranking(&self, query: &str) -> Vec<(usize, f32)> {
-        let q = self.provider.embed_query(query);
-        if q.magnitude() <= f32::EPSILON {
+    fn vector_ranking_embedding(
+        &self,
+        query_embedding: &crate::embeddings::Embedding,
+    ) -> Vec<(usize, f32)> {
+        if query_embedding.magnitude() <= f32::EPSILON {
             return Vec::new();
         }
         let mut ranked: Vec<(usize, f32)> = self
             .vectors
             .iter()
             .enumerate()
-            .map(|(i, v)| (i, v.best_similarity(&q)))
+            .map(|(i, v)| (i, v.best_similarity(query_embedding)))
             .filter(|(_, s)| *s > 0.0)
             .collect();
         ranked.sort_by(|a, b| b.1.total_cmp(&a.1));

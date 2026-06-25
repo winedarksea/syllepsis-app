@@ -130,6 +130,7 @@ impl Book {
         std::fs::create_dir_all(layout::commentary_dir(&root))?;
         std::fs::create_dir_all(layout::worlds_dir(&root))?;
         std::fs::create_dir_all(layout::derived_dir(&root))?;
+        std::fs::create_dir_all(layout::embeddings_dir(&root))?;
         std::fs::create_dir_all(layout::crdt_dir(&root))?;
         std::fs::create_dir_all(layout::sync_dir(&root))?;
 
@@ -142,8 +143,9 @@ impl Book {
         std::fs::write(
             root.join(".gitignore"),
             format!(
-                "{}/\n{}/\n{}/\n",
+                "{}/\n{}/\n{}/\n{}/\n",
                 layout::DERIVED_DIR,
+                layout::EMBEDDINGS_DIR,
                 layout::SYNC_DIR,
                 layout::CRDT_DIR
             ),
@@ -248,6 +250,7 @@ impl Book {
     pub fn delete_note(&self, id: &NoteId) -> CoreResult<()> {
         self.store.delete_note(id)?;
         let _ = std::fs::remove_file(layout::crdt_sidecar_path(&self.root, id));
+        let _ = std::fs::remove_file(layout::embedding_sidecar_path(&self.root, id));
         self.registry.lock().expect("registry poisoned").remove(id);
         Ok(())
     }

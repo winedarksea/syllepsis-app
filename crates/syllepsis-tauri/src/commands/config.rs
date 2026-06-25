@@ -10,7 +10,7 @@
 use tauri::State;
 
 use syllepsis_core::config::{
-    CleanupConfig, Config, LlmConfig, PrivacyConfig, SearchConfig, SyncConfig,
+    CleanupConfig, Config, EmbeddingConfig, LlmConfig, PrivacyConfig, SearchConfig, SyncConfig,
 };
 
 use crate::state::AppState;
@@ -54,6 +54,20 @@ pub fn update_cleanup_config(
 pub fn update_llm_config(state: State<AppState>, llm: LlmConfig) -> Result<Config, String> {
     // Changing LLM config invalidates the cached provider so the next call rebuilds from it.
     update_book_config(&state, |config| config.llm = llm, true)
+}
+
+#[tauri::command]
+pub fn update_embedding_config(
+    state: State<AppState>,
+    embedding: EmbeddingConfig,
+) -> Result<Config, String> {
+    let updated = update_book_config(&state, |config| config.embedding = embedding, false)?;
+    state.invalidate_graph_corpus();
+    let guard = state.book.lock().unwrap();
+    if let Some(book) = guard.as_ref() {
+        let _ = state.local_ai.enqueue_all_stale(book, true);
+    }
+    Ok(updated)
 }
 
 fn get_book_config_impl(state: &AppState) -> Result<Config, String> {

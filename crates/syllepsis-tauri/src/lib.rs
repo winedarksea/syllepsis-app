@@ -1,11 +1,13 @@
 //! Tauri app library: registers state, plugins, and all IPC commands.
 
 pub mod commands;
+pub mod local_ai;
 pub mod state;
 
 use commands::{
-    book::*, categories::*, cloud_llm::*, config::*, lifecycle::*, llm::*, notes::*, pack::*,
-    plugins::*, publish::*, search::*, spatial::*, style_cards::*, sync::*, text_import::*,
+    book::*, categories::*, cloud_llm::*, config::*, lifecycle::*, llm::*, local_ai::*, notes::*,
+    pack::*, plugins::*, publish::*, search::*, spatial::*, style_cards::*, sync::*,
+    text_import::*,
 };
 use state::AppState;
 use tauri::Manager;
@@ -49,6 +51,11 @@ pub fn run() {
                 .unwrap_or_default();
             let runtime = commands::plugins::PluginRuntime::load(builtin_dir, user_dir, prefs_path);
             app.manage(runtime);
+            if let Ok(app_data_dir) = app.path().app_data_dir() {
+                app.state::<AppState>()
+                    .local_ai
+                    .configure_preferences_path(app_data_dir.join("local-ai-device-policy.json"));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -67,6 +74,9 @@ pub fn run() {
             update_search_config,
             update_cleanup_config,
             update_llm_config,
+            update_embedding_config,
+            get_local_ai_device_policy,
+            update_local_ai_device_policy,
             // notes
             book_view,
             unsorted_notes,
@@ -91,6 +101,9 @@ pub fn run() {
             search,
             related_notes,
             embedding_diagnostics,
+            local_ai_status,
+            enqueue_all_stale_embeddings,
+            note_editing_finished,
             graph_analysis,
             search_across_books,
             // llm

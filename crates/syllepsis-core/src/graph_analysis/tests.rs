@@ -80,6 +80,8 @@ fn every_mode_returns_nodes_edges_and_finite_coordinates() {
         };
         add_note(&book, &format!("Note {index}"), body, category);
     }
+    let notes = book.store.read_all_notes().unwrap();
+    crate::embeddings::repository::write_test_sidecars(&book, &notes);
     let corpus = SemanticGraphCorpus::build(&book).unwrap();
 
     for mode in [

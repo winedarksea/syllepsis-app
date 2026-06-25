@@ -286,12 +286,16 @@ export function Editor({ noteId }: Props) {
 
   // Flush a pending save when the editor unmounts (e.g. switching to Settings or another view
   // mid-edit, which clears the autosave debounce). Without this, up to 1.5s of edits could be lost.
-  useEffect(() => () => { if (dirtyRef.current) void saveRef.current(); }, []);
+  useEffect(() => () => {
+    if (dirtyRef.current) void saveRef.current();
+    void api.noteEditingFinished(noteId);
+  }, [noteId]);
 
   const handleBack = useCallback(async () => {
     if (dirtyRef.current) await saveRef.current();
+    await api.noteEditingFinished(noteId).catch(() => {});
     closeEditor();
-  }, [closeEditor]);
+  }, [closeEditor, noteId]);
 
   const handleDelete = useCallback(async () => {
     if (!window.confirm('Delete this note? This cannot be undone.')) return;

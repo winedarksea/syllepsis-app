@@ -7,7 +7,7 @@
 //! pool and prompt. Adding a model — the optional larger LLM, a different embedder — is a new
 //! manifest entry, never a code change, which is what lets the LLM and the embedder share this
 //! exact machinery (llm-ai-features.md, "the same config-driven model manifest"). The built-in
-//! registry below ships the two Qwen3-family models the POC bundles.
+//! registry below ships the embedding and generation models the app bundles.
 
 use serde::{Deserialize, Serialize};
 
@@ -135,10 +135,16 @@ pub struct ModelManifest {
     /// How to pool token states into one vector. `Some` for embedders, `None` for LLMs.
     #[serde(default)]
     pub pooling: Option<PoolingStrategy>,
-    /// Instruction template wrapped around a *query* for an asymmetric embedder (Qwen3 embeds
+    /// Instruction template wrapped around a *query* for an asymmetric embedder (queries and
     /// queries and documents differently). `{query}` is substituted. `None` for symmetric models.
     #[serde(default)]
     pub query_instruction: Option<String>,
+    /// Document-side template. `{title}` and `{text}` are substituted before tokenization.
+    #[serde(default)]
+    pub document_instruction: Option<String>,
+    /// Preferred named embedding output. Some exports return the pooled sentence vector directly.
+    #[serde(default)]
+    pub embedding_output_name: Option<String>,
 }
 
 impl ModelManifest {
@@ -173,7 +179,7 @@ impl ModelManifest {
 /// All models the app ships knowledge of. Downloaded lazily on first use; nothing here implies
 /// the bytes are present (see [`ModelCache`](super::cache::ModelCache)).
 pub fn builtin_manifests() -> Vec<ModelManifest> {
-    vec![qwen3_embedding_0_6b(), gemma_4_e2b()]
+    vec![embeddinggemma_300m(), gemma_4_e2b()]
 }
 
 /// Look up a built-in manifest by its [`ModelManifest::id`].
@@ -184,55 +190,46 @@ pub fn builtin(id: &str) -> Option<ModelManifest> {
 /// Stable id of the bundled local LLM (Phase 3).
 pub const BUNDLED_LLM_ID: &str = "gemma-4-e2b";
 /// Stable id of the default ONNX embedder (Phase 2).
-pub const QWEN3_EMBEDDING_ID: &str = "qwen3-embedding-0.6b";
+pub const EMBEDDINGGEMMA_ID: &str = "embeddinggemma-300m";
 
-/// [Qwen3-Embedding-0.6B](https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX):
-/// a 1024-dim causal embedder with last-token pooling, 32k context, and Matryoshka dims that can
-/// be truncated for cheaper storage. Asymmetric — queries take an instruction prefix, documents
-/// do not. Shares the ONNX runtime and tokenizer family with the bundled LLM below.
-fn qwen3_embedding_0_6b() -> ModelManifest {
+/// EmbeddingGemma 300M Q4: 768 native dimensions, 2k context, direct sentence-vector output, and
+/// Matryoshka truncation to the configured 256 dimensions.
+fn embeddinggemma_300m() -> ModelManifest {
     ModelManifest {
-        id: QWEN3_EMBEDDING_ID.to_string(),
-        display_name: "Qwen3 Embedding 0.6B".to_string(),
-        repo: "onnx-community/Qwen3-Embedding-0.6B-ONNX".to_string(),
-        revision: "main".to_string(),
+        id: EMBEDDINGGEMMA_ID.to_string(),
+        display_name: "EmbeddingGemma 300M".to_string(),
+        repo: "onnx-community/embeddinggemma-300m-ONNX".to_string(),
+        revision: "5090578d9565bb06545b4552f76e6bc2c93e4a66".to_string(),
         kind: ModelKind::Embedding,
-        quantization: Quantization::Int8,
+        quantization: Quantization::Q4,
         files: vec![
             ModelFile::pinned(
-                "onnx/model_quantized.onnx",
+                "onnx/model_q4.onnx",
                 FileRole::Weights,
-                "87cd124e0ef1fd1f223ebc283efccbaeac386d0b08344701c46975d0657b591f",
-                613_527_631,
+                "ad1dfee81a70f7944b9b9d1cc6e48075b832881cf33fab2f2b248be78f3f0043",
+                519_322,
+            ),
+            ModelFile::pinned(
+                "onnx/model_q4.onnx_data",
+                FileRole::WeightsData,
+                "599962c3143b040de2dd05e5975be3e9091dd067cacc6a8f7186e3203bab9e02",
+                196_725_760,
             ),
             ModelFile::pinned(
                 "tokenizer.json",
                 FileRole::Tokenizer,
-                "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
-                11_423_705,
-            ),
-            ModelFile::pinned(
-                "tokenizer_config.json",
-                FileRole::TokenizerConfig,
-                "977648852447cb6587327ff3205b0a84cf2fc9f05621d6c8e88a497caafab2e1",
-                9_731,
-            ),
-            ModelFile::pinned(
-                "config.json",
-                FileRole::Config,
-                "66a10929782f3c9a3cd5dec90e2a95c60e05736134a63cd54479eeae80bed175",
-                1_576,
+                "4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47",
+                20_323_312,
             ),
         ],
-        hidden_size: 1024,
-        max_context_tokens: 32_768,
-        min_ram_mb: 2_048,
+        hidden_size: 768,
+        max_context_tokens: 2_048,
+        min_ram_mb: 512,
         preferred_execution_providers: vec![ExecutionProvider::Cuda, ExecutionProvider::DirectMl],
-        pooling: Some(PoolingStrategy::LastToken),
-        // The instruction Qwen3-Embedding recommends for retrieval queries (documents are raw).
-        query_instruction: Some(
-            "Instruct: Given a search query, retrieve relevant notes\nQuery: {query}".to_string(),
-        ),
+        pooling: Some(PoolingStrategy::Mean),
+        query_instruction: Some("task: search result | query: {query}".to_string()),
+        document_instruction: Some("title: {title} | text: {text}".to_string()),
+        embedding_output_name: Some("sentence_embedding".to_string()),
     }
 }
 
@@ -311,6 +308,8 @@ fn gemma_4_e2b() -> ModelManifest {
         ],
         pooling: None,
         query_instruction: None,
+        document_instruction: None,
+        embedding_output_name: None,
     }
 }
 
@@ -339,11 +338,13 @@ mod tests {
     }
 
     #[test]
-    fn embedder_is_asymmetric_with_last_token_pooling() {
-        let m = builtin(QWEN3_EMBEDDING_ID).unwrap();
-        assert_eq!(m.pooling, Some(PoolingStrategy::LastToken));
+    fn embeddinggemma_has_document_and_query_prompts() {
+        let m = builtin(EMBEDDINGGEMMA_ID).unwrap();
+        assert_eq!(m.pooling, Some(PoolingStrategy::Mean));
         assert!(m.query_instruction.as_ref().unwrap().contains("{query}"));
-        assert_eq!(m.hidden_size, 1024);
+        assert!(m.document_instruction.as_ref().unwrap().contains("{text}"));
+        assert_eq!(m.hidden_size, 768);
+        assert_eq!(m.max_context_tokens, 2048);
     }
 
     #[test]

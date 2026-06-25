@@ -158,6 +158,8 @@ mod tests {
             preferred_execution_providers: vec![ExecutionProvider::Cpu],
             pooling: None,
             query_instruction: None,
+            document_instruction: None,
+            embedding_output_name: None,
         }
     }
 

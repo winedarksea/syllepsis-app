@@ -6,7 +6,7 @@ use syllepsis_core::config::ModelRef;
 use syllepsis_core::config::{EmbeddingConfig, LlmConfig};
 use syllepsis_core::embeddings::{EmbeddingProvider, OnnxEmbedder};
 use syllepsis_core::llm::{LlmProvider, LlmRequest, LlmTask, OnnxLlmProvider};
-use syllepsis_core::onnx::{builtin, ModelCache, BUNDLED_LLM_ID, QWEN3_EMBEDDING_ID};
+use syllepsis_core::onnx::{builtin, ModelCache, BUNDLED_LLM_ID, EMBEDDINGGEMMA_ID};
 
 fn live_cache() -> ModelCache {
     let root = std::env::var("SYLLEPSIS_MODEL_CACHE").expect(
@@ -28,11 +28,11 @@ fn require_cached(cache: &ModelCache, model_id: &str) {
 }
 
 #[test]
-#[ignore = "requires SYLLEPSIS_MODEL_CACHE with Qwen3 embedding files downloaded"]
+#[ignore = "requires SYLLEPSIS_MODEL_CACHE with EmbeddingGemma files downloaded"]
 fn qwen3_embedding_onnx_runs_real_inference() {
     let cache = live_cache();
-    require_cached(&cache, QWEN3_EMBEDDING_ID);
-    let manifest = builtin(QWEN3_EMBEDDING_ID).unwrap();
+    require_cached(&cache, EMBEDDINGGEMMA_ID);
+    let manifest = builtin(EMBEDDINGGEMMA_ID).unwrap();
     let embedder = OnnxEmbedder::load(&cache, &manifest, &EmbeddingConfig::default()).unwrap();
 
     let document = embedder.embed("Local-first notes need reliable vector search.");

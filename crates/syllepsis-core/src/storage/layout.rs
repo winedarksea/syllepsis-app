@@ -12,6 +12,7 @@
 //!   _commentary/      commentary notes (AI proposals, fact checks)
 //!   _worlds/          spatial worlds registry
 //!   _crdt/            per-note CRDT sidecars (Phase 4) — synced, not human-edited
+//!   _embeddings/      per-note generated embedding sidecars — synced, not human-edited
 //!   _sync/            device-local sync bookkeeping (state, actor id) — never synced
 //!   _derived/         ephemeral caches (vectors, search index) — gitignored, not synced
 //!   note-*.md         notes (and other object types)
@@ -25,6 +26,7 @@ pub const CATEGORIES_DIR: &str = "_categories";
 pub const COMMENTARY_DIR: &str = "_commentary";
 pub const WORLDS_DIR: &str = "_worlds";
 pub const DERIVED_DIR: &str = "_derived";
+pub const EMBEDDINGS_DIR: &str = "_embeddings";
 /// Per-note CRDT sidecars (Phase 4). Synced (so other devices can merge) but excluded from the
 /// note scan — it holds `{ulid}.crdt` snapshots, not markdown.
 pub const CRDT_DIR: &str = "_crdt";
@@ -41,7 +43,14 @@ pub const LOCATION_LOOKUP_FILE: &str = "locations.csv";
 
 /// Directories that never contain plain notes and are skipped when scanning for them.
 /// `_commentary` is intentionally absent: commentary entries *are* notes.
-pub const RESERVED_DIRS: &[&str] = &[CATEGORIES_DIR, WORLDS_DIR, DERIVED_DIR, CRDT_DIR, SYNC_DIR];
+pub const RESERVED_DIRS: &[&str] = &[
+    CATEGORIES_DIR,
+    WORLDS_DIR,
+    DERIVED_DIR,
+    EMBEDDINGS_DIR,
+    CRDT_DIR,
+    SYNC_DIR,
+];
 
 /// `_categories/` for the given book root.
 pub fn categories_dir(root: &Path) -> PathBuf {
@@ -66,6 +75,16 @@ pub fn location_lookup_path(root: &Path) -> PathBuf {
 /// `_derived/` for the given book root (ephemeral, gitignored).
 pub fn derived_dir(root: &Path) -> PathBuf {
     root.join(DERIVED_DIR)
+}
+
+/// `_embeddings/` for synced per-note embedding records.
+pub fn embeddings_dir(root: &Path) -> PathBuf {
+    root.join(EMBEDDINGS_DIR)
+}
+
+/// Binary embedding sidecar path, keyed by immutable note ULID.
+pub fn embedding_sidecar_path(root: &Path, note: &NoteId) -> PathBuf {
+    embeddings_dir(root).join(format!("{}.svec", note.ulid()))
 }
 
 /// `_crdt/` for the given book root (per-note CRDT sidecars, synced).

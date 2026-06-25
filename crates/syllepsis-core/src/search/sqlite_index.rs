@@ -5,6 +5,7 @@
 //! read exact/FTS/vector candidates back from that index, then reuse the same RRF/result shaping.
 
 use rusqlite::{params, Connection};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -16,7 +17,7 @@ use crate::search::rrf::reciprocal_rank_fusion;
 use crate::search::SearchEngine;
 
 const SQLITE_SEARCH_DB: &str = "search.sqlite";
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 pub struct SqliteSearchIndex {
     conn: Connection,
@@ -32,6 +33,18 @@ impl SqliteSearchIndex {
     }
 
     pub fn rebuild_from_engine(&mut self, engine: &SearchEngine) -> CoreResult<()> {
+        let snapshot_hash = engine_snapshot_hash(engine);
+        let existing_hash = self
+            .conn
+            .query_row(
+                "SELECT value FROM search_meta WHERE key = 'snapshot_hash'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok();
+        if existing_hash.as_deref() == Some(snapshot_hash.as_str()) {
+            return Ok(());
+        }
         let tx = self.conn.transaction()?;
         tx.execute_batch(
             "
@@ -72,17 +85,21 @@ impl SqliteSearchIndex {
             }
             for (part_idx, vector) in engine.vectors()[idx].parts.iter().enumerate() {
                 tx.execute(
-                    "INSERT INTO note_vectors(note_index, part_index, dim, vector_json)
+                    "INSERT INTO note_vectors(note_index, part_index, dim, vector_blob)
                      VALUES (?1, ?2, ?3, ?4)",
                     params![
                         idx as i64,
                         part_idx as i64,
                         vector.len() as i64,
-                        serde_json::to_string(&vector.0)?,
+                        embedding_to_blob(vector),
                     ],
                 )?;
             }
         }
+        tx.execute(
+            "INSERT OR REPLACE INTO search_meta(key, value) VALUES ('snapshot_hash', ?1)",
+            params![snapshot_hash],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -92,10 +109,14 @@ impl SqliteSearchIndex {
         engine: &SearchEngine,
         query: &str,
         category_filter: &[String],
+        query_embedding: Option<&Embedding>,
     ) -> CoreResult<SearchResults> {
         let exact = ids_only(match_exact(engine.documents(), query));
         let fts = self.fts_ranked_indices(query)?;
-        let vector = self.vector_ranked_indices(&engine.query_embedding(query))?;
+        let vector = match query_embedding {
+            Some(query_embedding) => self.vector_ranked_indices(query_embedding)?,
+            None => Vec::new(),
+        };
         let exact_ranks = rank_map(&exact);
         let fts_ranks = rank_map(&fts);
         let vector_ranks = rank_map(&vector);
@@ -138,6 +159,26 @@ impl SqliteSearchIndex {
     }
 
     fn ensure_schema(&self) -> CoreResult<()> {
+        let existing_version = self
+            .conn
+            .query_row(
+                "SELECT value FROM search_meta WHERE key = 'schema_version'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok());
+        if existing_version != Some(SCHEMA_VERSION) {
+            self.conn.execute_batch(
+                "
+                DROP TABLE IF EXISTS note_vectors;
+                DROP TABLE IF EXISTS note_categories;
+                DROP TABLE IF EXISTS notes;
+                DROP TABLE IF EXISTS note_fts;
+                DROP TABLE IF EXISTS search_meta;
+                ",
+            )?;
+        }
         self.conn.execute_batch(
             "
             PRAGMA foreign_keys = ON;
@@ -162,7 +203,7 @@ impl SqliteSearchIndex {
                 note_index INTEGER NOT NULL REFERENCES notes(note_index) ON DELETE CASCADE,
                 part_index INTEGER NOT NULL,
                 dim INTEGER NOT NULL,
-                vector_json TEXT NOT NULL,
+                vector_blob BLOB NOT NULL,
                 PRIMARY KEY(note_index, part_index)
             );
             CREATE VIRTUAL TABLE IF NOT EXISTS note_fts
@@ -174,7 +215,7 @@ impl SqliteSearchIndex {
             params![SCHEMA_VERSION.to_string()],
         )?;
         self.conn.execute(
-            "INSERT OR REPLACE INTO search_meta(key, value) VALUES ('vector_backend', 'sqlite-json-f32')",
+            "INSERT OR REPLACE INTO search_meta(key, value) VALUES ('vector_backend', 'sqlite-blob-f32')",
             [],
         )?;
         Ok(())
@@ -205,15 +246,14 @@ impl SqliteSearchIndex {
         }
         let mut stmt = self
             .conn
-            .prepare("SELECT note_index, vector_json FROM note_vectors ORDER BY note_index")?;
+            .prepare("SELECT note_index, vector_blob FROM note_vectors ORDER BY note_index")?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)? as usize, row.get::<_, String>(1)?))
+            Ok((row.get::<_, i64>(0)? as usize, row.get::<_, Vec<u8>>(1)?))
         })?;
         let mut best_by_note: Vec<(usize, f32)> = Vec::new();
         for row in rows {
-            let (note_index, vector_json) = row?;
-            let values: Vec<f32> = serde_json::from_str(&vector_json)?;
-            let score = Embedding::new(values).cosine_similarity(query);
+            let (note_index, vector_blob) = row?;
+            let score = embedding_from_blob(&vector_blob)?.cosine_similarity(query);
             if score <= 0.0 {
                 continue;
             }
@@ -249,6 +289,48 @@ impl SqliteSearchIndex {
         });
         Ok(facets)
     }
+}
+
+fn engine_snapshot_hash(engine: &SearchEngine) -> String {
+    let mut hasher = Sha256::new();
+    for (index, note) in engine.notes().iter().enumerate() {
+        hasher.update(note.id.as_str().as_bytes());
+        hasher.update(engine.documents()[index].as_bytes());
+        for category in &note.categories {
+            hasher.update((category.len() as u64).to_le_bytes());
+            hasher.update(category.as_bytes());
+        }
+        for vector in &engine.vectors()[index].parts {
+            hasher.update((vector.len() as u64).to_le_bytes());
+            for value in &vector.0 {
+                hasher.update(value.to_le_bytes());
+            }
+        }
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn embedding_to_blob(embedding: &Embedding) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(embedding.len() * 4);
+    for value in &embedding.0 {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    bytes
+}
+
+fn embedding_from_blob(bytes: &[u8]) -> CoreResult<Embedding> {
+    if bytes.len() % 4 != 0 {
+        return Err(CoreError::parse(
+            "SQLite embedding",
+            "BLOB length is not divisible by four",
+        ));
+    }
+    Ok(Embedding::new(
+        bytes
+            .chunks_exact(4)
+            .map(|chunk| f32::from_le_bytes(chunk.try_into().expect("four-byte chunk")))
+            .collect(),
+    ))
 }
 
 fn ids_only(ranked: Vec<(usize, f32)>) -> Vec<usize> {
@@ -335,10 +417,47 @@ mod tests {
         index.rebuild_from_engine(&engine).unwrap();
 
         assert_eq!(index.persisted_note_count().unwrap(), 2);
-        assert_eq!(index.vector_backend().unwrap(), "sqlite-json-f32");
-        let results = index.search(&engine, "breaker panel", &[]).unwrap();
+        assert_eq!(index.vector_backend().unwrap(), "sqlite-blob-f32");
+        let query = engine.query_embedding("breaker panel");
+        let results = index
+            .search(&engine, "breaker panel", &[], Some(&query))
+            .unwrap();
         assert_eq!(results.hits[0].title, "Kitchen wiring");
         assert!(results.facets.iter().any(|f| f.category == "electrical"));
         assert!(dir.path().join(SQLITE_SEARCH_DB).exists());
+    }
+
+    #[test]
+    fn schema_v1_is_rebuilt_for_blob_vectors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SQLITE_SEARCH_DB);
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE search_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                INSERT INTO search_meta VALUES ('schema_version', '1');
+                CREATE TABLE note_vectors(
+                    note_index INTEGER,
+                    part_index INTEGER,
+                    dim INTEGER,
+                    vector_json TEXT
+                );
+                ",
+            )
+            .unwrap();
+        drop(connection);
+
+        let index = SqliteSearchIndex::open(dir.path()).unwrap();
+        assert_eq!(index.vector_backend().unwrap(), "sqlite-blob-f32");
+        let column: String = index
+            .conn
+            .query_row(
+                "SELECT name FROM pragma_table_info('note_vectors') WHERE name = 'vector_blob'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(column, "vector_blob");
     }
 }

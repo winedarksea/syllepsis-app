@@ -69,10 +69,9 @@ pub async fn generate_proposal(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         with_book!(state, book, {
-            state.with_llm_service(book, |service| {
-                app::generate_proposal_with_service(book, service, &note_id, task, model_override)
-                    .map_err(|e| e.to_string())
-            })
+            state
+                .local_ai
+                .submit_llm(book, note_id, task, model_override)
         })
     })
     .await
@@ -112,8 +111,12 @@ pub fn accept_proposal(
     fact_check_passed: bool,
 ) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        app::accept_proposal(book, &proposal, store_old_as_commentary, fact_check_passed)
-            .map_err(|e| e.to_string())
+        let updated =
+            app::accept_proposal(book, &proposal, store_old_as_commentary, fact_check_passed)
+                .map_err(|e| e.to_string())?;
+        let _ = state.local_ai.enqueue_note(book, updated.id.clone(), false);
+        state.invalidate_graph_corpus();
+        Ok(updated)
     })
 }
 
@@ -167,6 +170,11 @@ pub fn download_builtin_model(
         .collect();
     state.invalidate_llm_service();
     state.invalidate_graph_corpus();
+    if manifest.kind == onnx::ModelKind::Embedding {
+        if let Some(book) = state.book.lock().unwrap().as_ref() {
+            let _ = state.local_ai.enqueue_all_stale(book, true);
+        }
+    }
     Ok(ModelDownloadReport {
         model_id,
         downloaded_files: downloaded,

@@ -106,6 +106,12 @@ pub fn is_sidecar(path: &str) -> bool {
         && path.ends_with(&format!(".{}", layout::CRDT_EXTENSION))
 }
 
+/// True for generated per-note embedding records. These are synced as ordinary primary files,
+/// except concurrent writes converge to one record without creating user-facing conflict copies.
+pub fn is_embedding_sidecar(path: &str) -> bool {
+    path.starts_with(&format!("{}/", layout::EMBEDDINGS_DIR)) && path.ends_with(".svec")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

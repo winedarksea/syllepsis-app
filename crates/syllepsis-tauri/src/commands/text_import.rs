@@ -37,6 +37,8 @@ pub fn commit_text_import(
     request: TextImportCommitRequest,
 ) -> Result<TextImportReport, String> {
     with_book!(state, book, {
-        app::commit_text_import(book, request).map_err(|e| e.to_string())
+        let report = app::commit_text_import(book, request).map_err(|e| e.to_string())?;
+        let _ = state.local_ai.enqueue_all_stale(book, false);
+        Ok(report)
     })
 }

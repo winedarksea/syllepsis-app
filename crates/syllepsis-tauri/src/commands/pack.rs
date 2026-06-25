@@ -60,7 +60,9 @@ pub fn import_pack(
 ) -> Result<ImportReport, String> {
     with_book!(state, book, {
         let pack = app::read_pack(Path::new(&path)).map_err(|e| e.to_string())?;
-        app::import_pack(book, &pack, &options).map_err(|e| e.to_string())
+        let report = app::import_pack(book, &pack, &options).map_err(|e| e.to_string())?;
+        let _ = state.local_ai.enqueue_all_stale(book, false);
+        Ok(report)
     })
 }
 
@@ -94,5 +96,8 @@ pub fn import_pack_as_book(
     track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
+    if let Some(book) = state.book.lock().unwrap().as_ref() {
+        let _ = state.local_ai.enqueue_all_stale(book, false);
+    }
     Ok(info)
 }

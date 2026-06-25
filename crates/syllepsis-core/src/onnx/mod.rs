@@ -7,7 +7,7 @@
 //! a model needs is described once by a [`ModelManifest`]; from there a [`ModelCache`] places its
 //! files, [`download`] fetches the missing ones through a swappable [`ModelFetcher`],
 //! [`verify`] checks them against pinned sha256s, and [`execution_provider`] picks the backend.
-//! Gemma 4 E2B and Qwen3-Embedding are different model families, but the local runtime mechanics
+//! Gemma 4 E2B and EmbeddingGemma are different models, but the local runtime mechanics
 //! are intentionally the same: manifest-described ONNX exports, tokenizer files, external data,
 //! cache verification, and execution-provider selection.
 //!
@@ -41,7 +41,7 @@ pub use execution_provider::{
 };
 pub use manifest::{
     builtin, builtin_manifests, ModelFile, ModelKind, ModelManifest, PoolingStrategy, Quantization,
-    BUNDLED_LLM_ID, QWEN3_EMBEDDING_ID,
+    BUNDLED_LLM_ID, EMBEDDINGGEMMA_ID,
 };
 pub use status::{
     inspect_model_cache, ModelCacheStatus, ModelFileCacheState, ModelFileCacheStatus,

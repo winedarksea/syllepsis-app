@@ -60,8 +60,10 @@ pub fn create_note(
     inherit_from: Option<String>,
 ) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        app::create_note(book, object_type, &title, inherit_from.as_deref())
-            .map_err(|e| e.to_string())
+        let created = app::create_note(book, object_type, &title, inherit_from.as_deref())
+            .map_err(|e| e.to_string())?;
+        let _ = state.local_ai.enqueue_note(book, created.id.clone(), false);
+        Ok(created)
     })
 }
 
@@ -69,7 +71,20 @@ pub fn create_note(
 #[tauri::command]
 pub fn update_note(state: State<AppState>, note: NoteDto) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        app::update_note(book, note).map_err(|e| e.to_string())
+        let updated = app::update_note(book, note).map_err(|e| e.to_string())?;
+        let stored = book
+            .store
+            .read_note(&syllepsis_core::id::NoteId::parse(&updated.id).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        if syllepsis_core::embeddings::note_embedding_is_stale(book, &stored)
+            .map_err(|e| e.to_string())?
+        {
+            state
+                .local_ai
+                .enqueue_note(book, updated.id.clone(), false)?;
+        }
+        state.invalidate_graph_corpus();
+        Ok(updated)
     })
 }
 
@@ -89,7 +104,9 @@ pub fn set_prior(
 #[tauri::command]
 pub fn fork_note(state: State<AppState>, id: String) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        app::fork_note(book, &id).map_err(|e| e.to_string())
+        let forked = app::fork_note(book, &id).map_err(|e| e.to_string())?;
+        let _ = state.local_ai.enqueue_note(book, forked.id.clone(), false);
+        Ok(forked)
     })
 }
 

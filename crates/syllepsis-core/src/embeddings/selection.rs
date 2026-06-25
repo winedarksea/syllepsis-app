@@ -13,6 +13,7 @@ use std::path::Path;
 use crate::config::EmbeddingConfig;
 use crate::embeddings::provider::EmbeddingProvider;
 use crate::embeddings::HashingEmbedder;
+use crate::error::{CoreError, CoreResult};
 
 /// Pick the embedding provider given the (optional) local models directory and config.
 pub fn select_embedder(
@@ -27,6 +28,40 @@ pub fn select_embedder(
     let _ = models_root;
 
     Box::new(HashingEmbedder::new(cfg.dimensions))
+}
+
+/// Select the configured model without substituting hashing vectors. Canonical sidecars must
+/// never mix vector spaces, so background generation and semantic query ranking use this path.
+pub fn try_select_embedder(
+    models_root: Option<&Path>,
+    cfg: &EmbeddingConfig,
+) -> CoreResult<Box<dyn EmbeddingProvider>> {
+    #[cfg(feature = "onnx")]
+    {
+        use crate::embeddings::onnx::OnnxEmbedder;
+        use crate::onnx::{manifest, ModelCache};
+
+        let model = manifest::builtin(&cfg.model_id)
+            .ok_or_else(|| CoreError::Model(format!("unknown embedding model {}", cfg.model_id)))?;
+        let root = models_root
+            .ok_or_else(|| CoreError::Model("local model directory unavailable".into()))?;
+        let cache = ModelCache::new(root);
+        if !cache.is_cached(&model) {
+            return Err(CoreError::Model(format!(
+                "embedding model {} is not downloaded",
+                model.id
+            )));
+        }
+        return OnnxEmbedder::load(&cache, &model, cfg)
+            .map(|provider| Box::new(provider) as Box<dyn EmbeddingProvider>);
+    }
+    #[cfg(not(feature = "onnx"))]
+    {
+        let _ = (models_root, cfg);
+        Err(CoreError::Model(
+            "this build does not include local ONNX embeddings".into(),
+        ))
+    }
 }
 
 /// Attempt to build the ONNX embedder; `None` (→ fallback) if any precondition is unmet.
@@ -74,7 +109,7 @@ mod tests {
         // A models dir that exists but holds no files still yields the fallback.
         let dir = tempfile::tempdir().unwrap();
         let cfg = EmbeddingConfig {
-            model_id: "qwen3-embedding-0.6b".to_string(),
+            model_id: "embeddinggemma-300m".to_string(),
             ..Default::default()
         };
         let provider = select_embedder(Some(dir.path()), &cfg);

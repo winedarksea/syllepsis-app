@@ -12,6 +12,7 @@
 use crate::config::EmbeddingConfig;
 use crate::embeddings::chunk::chunk_text;
 use crate::embeddings::provider::EmbeddingProvider;
+use crate::embeddings::sidecar::NoteEmbeddingSidecar;
 use crate::embeddings::vector::Embedding;
 use crate::id::NoteId;
 use crate::model::{Category, Note};
@@ -24,6 +25,9 @@ pub struct NoteVectors {
     pub centroid: Embedding,
     /// Header + per-chunk vectors, for matching a query against the closest passage.
     pub parts: Vec<Embedding>,
+    pub summary: Option<Embedding>,
+    pub full_note: Option<Embedding>,
+    pub stale: bool,
 }
 
 impl NoteVectors {
@@ -33,6 +37,41 @@ impl NoteVectors {
             .iter()
             .map(|p| p.cosine_similarity(query))
             .fold(0.0_f32, f32::max)
+    }
+
+    pub fn missing(note: &Note, dimensions: usize) -> NoteVectors {
+        NoteVectors {
+            note_id: note.id.clone(),
+            centroid: Embedding::zeros(dimensions),
+            parts: Vec::new(),
+            summary: None,
+            full_note: None,
+            stale: false,
+        }
+    }
+
+    pub fn from_sidecar(note: &Note, sidecar: &NoteEmbeddingSidecar, stale: bool) -> NoteVectors {
+        let summary = sidecar.summary.as_ref().map(|stored| stored.vector.clone());
+        let full_note = sidecar
+            .full_note
+            .as_ref()
+            .map(|stored| stored.vector.clone());
+        let centroid = full_note
+            .clone()
+            .or_else(|| summary.clone())
+            .unwrap_or_else(|| Embedding::zeros(sidecar.model.dimensions));
+        let parts = [summary.clone(), full_note.clone()]
+            .into_iter()
+            .flatten()
+            .collect();
+        NoteVectors {
+            note_id: note.id.clone(),
+            centroid,
+            parts,
+            summary,
+            full_note,
+            stale,
+        }
     }
 }
 
@@ -60,6 +99,9 @@ pub fn embed_note(
         note_id: note.id.clone(),
         centroid,
         parts,
+        summary: None,
+        full_note: None,
+        stale: false,
     }
 }
 

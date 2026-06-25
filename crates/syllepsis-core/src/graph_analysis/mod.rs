@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use sha2::{Digest, Sha256};
 
-use crate::embeddings::{embed_notes, select_embedder, Embedding};
+use crate::embeddings::{configured_model_fingerprint, load_embedding_corpus, Embedding};
 use crate::error::CoreResult;
 use crate::model::{Category, Note};
 use crate::storage::{Book, NoteStore};
@@ -43,11 +43,11 @@ impl SemanticGraphCorpus {
             .filter(|note| note.metadata.is_visible_in_default_views())
             .collect();
         notes.sort_by(|left, right| left.id.to_string().cmp(&right.id.to_string()));
-        let provider = select_embedder(book.models_root(), &book.config.embedding);
-        let provider_id = provider.name().to_string();
+        let provider_id = configured_model_fingerprint(&book.config.embedding)?.model_id;
         let fingerprint = corpus_fingerprint(book, &notes, &embedding_source_cache_key(book))?;
-        let vectors = embed_notes(provider.as_ref(), &notes, &book.config.embedding);
-        let centroids: Vec<Embedding> = vectors
+        let loaded = load_embedding_corpus(book, &notes)?;
+        let centroids: Vec<Embedding> = loaded
+            .vectors
             .into_iter()
             .map(|vectors| vectors.centroid)
             .collect();
@@ -295,19 +295,23 @@ pub fn corpus_fingerprint(book: &Book, notes: &[Note], provider_id: &str) -> Cor
 }
 
 fn embedding_source_cache_key(_book: &Book) -> String {
-    #[cfg(feature = "onnx")]
-    {
-        use crate::onnx::{manifest, ModelCache};
-        if let (Some(models_root), Some(model_manifest)) = (
-            _book.models_root(),
-            manifest::builtin(&_book.config.embedding.model_id),
-        ) {
-            if ModelCache::new(models_root).is_cached(&model_manifest) {
-                return format!("cached:{}", model_manifest.id);
+    let mut hasher = Sha256::new();
+    hasher.update(_book.config.embedding.model_id.as_bytes());
+    let directory = crate::storage::layout::embeddings_dir(&_book.root);
+    if let Ok(entries) = std::fs::read_dir(directory) {
+        let mut paths = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        paths.sort();
+        for path in paths {
+            if let Ok(bytes) = std::fs::read(path) {
+                hasher.update((bytes.len() as u64).to_le_bytes());
+                hasher.update(bytes);
             }
         }
     }
-    "hashing-bow".into()
+    format!("{:x}", hasher.finalize())
 }
 
 fn semantic_edges(

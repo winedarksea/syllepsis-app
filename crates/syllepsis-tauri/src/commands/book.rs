@@ -58,6 +58,9 @@ pub fn open_book(app: AppHandle, state: State<AppState>, path: String) -> Result
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
     state.invalidate_graph_corpus();
+    if let Some(book) = state.book.lock().unwrap().as_ref() {
+        let _ = state.local_ai.enqueue_all_stale(book, false);
+    }
     Ok(info)
 }
 
@@ -82,6 +85,9 @@ pub fn create_book(
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
     state.invalidate_graph_corpus();
+    if let Some(book) = state.book.lock().unwrap().as_ref() {
+        let _ = state.local_ai.enqueue_all_stale(book, false);
+    }
     Ok(info)
 }
 
@@ -107,6 +113,9 @@ pub fn create_book_in_parent(
     *state.book.lock().unwrap() = Some(book);
     state.invalidate_llm_service();
     state.invalidate_graph_corpus();
+    if let Some(book) = state.book.lock().unwrap().as_ref() {
+        let _ = state.local_ai.enqueue_all_stale(book, false);
+    }
     Ok(info)
 }
 

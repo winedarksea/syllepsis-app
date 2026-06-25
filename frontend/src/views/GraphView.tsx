@@ -7,7 +7,7 @@ import { GraphControls } from './GraphControls';
 import { filterSemanticEdges } from './graphGeometry';
 import './GraphView.css';
 
-const QWEN3_EMBEDDING_MODEL_ID = 'qwen3-embedding-0.6b';
+const EMBEDDINGGEMMA_MODEL_ID = 'embeddinggemma-300m';
 
 export function GraphView() {
   const store = useStore();
@@ -64,7 +64,7 @@ export function GraphView() {
     setModelDownloadInProgress(true);
     setModelDownloadError(null);
     try {
-      await api.downloadBuiltinModel(QWEN3_EMBEDDING_MODEL_ID);
+      await api.downloadBuiltinModel(EMBEDDINGGEMMA_MODEL_ID);
       setEmbeddingModelRevision((revision) => revision + 1);
     } catch (nextError) {
       setModelDownloadError(String(nextError));
@@ -103,7 +103,7 @@ export function GraphView() {
                 disabled={modelDownloadInProgress}
                 onClick={downloadEmbeddingModel}
               >
-                {modelDownloadInProgress ? 'Downloading Qwen3…' : 'Download Qwen3 embedding model'}
+                {modelDownloadInProgress ? 'Downloading EmbeddingGemma…' : 'Download EmbeddingGemma model'}
               </button>
             </>
           )}

@@ -1,4 +1,4 @@
-//! The model-backed [`EmbeddingProvider`]: Qwen3-Embedding-0.6B on ONNX Runtime (feature `onnx`).
+//! The model-backed [`EmbeddingProvider`]: EmbeddingGemma 300M on ONNX Runtime (`onnx` feature).
 //!
 //! This is the Phase-2 redefinition — the embedder now rides the *same* ONNX stack as the LLM
 //! ([`onnx`](crate::onnx)). It is one forward pass: tokenize, run the graph, pool the hidden
@@ -19,17 +19,19 @@ use ort::value::{Outlet, Tensor};
 use serde::Deserialize;
 
 use crate::config::EmbeddingConfig;
+use crate::embeddings::input::fit_document_token_ids;
 use crate::embeddings::pooling::{format_query, matryoshka_embedding, pool};
 use crate::embeddings::provider::{EmbeddingProvider, ProviderInfo};
 use crate::embeddings::vector::Embedding;
 use crate::error::CoreResult;
+use crate::model::Note;
 use crate::onnx::cache::ModelCache;
 use crate::onnx::manifest::{FileRole, ModelManifest, PoolingStrategy};
 use crate::onnx::session::{map_ort_err, ModelSession};
 use crate::onnx::tokenizer::ModelTokenizer;
 use crate::onnx::RuntimeDiagnostics;
 
-/// Qwen3-Embedding-0.6B (or any manifest-described embedder) behind the embedding seam.
+/// A manifest-described ONNX embedder behind the embedding seam.
 pub struct OnnxEmbedder {
     // `Session::run` needs `&mut`, but the seam is `&self`; the Mutex makes the provider usable
     // behind a shared `Box<dyn EmbeddingProvider>` while keeping inference serialized per session.
@@ -45,6 +47,9 @@ pub struct OnnxEmbedder {
     pooling: PoolingStrategy,
     /// Instruction template for the query side of an asymmetric model; `None` ⇒ symmetric.
     query_instruction: Option<String>,
+    document_instruction: Option<String>,
+    embedding_output_name: Option<String>,
+    max_context_tokens: usize,
     /// The model's native output width.
     native_dim: usize,
     /// Matryoshka truncation target (`< native_dim`), or `None` to keep the full vector.
@@ -114,6 +119,9 @@ impl OnnxEmbedder {
             cache_config,
             pooling: manifest.pooling.unwrap_or(PoolingStrategy::LastToken),
             query_instruction: manifest.query_instruction.clone(),
+            document_instruction: manifest.document_instruction.clone(),
+            embedding_output_name: manifest.embedding_output_name.clone(),
+            max_context_tokens: manifest.max_context_tokens,
             native_dim: manifest.hidden_size,
             target_dim,
             name: manifest.id.clone(),
@@ -131,7 +139,12 @@ impl OnnxEmbedder {
 
     /// Tokenize, run the graph, pool, truncate, normalize. Empty input ⇒ a zero vector.
     fn run(&self, text: &str) -> CoreResult<Embedding> {
-        let ids = self.tokenizer.encode(text, true)?;
+        let mut ids = self.tokenizer.encode(text, true)?;
+        ids.truncate(self.max_context_tokens);
+        self.run_ids(ids)
+    }
+
+    fn run_ids(&self, ids: Vec<i64>) -> CoreResult<Embedding> {
         if ids.is_empty() {
             return Ok(Embedding::zeros(self.dimensions()));
         }
@@ -198,16 +211,39 @@ impl OnnxEmbedder {
         let mut session = self.session.lock().expect("embedding session poisoned");
         let outputs = session.run(inputs).map_err(map_ort_err)?;
 
-        // The base-model export's first output is the [1, seq, hidden] hidden-state tensor.
-        let (shape, data) = outputs[0]
-            .try_extract_tensor::<f32>()
-            .map_err(map_ort_err)?;
+        let output = self
+            .embedding_output_name
+            .as_ref()
+            .and_then(|name| outputs.get(name))
+            .unwrap_or(&outputs[0]);
+        let (shape, data) = output.try_extract_tensor::<f32>().map_err(map_ort_err)?;
+        if shape.len() == 2 && shape[0] == 1 && shape[1] as usize == self.native_dim {
+            return Ok(matryoshka_embedding(data.to_vec(), self.target_dim));
+        }
         let hidden_size = shape.last().copied().unwrap_or(0) as usize;
         let pooled = pool(self.pooling, data, seq, hidden_size, &mask);
         if pooled.is_empty() {
             return Ok(Embedding::zeros(self.dimensions()));
         }
         Ok(matryoshka_embedding(pooled, self.target_dim))
+    }
+
+    fn document_ids(&self, title: &str, text: &str, head_tail: bool) -> CoreResult<Vec<i64>> {
+        let title = if title.trim().is_empty() {
+            "none"
+        } else {
+            title
+        };
+        let template = self.document_instruction.as_deref().unwrap_or("{text}");
+        let prefix = template.replace("{title}", title).replace("{text}", "");
+        let prefix_ids = self.tokenizer.encode(&prefix, true)?;
+        let text_ids = self.tokenizer.encode(text, false)?;
+        Ok(fit_document_token_ids(
+            prefix_ids,
+            &text_ids,
+            self.max_context_tokens,
+            head_tail,
+        ))
     }
 }
 
@@ -295,12 +331,40 @@ impl EmbeddingProvider for OnnxEmbedder {
     }
 
     fn embed_query(&self, text: &str) -> Embedding {
+        self.try_embed_query(text)
+            .unwrap_or_else(|_| Embedding::zeros(self.dimensions()))
+    }
+
+    fn try_embed_query(&self, text: &str) -> CoreResult<Embedding> {
         match &self.query_instruction {
-            Some(instruction) => self
-                .run(&format_query(instruction, text))
-                .unwrap_or_else(|_| Embedding::zeros(self.dimensions())),
-            None => self.embed(text),
+            Some(instruction) => self.run(&format_query(instruction, text)),
+            None => self.run(text),
         }
+    }
+
+    fn embed_note_fields(&self, note: &Note) -> CoreResult<(Option<Embedding>, Option<Embedding>)> {
+        Ok((
+            self.embed_note_summary(note)?,
+            self.embed_full_note(note)?,
+        ))
+    }
+
+    fn embed_note_summary(&self, note: &Note) -> CoreResult<Option<Embedding>> {
+        let summary = if note.summary.trim().is_empty() {
+            None
+        } else {
+            Some(self.run_ids(self.document_ids(&note.title, &note.summary, false)?)?)
+        };
+        Ok(summary)
+    }
+
+    fn embed_full_note(&self, note: &Note) -> CoreResult<Option<Embedding>> {
+        let full_note = if note.title.trim().is_empty() && note.body.trim().is_empty() {
+            None
+        } else {
+            Some(self.run_ids(self.document_ids(&note.title, &note.body, true)?)?)
+        };
+        Ok(full_note)
     }
 }
 

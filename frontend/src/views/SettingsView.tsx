@@ -15,6 +15,7 @@ import type { ThemePref } from '../lib/store';
 import type {
   BuildInfo, BookConfig, CloudLlmProviderDescriptor,
   PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, ModelRef,
+  EmbeddingConfig, LocalAiDevicePolicy,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, PluginDescriptor,
   DeleteCurrentBookReport,
 } from '../types';
@@ -65,6 +66,7 @@ export function SettingsView({ launchMode = false }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [localAiPolicy, setLocalAiPolicy] = useState<LocalAiDevicePolicy | null>(null);
 
   const loadCloud = useCallback(async () => {
     setDescriptors(await api.cloudLlmProviderDescriptors());
@@ -74,6 +76,7 @@ export function SettingsView({ launchMode = false }: Props) {
     api.getBuildInfo().then(setBuild).catch((e) => setError(String(e)));
     loadCloud().catch((e) => setError(String(e)));
     api.listPlugins().then(setPlugins).catch((e) => setError(String(e)));
+    api.getLocalAiDevicePolicy().then(setLocalAiPolicy).catch((e) => setError(String(e)));
   }, [loadCloud]);
 
   useEffect(() => {
@@ -130,6 +133,16 @@ export function SettingsView({ launchMode = false }: Props) {
             onChanged={flash}
             onError={setError}
           />
+          {localAiPolicy && (
+            <DeviceEmbeddingPanel
+              value={localAiPolicy}
+              onSaved={(policy) => {
+                setLocalAiPolicy(policy);
+                flash('Device embedding policy saved.');
+              }}
+              onError={setError}
+            />
+          )}
           {book ? (
             config && (
               <LlmDefaultsPanel
@@ -180,6 +193,14 @@ export function SettingsView({ launchMode = false }: Props) {
                     <SearchPanel
                       value={config.search}
                       onSaved={(search) => { setConfig((p) => p && { ...p, search }); flash('Search tuning saved.'); }}
+                      onError={setError}
+                    />
+                    <EmbeddingPanel
+                      value={config.embedding}
+                      onSaved={(embedding) => {
+                        setConfig((p) => p && { ...p, embedding });
+                        flash('Embedding configuration saved.');
+                      }}
                       onError={setError}
                     />
                     <CleanupPanel
@@ -871,6 +892,90 @@ function SyncPanel({ value, onSaved, onError }: {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ── Device-local embedding policy ────────────────────────────────────────────────
+
+function DeviceEmbeddingPanel({ value, onSaved, onError }: {
+  value: LocalAiDevicePolicy;
+  onSaved: (value: LocalAiDevicePolicy) => void;
+  onError: (message: string) => void;
+}) {
+  const { draft, setDraft, dirty, saving, commit } = useSectionDraft(
+    value,
+    async (policy) => onSaved(await api.updateLocalAiDevicePolicy(policy)),
+    onError,
+  );
+  return (
+    <div className="sv-subpanel">
+      <h4 className="sv-subhead">On-device embeddings</h4>
+      <p className="sv-hint">
+        Synced note vectors remain usable when generation is disabled. Search queries may still
+        load the model for one small inference.
+      </p>
+      <Field label="Generate note embeddings on this device">
+        <Toggle
+          checked={draft.generate_note_embeddings}
+          onChange={(enabled) => setDraft({ ...draft, generate_note_embeddings: enabled })}
+        />
+      </Field>
+      <Field label="Pause note embeddings on battery">
+        <Toggle
+          checked={draft.pause_note_embeddings_on_battery}
+          onChange={(enabled) => setDraft({ ...draft, pause_note_embeddings_on_battery: enabled })}
+        />
+      </Field>
+      <Field label="Embedding idle delay (seconds)">
+        <NumberInput
+          value={draft.note_embedding_debounce_seconds}
+          onChange={(seconds) => setDraft({ ...draft, note_embedding_debounce_seconds: seconds })}
+        />
+      </Field>
+      <Field label="Unload model after idle (seconds)">
+        <NumberInput
+          value={draft.model_idle_unload_seconds}
+          onChange={(seconds) => setDraft({ ...draft, model_idle_unload_seconds: seconds })}
+        />
+      </Field>
+      <SaveBar saving={saving} dirty={dirty} onSave={commit} />
+    </div>
+  );
+}
+
+// ── Advanced: embedding model ────────────────────────────────────────────────────
+
+function EmbeddingPanel({ value, onSaved, onError }: {
+  value: EmbeddingConfig;
+  onSaved: (value: EmbeddingConfig) => void;
+  onError: (message: string) => void;
+}) {
+  const { draft, setDraft, dirty, saving, commit } = useSectionDraft(
+    value,
+    async (embedding) => {
+      const updated = await api.updateEmbeddingConfig(embedding);
+      onSaved(updated.embedding);
+    },
+    onError,
+  );
+  return (
+    <div className="sv-subpanel">
+      <h4 className="sv-subhead">Embedding model</h4>
+      <Field label="Model ID">
+        <input
+          className="sv-input"
+          value={draft.model_id}
+          onChange={(event) => setDraft({ ...draft, model_id: event.target.value })}
+        />
+      </Field>
+      <Field label="MRL dimensions">
+        <NumberInput
+          value={draft.matryoshka_dims ?? 256}
+          onChange={(dimensions) => setDraft({ ...draft, matryoshka_dims: dimensions })}
+        />
+      </Field>
+      <SaveBar saving={saving} dirty={dirty} onSave={commit} />
     </div>
   );
 }

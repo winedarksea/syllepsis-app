@@ -9,7 +9,11 @@ Search is a first-class feature. It must be fast, accurate, and deeply integrate
 | **Exact match** | Literal string search |
 | **Sparse retrieval (BM25)** | Keyword-based relevance ranking |
 | **Vector search** | Semantic similarity using local embeddings |
-| **Reciprocal Rank Fusion (RRF)** | Combines BM25 and vector results into a single ranked list |
+| **Reciprocal Rank Fusion (RRF)** | Combines exact, BM25, and vector rankings into a single ranked list |
+
+Document vectors are read from synced per-note embedding sidecars and reused by search, related notes,
+duplicates, blind spots, category centroids, and clustering. Search embeds only the query at request time.
+If the local model is unavailable, exact and BM25 rankings continue without the vector leg.
 
 ## Filtering
 

@@ -26,7 +26,7 @@ rand = { workspace = true }
 
 # Heavy native ML dependencies for the real local-model path live behind the `onnx` feature so
 # the default build/test stays fast. `ort` is the ONNX Runtime; `tokenizers` is the Hugging Face
-# fast tokenizer the Qwen3/Gemma models ship; `reqwest` fetches the first-run model download.
+# fast tokenizer the local models ship; `reqwest` fetches the first-run model download.
 ort = { version = "2.0.0-rc.12", optional = true, default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls", "coreml"] }
 # default-features off drops the oniguruma (C) and esaxx (C++) builds; Qwen's ByteLevel BPE
 # tokenizer.json loads without them.
@@ -45,7 +45,7 @@ extism = { version = "1", optional = true }
 
 [features]
 default = []
-# Enables the real ONNX-backed embedder (Qwen3-Embedding-0.6B) and local LLM (Gemma 4 E2B),
+# Enables the real ONNX-backed embedder (EmbeddingGemma 300M) and local LLM (Gemma 4 E2B),
 # plus the HTTP model fetcher. Pulls native ONNX Runtime binaries at build time.
 onnx = ["dep:ort", "dep:tokenizers", "dep:reqwest"]
 # Enables the fine-grained Loro text CRDT backend behind the CrdtBackend seam (crdt::loro_backend).

@@ -55,7 +55,11 @@ macro_rules! with_book {
 #[tauri::command]
 pub fn sync_to_folder(state: State<AppState>, remote_path: String) -> Result<SyncReport, String> {
     with_book!(state, book, {
-        app::sync_to_local_folder(book, &remote_path).map_err(|e| e.to_string())
+        let report = app::sync_to_local_folder(book, &remote_path).map_err(|e| e.to_string())?;
+        book.store.refresh().map_err(|e| e.to_string())?;
+        let _ = state.local_ai.enqueue_all_stale(book, false);
+        state.invalidate_graph_corpus();
+        Ok(report)
     })
 }
 
@@ -114,14 +118,20 @@ pub fn git_pull(state: State<AppState>) -> Result<git_app::GitCommandReport, Str
 
 #[tauri::command]
 pub fn start_file_watch(state: State<AppState>) -> Result<(), String> {
-    let root = {
+    let (root, models_root) = {
         let guard = state.book.lock().unwrap();
-        guard
+        let book = guard
             .as_ref()
-            .map(|book| book.root.clone())
-            .ok_or_else(|| "no book is open".to_string())?
+            .ok_or_else(|| "no book is open".to_string())?;
+        (
+            book.root.clone(),
+            book.models_root()
+                .ok_or_else(|| "local model directory unavailable".to_string())?
+                .to_path_buf(),
+        )
     };
     let watch_root = root.clone();
+    let local_ai = state.local_ai.clone();
     let recent_watch_activity = Arc::new(Mutex::new(HashMap::<String, Instant>::new()));
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         let event = match event {
@@ -147,6 +157,16 @@ pub fn start_file_watch(state: State<AppState>) -> Result<(), String> {
                 continue;
             }
             let kind = watch_activity_kind(&rel);
+            if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
+                if let Ok(note_id) = NoteId::parse(file_name) {
+                    local_ai.enqueue_note_path(
+                        watch_root.clone(),
+                        models_root.clone(),
+                        note_id.to_string(),
+                        false,
+                    );
+                }
+            }
             let detail = if kind == "conflict_detected" {
                 "conflict copy detected"
             } else {
@@ -551,7 +571,10 @@ pub fn upload_book_to_cloud(
     with_book!(state, book, {
         let store = opendal_store_for(&provider)?;
         let mut engine = ManagedCloudSyncEngine::new(book, store, provider);
-        engine.sync().map_err(|e| e.to_string())
+        let report = engine.sync().map_err(|e| e.to_string())?;
+        let _ = state.local_ai.enqueue_all_stale(book, false);
+        state.invalidate_graph_corpus();
+        Ok(report)
     })
 }
 
@@ -625,6 +648,9 @@ pub fn open_cloud_book(
     let mut engine = ManagedCloudSyncEngine::new(&book, store, provider);
     engine.sync().map_err(|e| e.to_string())?;
     *state.book.lock().unwrap() = Some(book);
+    if let Some(book) = state.book.lock().unwrap().as_ref() {
+        let _ = state.local_ai.enqueue_all_stale(book, false);
+    }
     Ok(())
 }
 

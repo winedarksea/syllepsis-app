@@ -33,14 +33,27 @@ macro_rules! with_book {
 
 /// Run a full search; `category_filter` (possibly empty) narrows the hits.
 #[tauri::command]
-pub fn search(
-    state: State<AppState>,
+pub async fn search(
+    app_handle: tauri::AppHandle,
     query: String,
     category_filter: Vec<String>,
 ) -> Result<SearchResults, String> {
-    with_book!(state, book, {
-        app::search(book, &query, &category_filter).map_err(|e| e.to_string())
+    use tauri::Manager;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle.state::<AppState>();
+        with_book!(state, book, {
+            let query_embedding = state.local_ai.submit_query(book, query.clone()).ok();
+            app::search_with_query_embedding(
+                book,
+                &query,
+                &category_filter,
+                query_embedding.as_ref(),
+            )
+            .map_err(|e| e.to_string())
+        })
     })
+    .await
+    .map_err(|error| format!("search worker failed: {error}"))?
 }
 
 /// Notes related to `id` for the related carousel.

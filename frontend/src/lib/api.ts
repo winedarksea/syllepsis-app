@@ -10,6 +10,7 @@ import type {
   CloudLlmConnectionTestResult, CloudLlmProviderDescriptor, CloudLlmProviderSettings,
   ModelManifest, ModelCacheStatus, ModelDownloadReport,
   BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig,
+  EmbeddingConfig, LocalAiDevicePolicy, LocalAiStatus,
   GitStatusDto, GitCommandReport, SyncActivityEvent, OperationalActivitySummary, NoteSyncActivity,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, CloudSyncConnectStart, CloudBookSummary,
   ManagedCloudReport, DeleteCurrentBookReport,
@@ -37,6 +38,12 @@ export const api = {
   updateCleanupConfig: (cleanup: CleanupConfig) =>
     invoke<BookConfig>('update_cleanup_config', { cleanup }),
   updateLlmConfig: (llm: LlmConfig) => invoke<BookConfig>('update_llm_config', { llm }),
+  updateEmbeddingConfig: (embedding: EmbeddingConfig) =>
+    invoke<BookConfig>('update_embedding_config', { embedding }),
+  getLocalAiDevicePolicy: () =>
+    invoke<LocalAiDevicePolicy>('get_local_ai_device_policy'),
+  updateLocalAiDevicePolicy: (policy: LocalAiDevicePolicy) =>
+    invoke<LocalAiDevicePolicy>('update_local_ai_device_policy', { policy }),
 
   openBook: (path: string) => invoke<BookInfo>('open_book', { path }),
   listTrackedBooks: () => invoke<TrackedBookInfo[]>('list_tracked_books'),
@@ -84,6 +91,10 @@ export const api = {
     invoke<SearchResults>('search', { query, categoryFilter }),
   relatedNotes: (id: string) => invoke<RelatedNote[]>('related_notes', { id }),
   embeddingDiagnostics: () => invoke<EmbeddingDiagnostics>('embedding_diagnostics'),
+  localAiStatus: () => invoke<LocalAiStatus>('local_ai_status'),
+  enqueueAllStaleEmbeddings: () => invoke<number>('enqueue_all_stale_embeddings'),
+  noteEditingFinished: (noteId: string) =>
+    invoke<void>('note_editing_finished', { noteId }),
   graphAnalysis: (request: GraphAnalysisRequest) =>
     invoke<GraphAnalysisResult>('graph_analysis', { request }),
   searchAcrossBooks: (query: string) => invoke<CrossBookNote[]>('search_across_books', { query }),

@@ -33,7 +33,7 @@ docs/                  design docs + implementation plan
 | `storage` | book folder layout, the `NoteStore` seam + FS impl, id registry, the `Book` handle |
 | `sort` | build the prior-relationship tree and flatten it into book view (+ markdown export) |
 | `search` | hybrid BM25 + vector search with RRF fusion; embedding diagnostics; related-note carousel |
-| `embeddings` | `EmbeddingProvider` seam + hashing fallback + `OnnxEmbedder` (Qwen3-Embedding-0.6B, `onnx` feature) |
+| `embeddings` | Versioned synced sidecars + SQLite projection + `EmbeddingProvider` seam + EmbeddingGemma 300M Q4 |
 | `llm` | `LlmProvider` seam + offline heuristic + `OnnxLlmProvider` (Gemma 4 E2B, `onnx` feature); ChatML + proposal/cloud-handoff flow |
 | `onnx` | Shared ONNX infrastructure: model manifest registry, file cache, sha256 verify, download planner, EP selection, session builder |
 | `crdt` | `NoteCrdt`/`CrdtBackend` seams + always-on LWW-register backend + `LoroDocument` (fine-grained text CRDT, `loro` feature) |
@@ -50,9 +50,9 @@ docs/                  design docs + implementation plan
 
 **Phase 2 & 3 implementation is in place** (core/Tauri/frontend builds pass, `clippy -D warnings` clean):
 shared ONNX Runtime infrastructure (model manifests, sha256-verified first-run download, execution-provider
-selection, session builder) shared by the Qwen3-Embedding-0.6B embedder (Phase 2) and the Gemma 4 E2B local
-LLM (Phase 3). Both sit behind `EmbeddingProvider` / `LlmProvider` seams with offline fallbacks; the whole
-suite passes with no model files present. Real ONNX inference has gated ignored tests that require
+selection, session builder) shared by the EmbeddingGemma 300M Q4 embedder (Phase 2) and the Gemma 4 E2B
+local LLM (Phase 3). Canonical note vectors are persisted in synced `_embeddings/` sidecars and projected
+into local SQLite; search degrades to exact + BM25 when query inference is unavailable. Real ONNX inference has gated ignored tests that require
 `SYLLEPSIS_MODEL_CACHE` to point at a populated model cache.
 
 **Phase 4 CRDT sync is in place** (`clippy -D warnings` clean, default suite green): per-note CRDT sidecars

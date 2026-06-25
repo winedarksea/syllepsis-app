@@ -432,6 +432,44 @@ export interface EmbeddingConfig {
   matryoshka_dims: number | null;
 }
 
+export interface LocalAiDevicePolicy {
+  generate_note_embeddings: boolean;
+  pause_note_embeddings_on_battery: boolean;
+  note_embedding_debounce_seconds: number;
+  model_idle_unload_seconds: number;
+}
+
+export interface EmbeddingCoverage {
+  total_notes: number;
+  fresh_notes: number;
+  stale_notes: number;
+  missing_notes: number;
+  incompatible_notes: number;
+  blocked_notes: number;
+}
+
+export interface LocalAiFailure {
+  occurred_at: string;
+  job: string;
+  message: string;
+}
+
+export interface LocalAiWorkerStatus {
+  current_job: string | null;
+  pending_llm_jobs: number;
+  pending_query_jobs: number;
+  pending_note_jobs: number;
+  blocked_note_jobs: number;
+  power_source: 'ac' | 'battery' | 'unknown';
+  policy: LocalAiDevicePolicy;
+  recent_failures: LocalAiFailure[];
+}
+
+export interface LocalAiStatus {
+  worker: LocalAiWorkerStatus;
+  embedding_coverage: EmbeddingCoverage;
+}
+
 export interface SearchConfig {
   rrf_k: number;
   category_upweight: number;
@@ -579,6 +617,8 @@ export interface ManagedCloudReport {
   downloaded_patches: string[];
   uploaded_snapshots: string[];
   reconstructed_notes: string[];
+  uploaded_embeddings: string[];
+  downloaded_embeddings: string[];
   skipped_notes: number;
 }
 

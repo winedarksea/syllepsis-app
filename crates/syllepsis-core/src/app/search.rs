@@ -6,7 +6,7 @@
 //! SQLite/FTS5 storage before querying; related/diagnostics reuse the same engine
 //! snapshot directly.
 
-use crate::embeddings::select_embedder;
+use crate::embeddings::{load_embedding_corpus, try_select_embedder, Embedding, EmbeddingCoverage};
 use crate::error::CoreResult;
 use crate::model::Note;
 use crate::search::{
@@ -18,24 +18,40 @@ use crate::storage::{Book, NoteStore};
 /// Build a search engine over the book's *visible* notes (hidden — archived/private — and
 /// pending-deletion notes are excluded so they never surface in RAG results), using the
 /// configured embedding provider.
-fn engine_for(book: &Book) -> CoreResult<SearchEngine> {
-    let notes: Vec<Note> = book
+fn engine_for(book: &Book) -> CoreResult<(SearchEngine, EmbeddingCoverage)> {
+    let mut notes: Vec<Note> = book
         .store
         .read_all_notes()?
         .into_iter()
         .filter(|n| n.metadata.is_visible_in_default_views())
         .collect();
-    let provider = select_embedder(book.models_root(), &book.config.embedding);
-    Ok(SearchEngine::build(notes, provider, &book.config))
+    notes.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
+    let loaded = load_embedding_corpus(book, &notes)?;
+    Ok((
+        SearchEngine::build_from_vectors(notes, loaded.vectors, &book.config),
+        loaded.coverage,
+    ))
 }
 
 /// Full search: exact + BM25 + vector fused with RRF, optionally narrowed to `category_filter`.
 pub fn search(book: &Book, query: &str, category_filter: &[String]) -> CoreResult<SearchResults> {
+    let query_embedding = try_select_embedder(book.models_root(), &book.config.embedding)
+        .and_then(|provider| provider.try_embed_query(query))
+        .ok();
+    search_with_query_embedding(book, query, category_filter, query_embedding.as_ref())
+}
+
+pub fn search_with_query_embedding(
+    book: &Book,
+    query: &str,
+    category_filter: &[String],
+    query_embedding: Option<&Embedding>,
+) -> CoreResult<SearchResults> {
     let started = std::time::Instant::now();
-    let engine = engine_for(book)?;
+    let (engine, _) = engine_for(book)?;
     let mut index = SqliteSearchIndex::open(&layout::derived_dir(&book.root))?;
     index.rebuild_from_engine(&engine)?;
-    let results = index.search(&engine, query, category_filter)?;
+    let results = index.search(&engine, query, category_filter, query_embedding)?;
     tracing::info!(
         query = query,
         filters = category_filter.len(),
@@ -48,12 +64,16 @@ pub fn search(book: &Book, query: &str, category_filter: &[String]) -> CoreResul
 
 /// Notes related to `id` for the related carousel (vector neighbors, category-upweighted).
 pub fn related_notes(book: &Book, id: &str) -> CoreResult<Vec<RelatedNote>> {
-    Ok(engine_for(book)?.related(id))
+    Ok(engine_for(book)?.0.related(id))
 }
 
 /// Embedding health report: near-duplicates and blind-spot (weakly connected) notes.
 pub fn embedding_diagnostics(book: &Book) -> CoreResult<EmbeddingDiagnostics> {
-    Ok(engine_for(book)?.diagnostics())
+    Ok(engine_for(book)?.0.diagnostics())
+}
+
+pub fn embedding_coverage(book: &Book) -> CoreResult<EmbeddingCoverage> {
+    Ok(engine_for(book)?.1)
 }
 
 #[cfg(test)]
@@ -122,11 +142,44 @@ mod tests {
             &["garden"],
         );
         add(&book, "Wiring", "electrical breaker panel", &["electrical"]);
+        let notes = book.store.read_all_notes().unwrap();
+        crate::embeddings::repository::write_test_sidecars(&book, &notes);
 
         // Resolve the id of Compost A.
         let hits = search(&book, "Compost A", &[]).unwrap();
         let id = &hits.hits[0].note_id;
         let related = related_notes(&book, id).unwrap();
         assert!(related.iter().any(|r| r.title == "Compost B"));
+    }
+
+    #[test]
+    fn repeated_consumers_do_not_rewrite_or_recompute_note_embeddings() {
+        let (_d, book) = book();
+        add(&book, "Compost A", "compost soil garden", &["garden"]);
+        add(&book, "Compost B", "garden compost watering", &["garden"]);
+        let notes = book.store.read_all_notes().unwrap();
+        crate::embeddings::repository::write_test_sidecars(&book, &notes);
+        let paths = notes
+            .iter()
+            .map(|note| layout::embedding_sidecar_path(&book.root, &note.id))
+            .collect::<Vec<_>>();
+        let before = paths
+            .iter()
+            .map(std::fs::read)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        let first = search(&book, "compost", &[]).unwrap();
+        let id = first.hits[0].note_id.clone();
+        let _ = search(&book, "compost", &[]).unwrap();
+        let _ = related_notes(&book, &id).unwrap();
+        let _ = embedding_diagnostics(&book).unwrap();
+
+        let after = paths
+            .iter()
+            .map(std::fs::read)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(before, after);
     }
 }

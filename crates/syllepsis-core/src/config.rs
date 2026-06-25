@@ -107,11 +107,10 @@ pub struct EmbeddingConfig {
     pub chunk_overlap_tokens: usize,
     /// Vector dimensionality. The default [`crate::embeddings`] provider is a deterministic
     /// feature-hashing embedder at this width; an ONNX model swapped in behind the
-    /// `EmbeddingProvider` seam fixes its own native dimension and ignores this (Qwen3-Embedding
-    /// is 1024).
+    /// `EmbeddingProvider` seam fixes its own native dimension; canonical vectors use 256 MRL
+    /// dimensions.
     pub dimensions: usize,
-    /// Which embedding model to use. The default names the built-in Qwen3 ONNX embedder; until it
-    /// is downloaded, the provider selector falls back to deterministic feature hashing.
+    /// Which embedding model to use. The default is the built-in EmbeddingGemma ONNX export.
     pub model_id: String,
     /// Optional Matryoshka truncation for the ONNX embedder: keep only the first N dimensions of
     /// each vector (re-normalized) for cheaper storage. `None` keeps the model's native width.
@@ -125,8 +124,8 @@ impl Default for EmbeddingConfig {
             chunk_token_limit: 512,
             chunk_overlap_tokens: 64,
             dimensions: 256,
-            model_id: crate::onnx::manifest::QWEN3_EMBEDDING_ID.to_string(),
-            matryoshka_dims: None,
+            model_id: crate::onnx::manifest::EMBEDDINGGEMMA_ID.to_string(),
+            matryoshka_dims: Some(256),
         }
     }
 }

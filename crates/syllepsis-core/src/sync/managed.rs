@@ -106,6 +106,8 @@ pub struct ManagedCloudReport {
     pub downloaded_patches: Vec<String>,
     pub uploaded_snapshots: Vec<String>,
     pub reconstructed_notes: Vec<String>,
+    pub uploaded_embeddings: Vec<String>,
+    pub downloaded_embeddings: Vec<String>,
     pub skipped_notes: usize,
 }
 
@@ -159,6 +161,7 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
         // Merge remote patches in; the exported VV is advanced to include the remote frontier so
         // the next upload step only sends genuinely new local ops.
         self.apply_remote_patches(&actor, &mut state, &mut report)?;
+        self.sync_embedding_sidecars(&mut report)?;
         self.upload_manifest(&state)?;
 
         state.save(&self.book.root)?;
@@ -452,6 +455,85 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
             &cloud_path(self.book.metadata.book_id.as_str(), MANIFEST_PATH),
             &bytes,
         )
+    }
+
+    fn sync_embedding_sidecars(&mut self, report: &mut ManagedCloudReport) -> CoreResult<()> {
+        let local_dir = layout::embeddings_dir(&self.book.root);
+        std::fs::create_dir_all(&local_dir)?;
+        let local_note_ulids = self
+            .book
+            .store
+            .read_all_notes()?
+            .into_iter()
+            .map(|note| note.id.ulid().to_string())
+            .collect::<BTreeSet<_>>();
+        let remote_prefix = cloud_path(self.book.metadata.book_id.as_str(), "embeddings/");
+        let remote_entries = self.store.list(&remote_prefix)?;
+        let mut remote_by_name = remote_entries
+            .into_iter()
+            .filter_map(|entry| {
+                entry
+                    .path
+                    .strip_prefix(&remote_prefix)
+                    .map(|name| (name.to_string(), entry.path.clone()))
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        for entry in std::fs::read_dir(&local_dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("svec") {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let ulid = name.strip_suffix(".svec").unwrap_or(name);
+            if !local_note_ulids.contains(ulid) {
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
+            let local_bytes = std::fs::read(&path)?;
+            let remote_path = remote_by_name.remove(name);
+            match remote_path {
+                None => {
+                    let destination = format!("{remote_prefix}{name}");
+                    self.store.put(&destination, &local_bytes)?;
+                    report.uploaded_embeddings.push(destination);
+                }
+                Some(remote_path) => {
+                    let remote_bytes = self.store.get(&remote_path)?;
+                    let local_rank =
+                        crate::embeddings::sidecar_preference_rank(self.book, &local_bytes);
+                    let remote_rank =
+                        crate::embeddings::sidecar_preference_rank(self.book, &remote_bytes);
+                    if local_rank > remote_rank {
+                        self.store.put(&remote_path, &local_bytes)?;
+                        report.uploaded_embeddings.push(remote_path);
+                    } else if remote_rank > local_rank {
+                        crate::embeddings::write_sidecar_atomic(
+                            &path,
+                            &crate::embeddings::sidecar::decode(&remote_bytes)?,
+                        )?;
+                        report.downloaded_embeddings.push(remote_path);
+                    }
+                }
+            }
+        }
+
+        for (name, remote_path) in remote_by_name {
+            let ulid = name.strip_suffix(".svec").unwrap_or(&name);
+            if !local_note_ulids.contains(ulid) {
+                self.store.delete(&remote_path)?;
+                continue;
+            }
+            let remote_bytes = self.store.get(&remote_path)?;
+            crate::embeddings::write_sidecar_atomic(
+                &local_dir.join(name),
+                &crate::embeddings::sidecar::decode(&remote_bytes)?,
+            )?;
+            report.downloaded_embeddings.push(remote_path);
+        }
+        Ok(())
     }
 
     fn patch_entries(&self, ulid: &str) -> CoreResult<Vec<ManagedObjectEntry>> {

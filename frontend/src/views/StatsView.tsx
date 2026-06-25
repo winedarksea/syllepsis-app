@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import type { BookStats, OperationalActivitySummary } from '../types';
+import type { BookStats, LocalAiStatus, OperationalActivitySummary } from '../types';
 import './StatsView.css';
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -27,6 +27,7 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 export function StatsView() {
   const [stats, setStats] = useState<BookStats | null>(null);
   const [operational, setOperational] = useState<OperationalActivitySummary | null>(null);
+  const [localAi, setLocalAi] = useState<LocalAiStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -34,12 +35,14 @@ export function StatsView() {
     setLoading(true);
     setError(null);
     try {
-      const [bookStats, operationalSummary] = await Promise.all([
+      const [bookStats, operationalSummary, localAiStatus] = await Promise.all([
         api.bookStats(),
         api.operationalActivitySummary(),
+        api.localAiStatus(),
       ]);
       setStats(bookStats);
       setOperational(operationalSummary);
+      setLocalAi(localAiStatus);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -120,6 +123,54 @@ export function StatsView() {
               value={operational.activity.latest_conflict_path ?? 'None'}
             />
           </div>
+        </section>
+      )}
+
+      {localAi && (
+        <section className="stats-section">
+          <h3 className="stats-section-title">Local AI queue</h3>
+          <div className="stats-grid">
+            <StatCard
+              label="Current job"
+              value={localAi.worker.current_job ?? 'Idle'}
+              sub={`power: ${localAi.worker.power_source}`}
+            />
+            <StatCard
+              label="Queued embeddings"
+              value={localAi.worker.pending_note_jobs}
+              sub={`${localAi.worker.blocked_note_jobs} blocked`}
+            />
+            <StatCard
+              label="Fresh embeddings"
+              value={localAi.embedding_coverage.fresh_notes}
+              sub={`${localAi.embedding_coverage.total_notes} visible notes`}
+            />
+            <StatCard
+              label="Needs embedding"
+              value={
+                localAi.embedding_coverage.stale_notes
+                + localAi.embedding_coverage.missing_notes
+                + localAi.embedding_coverage.incompatible_notes
+              }
+              sub={`${localAi.embedding_coverage.stale_notes} stale`}
+            />
+          </div>
+          <div className="stats-summary-panel">
+            <SummaryRow
+              label="Interactive queue"
+              value={`${localAi.worker.pending_llm_jobs} LLM, ${localAi.worker.pending_query_jobs} search`}
+            />
+            <SummaryRow
+              label="Latest failure"
+              value={localAi.worker.recent_failures[0]?.message ?? 'None'}
+            />
+          </div>
+          <button className="stats-refresh-btn" onClick={async () => {
+            await api.enqueueAllStaleEmbeddings();
+            await load();
+          }}>
+            Queue stale embeddings
+          </button>
         </section>
       )}
 

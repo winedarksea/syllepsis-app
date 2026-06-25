@@ -4,6 +4,7 @@ pub mod cloud_llm;
 pub mod config;
 pub mod lifecycle;
 pub mod llm;
+pub mod local_ai;
 pub mod notes;
 pub mod pack;
 pub mod plugins;

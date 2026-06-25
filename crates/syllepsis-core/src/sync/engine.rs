@@ -24,7 +24,7 @@ use crate::sync::local_folder::content_revision;
 use crate::sync::plan::{plan, SyncAction};
 use crate::sync::provider::SyncProvider;
 use crate::sync::state::SyncState;
-use crate::sync::{is_local_only, is_note_md, is_sidecar, sidecar_rel_path};
+use crate::sync::{is_embedding_sidecar, is_local_only, is_note_md, is_sidecar, sidecar_rel_path};
 
 /// What one sync pass did. The vectors name the affected paths (for the UI's activity log and for
 /// tests); [`is_noop`](SyncReport::is_noop) is the loop-prevention assertion — a second pass with
@@ -154,7 +154,11 @@ impl SyncEngine {
                 report.merged.push(path);
             }
             SyncAction::Conflict(path) => {
-                self.resolve_conflict(&path, state)?;
+                if is_embedding_sidecar(&path) {
+                    self.resolve_embedding_conflict(&path, state)?;
+                } else {
+                    self.resolve_conflict(&path, state)?;
+                }
                 report.conflicted.push(path);
             }
             SyncAction::DeleteLocal(path) => {
@@ -274,6 +278,23 @@ impl SyncEngine {
         state.mark_synced(path, content_revision(&winner), win_rev);
         let conflict_rev = self.provider.put(&conflict_rel, &loser)?;
         state.mark_synced(&conflict_rel, content_revision(&loser), conflict_rev);
+        Ok(())
+    }
+
+    fn resolve_embedding_conflict(&self, path: &str, state: &mut SyncState) -> CoreResult<()> {
+        let local_bytes = std::fs::read(self.full(path))?;
+        let remote_bytes = self.provider.get(path)?;
+        let book = crate::storage::Book::open(&self.book_root)?;
+        let local_rank = crate::embeddings::sidecar_preference_rank(&book, &local_bytes);
+        let remote_rank = crate::embeddings::sidecar_preference_rank(&book, &remote_bytes);
+        let winner = if local_rank >= remote_rank {
+            local_bytes
+        } else {
+            remote_bytes
+        };
+        self.write_local(path, &winner)?;
+        let revision = self.provider.put(path, &winner)?;
+        state.mark_synced(path, content_revision(&winner), revision);
         Ok(())
     }
 
@@ -523,6 +544,24 @@ mod tests {
         // Everything is now in sync; a second pass on each side must touch nothing.
         assert!(a.sync().is_noop(), "device A re-sync should be a no-op");
         assert!(b.sync().is_noop(), "device B re-sync should be a no-op");
+    }
+
+    #[test]
+    fn embedding_sidecars_sync_without_entering_the_note_scan() {
+        let (_tmp, a, b) = two_devices();
+        let mut note = a.book.new_note(ObjectType::Note, "embedded").unwrap();
+        note.body = "garden compost".into();
+        a.book.save_note(&note).unwrap();
+        crate::embeddings::repository::write_test_sidecars(&a.book, &[note.clone()]);
+
+        a.sync();
+        b.sync();
+
+        let sidecar = crate::storage::layout::embedding_sidecar_path(&b.book.root, &note.id);
+        assert!(sidecar.exists());
+        assert!(crate::embeddings::read_sidecar(&sidecar).is_ok());
+        b.book.store.refresh().unwrap();
+        assert_eq!(b.book.store.read_all_notes().unwrap().len(), 1);
     }
 
     #[test]
