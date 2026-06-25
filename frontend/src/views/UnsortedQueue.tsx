@@ -6,7 +6,7 @@ import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
-import type { NoteDto, TimelineDateField } from '../types';
+import type { NoteDto, ObjectType, TimelineDateField } from '../types';
 import './UnsortedQueue.css';
 
 const SORT_FIELDS: { id: TimelineDateField; label: string }[] = [
@@ -14,6 +14,19 @@ const SORT_FIELDS: { id: TimelineDateField; label: string }[] = [
   { id: 'updated', label: 'Updated' },
   { id: 'scheduled', label: 'Scheduled' },
   { id: 'completed', label: 'Completed' },
+];
+
+type FilterMode = 'unsorted' | 'all' | 'uncategorized';
+
+const OBJECT_TYPE_LABELS: Record<ObjectType | 'all', string> = {
+  all: 'All types', note: 'Note', quote: 'Quote', reference: 'Reference',
+  todo: 'Todo', qa: 'Q&A', commentary: 'Commentary', table: 'Table',
+  picture: 'Picture', drawing: 'Drawing', code: 'Code',
+};
+
+const ALL_OBJECT_TYPES: Array<ObjectType | 'all'> = [
+  'all', 'note', 'quote', 'reference', 'todo', 'qa',
+  'commentary', 'table', 'picture', 'drawing', 'code',
 ];
 
 // Sort key (epoch ms) for a note on the chosen date field; null when the date is absent.
@@ -76,29 +89,26 @@ export function UnsortedQueue() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [showAll, setShowAll] = useState(false);
-  const [sortField, setSortField] = useState<TimelineDateField>('created');
+  const [filterMode, setFilterMode] = useState<FilterMode>('unsorted');
+  const [sortField, setSortField] = useState<TimelineDateField>('updated');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
+  const [typeFilter, setTypeFilter] = useState<ObjectType | 'all'>('all');
 
   const refresh = useCallback(() => {
     setLoading(true);
-    const fetch = showAll ? api.listNotes() : api.unsortedNotes();
+    const fetch = filterMode === 'unsorted' ? api.unsortedNotes() : api.listNotes();
     fetch
       .then((ns) => {
         setNotes(ns);
-        // Badge always tracks unsorted count — re-fetch if we just loaded all notes.
-        if (!showAll) setUnsortedCount(ns.length);
+        if (filterMode !== 'unsorted') {
+          api.unsortedNotes().then((us) => setUnsortedCount(us.length)).catch(console.error);
+        } else {
+          setUnsortedCount(ns.length);
+        }
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [showAll, setUnsortedCount]);
-
-  // Keep unsorted count fresh when showing all notes.
-  useEffect(() => {
-    if (showAll) {
-      api.unsortedNotes().then((ns) => setUnsortedCount(ns.length)).catch(console.error);
-    }
-  }, [showAll, setUnsortedCount]);
+  }, [filterMode, setUnsortedCount]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -111,16 +121,19 @@ export function UnsortedQueue() {
 
   const sortedNotes = useMemo(() => {
     const direction = sortDir === 'asc' ? 1 : -1;
-    return [...notes].sort((a, b) => {
+    const modeFiltered = filterMode === 'uncategorized'
+      ? notes.filter((n) => n.categories.length === 0)
+      : notes;
+    const sorted = [...modeFiltered].sort((a, b) => {
       const ka = noteSortKey(a, sortField);
       const kb = noteSortKey(b, sortField);
-      // Notes missing the chosen date sort to the end regardless of direction.
       if (ka === null && kb === null) return 0;
       if (ka === null) return 1;
       if (kb === null) return -1;
       return (ka - kb) * direction;
     });
-  }, [notes, sortField, sortDir]);
+    return typeFilter === 'all' ? sorted : sorted.filter((n) => n.type === typeFilter);
+  }, [notes, filterMode, sortField, sortDir, typeFilter]);
 
   if (loading) return <div className="uq-state">Loading…</div>;
   if (error) return <div className="uq-state uq-error">{error}</div>;
@@ -132,16 +145,22 @@ export function UnsortedQueue() {
         <div className="uq-header-actions">
           <div className="uq-filter-toggle">
             <button
-              className={`uq-filter-btn ${!showAll ? 'active' : ''}`}
-              onClick={() => setShowAll(false)}
+              className={`uq-filter-btn ${filterMode === 'unsorted' ? 'active' : ''}`}
+              onClick={() => setFilterMode('unsorted')}
             >
               Unsorted
             </button>
             <button
-              className={`uq-filter-btn ${showAll ? 'active' : ''}`}
-              onClick={() => setShowAll(true)}
+              className={`uq-filter-btn ${filterMode === 'all' ? 'active' : ''}`}
+              onClick={() => setFilterMode('all')}
             >
               All notes
+            </button>
+            <button
+              className={`uq-filter-btn ${filterMode === 'uncategorized' ? 'active' : ''}`}
+              onClick={() => setFilterMode('uncategorized')}
+            >
+              Uncategorized
             </button>
           </div>
           <label className="uq-sort">
@@ -163,6 +182,18 @@ export function UnsortedQueue() {
               <Icon name={sortDir === 'desc' ? 'arrow_downward' : 'arrow_upward'} size={16} />
             </button>
           </label>
+          <label className="uq-sort">
+            <span className="uq-sort-label">Type</span>
+            <select
+              className="uq-sort-select"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as ObjectType | 'all')}
+            >
+              {ALL_OBJECT_TYPES.map((t) => (
+                <option key={t} value={t}>{OBJECT_TYPE_LABELS[t]}</option>
+              ))}
+            </select>
+          </label>
           <button className="uq-add-btn" onClick={() => setShowForm((s) => !s)}>
             {showForm ? 'Cancel' : '+ New Note'}
           </button>
@@ -173,13 +204,11 @@ export function UnsortedQueue() {
         <NewNoteForm onCreate={handleCreate} />
       )}
 
-      {notes.length === 0 && !showForm ? (
+      {sortedNotes.length === 0 && !showForm ? (
         <div className="uq-empty">
-          {showAll ? (
-            <p>No notes yet. Capture your first thought below.</p>
-          ) : (
-            <p>All caught up! Every note has been organised.</p>
-          )}
+          {filterMode === 'unsorted' && <p>All caught up! Every note has been organised.</p>}
+          {filterMode === 'all' && <p>No notes yet. Capture your first thought below.</p>}
+          {filterMode === 'uncategorized' && <p>No uncategorized notes — all notes have at least one category.</p>}
           <button className="uq-add-btn" onClick={() => setShowForm(true)}>+ Capture a thought</button>
         </div>
       ) : (
