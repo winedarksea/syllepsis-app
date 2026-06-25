@@ -124,6 +124,8 @@ interface AppStore {
   setTimelineColorBy: (colorBy: TimelineColorBy) => void;
   showTimelinePriorRelationships: boolean;
   setShowTimelinePriorRelationships: (show: boolean) => void;
+  showGraphPriorRelationships: boolean;
+  setShowGraphPriorRelationships: (show: boolean) => void;
 
   // Fenced-code languages claimed by code-block-renderer plugins (lower-cased). Loaded once at
   // startup; the editor maps these languages to a rendered PluginBlockNode instead of plain code.
@@ -239,6 +241,9 @@ export const useStore = create<AppStore>((set) => ({
   showTimelinePriorRelationships: false,
   setShowTimelinePriorRelationships: (showTimelinePriorRelationships) =>
     set({ showTimelinePriorRelationships }),
+  showGraphPriorRelationships: true,
+  setShowGraphPriorRelationships: (showGraphPriorRelationships) =>
+    set({ showGraphPriorRelationships }),
 
   pluginRenderLanguages: [],
   setPluginRenderLanguages: (pluginRenderLanguages) => set({ pluginRenderLanguages }),

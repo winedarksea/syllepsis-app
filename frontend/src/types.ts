@@ -244,7 +244,27 @@ export interface CrossBookNote {
   summary: string;
 }
 
-// ── Search & embeddings (mirrors syllepsis_core::search::results) ──
+// ── Search & embeddings (mirrors syllepsis_core::search::results + filter) ──
+
+export interface SearchFilter {
+  categories: string[];
+  updated_after: string | null;
+  min_body_len: number | null;
+  max_body_len: number | null;
+  object_types: ObjectType[];
+  starred_only: boolean;
+}
+
+export function emptyFilter(): SearchFilter {
+  return {
+    categories: [],
+    updated_after: null,
+    min_body_len: null,
+    max_body_len: null,
+    object_types: [],
+    starred_only: false,
+  };
+}
 
 export interface SearchHit {
   note_id: string;
@@ -254,6 +274,12 @@ export interface SearchHit {
   categories: string[];
   score: number;
   ranking_signals: SearchRankingSignals;
+  object_type: ObjectType;
+  /** ISO timestamp of last update. */
+  updated: string;
+  starred: boolean;
+  /** Body length in Unicode characters. */
+  body_len: number;
 }
 
 export interface SearchRankingSignals {
@@ -261,6 +287,8 @@ export interface SearchRankingSignals {
   bm25: number;
   vector: number;
   total: number;
+  /** Raw cosine similarity of the best-matching chunk to the query embedding. */
+  vector_similarity: number;
 }
 
 export interface FacetCount {
@@ -384,6 +412,7 @@ export interface GraphTimelineMeta {
   granularity: TimelineGranularity;
   ticks: GraphTimelineTick[];
   undated_count: number;
+  bucket_count: number;
 }
 
 export interface GraphAnalysisResult {

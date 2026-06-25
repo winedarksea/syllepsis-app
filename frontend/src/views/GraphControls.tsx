@@ -218,6 +218,19 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
             <output>{Math.round(store.graphSimilarityThreshold * 100)}%</output>
             <span className="gv-edge-count">{visibleSemanticEdges} edges</span>
           </label>
+          <label className="gv-timeline-switch-control">
+            <span>Prior relationships</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={store.showGraphPriorRelationships}
+              className={`gv-switch${store.showGraphPriorRelationships ? ' on' : ''}`}
+              onClick={() =>
+                store.setShowGraphPriorRelationships(!store.showGraphPriorRelationships)}
+            >
+              <span className="gv-switch-knob" />
+            </button>
+          </label>
           {topMode === 'clusters' && (
             <button
               type="button"

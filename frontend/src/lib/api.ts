@@ -18,7 +18,7 @@ import type {
   LockMode, PolicyOverview,
   ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
   PublishReport, GitignoreReport,
-  BookStats, StyleCard, CrossBookNote,
+  BookStats, StyleCard, CrossBookNote, SearchFilter,
   TextImportOptions, TextImportPreview, TextImportCommitRequest, TextImportReport,
   PluginDescriptor,
 } from '../types';
@@ -91,8 +91,8 @@ export const api = {
   categoryEmbeddingStats: (name: string) => invoke<CategoryEmbeddingStats>('category_embedding_stats', { name }),
 
   // Search & embeddings
-  search: (query: string, categoryFilter: string[] = []) =>
-    invoke<SearchResults>('search', { query, categoryFilter }),
+  search: (query: string, filter: SearchFilter) =>
+    invoke<SearchResults>('search', { query, filter }),
   relatedNotes: (id: string) => invoke<RelatedNote[]>('related_notes', { id }),
   embeddingDiagnostics: () => invoke<EmbeddingDiagnostics>('embedding_diagnostics'),
   localAiStatus: () => invoke<LocalAiStatus>('local_ai_status'),

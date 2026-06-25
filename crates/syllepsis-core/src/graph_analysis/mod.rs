@@ -104,7 +104,12 @@ impl SemanticGraphCorpus {
             .map(|index| self.centroids[*index].clone())
             .collect();
         let embedded_count = embedded_vectors.len();
-        if request.mode != GraphMode::Categories && embedded_count < self.notes.len() {
+        let embeddable_count = self
+            .notes
+            .iter()
+            .filter(|note| !note.title.trim().is_empty() || !note.body.trim().is_empty())
+            .count();
+        if request.mode != GraphMode::Categories && embedded_count < embeddable_count {
             return Ok(self.embedding_coverage_fallback(request.mode));
         }
         let default_neighbors = match request.mode {
@@ -339,6 +344,7 @@ impl SemanticGraphCorpus {
                 granularity: TimelineGranularity::Day,
                 ticks: Vec::new(),
                 undated_count,
+                bucket_count: 1,
             }
         } else {
             let min_ms = *dated.iter().min().unwrap();
@@ -438,6 +444,7 @@ impl SemanticGraphCorpus {
                 granularity,
                 ticks,
                 undated_count,
+                bucket_count: boundaries.len() as u32,
             }
         };
 

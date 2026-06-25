@@ -17,6 +17,7 @@ use crate::markdown::dialect::strip_comments;
 use crate::model::Note;
 use crate::search::bm25::Bm25Index;
 use crate::search::exact::match_exact;
+use crate::search::filter::SearchFilter;
 use crate::search::results::{
     BlindSpot, DuplicatePair, EmbeddingDiagnostics, FacetCount, RelatedNote, SearchHit,
     SearchRankingSignals, SearchResults,
@@ -95,9 +96,12 @@ impl SearchEngine {
     ) -> SearchResults {
         let exact = ids_only(match_exact(&self.documents, query));
         let bm25 = ids_only(self.bm25.score(query, &self.search_cfg));
-        let vector = query_embedding
-            .map(|embedding| ids_only(self.vector_ranking_embedding(embedding)))
+        let vector_scored: Vec<(usize, f32)> = query_embedding
+            .map(|embedding| self.vector_ranking_embedding(embedding))
             .unwrap_or_default();
+        let vector: Vec<usize> = vector_scored.iter().map(|(i, _)| *i).collect();
+        let vector_cosines: HashMap<usize, f32> = vector_scored.into_iter().collect();
+
         let exact_ranks = rank_map(&exact);
         let bm25_ranks = rank_map(&bm25);
         let vector_ranks = rank_map(&vector);
@@ -108,7 +112,7 @@ impl SearchEngine {
 
         let hits: Vec<SearchHit> = fused
             .into_iter()
-            .filter(|(idx, _)| self.passes_filter(*idx, category_filter))
+            .filter(|(idx, _)| self.passes_category_slice(*idx, category_filter))
             .take(self.search_cfg.result_limit)
             .map(|(idx, score)| {
                 let ranking_signals = ranking_signals(
@@ -118,6 +122,7 @@ impl SearchEngine {
                     &bm25_ranks,
                     &vector_ranks,
                     self.search_cfg.rrf_k,
+                    &vector_cosines,
                 );
                 self.hit(idx, score, query, ranking_signals)
             })
@@ -156,8 +161,41 @@ impl SearchEngine {
         self.hit(idx, score, query, ranking_signals)
     }
 
+    /// Backward-compat category-only filter used by callers that don't have a full SearchFilter.
     pub fn passes_category_filter(&self, idx: usize, filter: &[String]) -> bool {
-        self.passes_filter(idx, filter)
+        self.passes_category_slice(idx, filter)
+    }
+
+    /// Full structured filter predicate — used by `SqliteSearchIndex::search`.
+    pub fn passes_filter(&self, idx: usize, filter: &SearchFilter) -> bool {
+        let note = &self.notes[idx];
+
+        if !filter.categories.is_empty()
+            && !note.categories.iter().any(|c| filter.categories.contains(c))
+        {
+            return false;
+        }
+        if let Some(after) = filter.updated_after {
+            if note.metadata.dates.updated < after {
+                return false;
+            }
+        }
+        let body_len = note.body.chars().count();
+        if filter.min_body_len.map_or(false, |min| body_len < min) {
+            return false;
+        }
+        if filter.max_body_len.map_or(false, |max| body_len > max) {
+            return false;
+        }
+        if !filter.object_types.is_empty()
+            && !filter.object_types.contains(&note.object_type)
+        {
+            return false;
+        }
+        if filter.starred_only && !note.metadata.classification.starred {
+            return false;
+        }
+        true
     }
 
     pub fn facet_counts_for_indices(
@@ -273,7 +311,7 @@ impl SearchEngine {
     /// Vector ranking: best passage similarity per note against the embedded query. The query
     /// goes through [`embed_query`](EmbeddingProvider::embed_query) so an asymmetric model applies
     /// its retrieval-instruction prefix; the corpus was embedded with plain `embed`.
-    fn vector_ranking_embedding(
+    pub(super) fn vector_ranking_embedding(
         &self,
         query_embedding: &crate::embeddings::Embedding,
     ) -> Vec<(usize, f32)> {
@@ -295,7 +333,7 @@ impl SearchEngine {
         self.notes.iter().position(|n| n.id.to_string() == note_id)
     }
 
-    fn passes_filter(&self, idx: usize, filter: &[String]) -> bool {
+    fn passes_category_slice(&self, idx: usize, filter: &[String]) -> bool {
         filter.is_empty()
             || self.notes[idx]
                 .categories
@@ -339,6 +377,10 @@ impl SearchEngine {
             categories: note.categories.clone(),
             score,
             ranking_signals,
+            object_type: note.object_type,
+            updated: note.metadata.dates.updated,
+            starred: note.metadata.classification.starred,
+            body_len: note.body.chars().count(),
         }
     }
 }
@@ -358,6 +400,7 @@ fn ranking_signals(
     bm25_ranks: &HashMap<usize, usize>,
     vector_ranks: &HashMap<usize, usize>,
     rrf_k: f32,
+    vector_cosines: &HashMap<usize, f32>,
 ) -> SearchRankingSignals {
     let exact = exact_ranks
         .get(&note_index)
@@ -371,11 +414,13 @@ fn ranking_signals(
         .get(&note_index)
         .map(|rank| 1.0 / (rrf_k + *rank as f32 + 1.0))
         .unwrap_or(0.0);
+    let vector_similarity = vector_cosines.get(&note_index).copied().unwrap_or(0.0);
     SearchRankingSignals {
         exact,
         bm25,
         vector,
         total,
+        vector_similarity,
     }
 }
 
@@ -427,6 +472,7 @@ mod tests {
     use super::*;
     use crate::embeddings::hashing::HashingEmbedder;
     use crate::model::ObjectType;
+    use crate::search::filter::SearchFilter;
 
     fn note(title: &str, body: &str, cats: &[&str]) -> Note {
         let mut n = Note::new(ObjectType::Note, title, "syllepsis_001");
@@ -547,5 +593,40 @@ mod tests {
         let s = snippet(&body, "special breaker");
         assert!(s.contains("special breaker"));
         assert!(s.starts_with('…'));
+    }
+
+    #[test]
+    fn hit_populates_new_fields() {
+        let e = engine(corpus());
+        let results = e.search("breaker panel", &[]);
+        assert!(!results.hits.is_empty());
+        let hit = &results.hits[0];
+        // object_type should default to Note
+        assert_eq!(hit.object_type, ObjectType::Note);
+        // body_len reflects char count of the body
+        assert!(hit.body_len > 0);
+    }
+
+    #[test]
+    fn passes_filter_applies_starred_and_type_predicates() {
+        let e = engine(corpus());
+        // No notes are starred by default — starred_only should exclude all
+        let filter = SearchFilter {
+            starred_only: true,
+            ..Default::default()
+        };
+        assert!(corpus().iter().enumerate().all(|(idx, _)| !e.passes_filter(idx, &filter)));
+
+        // Empty filter passes everything
+        let empty = SearchFilter::default();
+        assert!(corpus().iter().enumerate().all(|(idx, _)| e.passes_filter(idx, &empty)));
+
+        // Category filter: only idx 0 and 2 are electrical
+        let cat_filter = SearchFilter {
+            categories: vec!["electrical".into()],
+            ..Default::default()
+        };
+        assert!(e.passes_filter(0, &cat_filter)); // Kitchen wiring — electrical
+        assert!(!e.passes_filter(1, &cat_filter)); // Garden beds — garden only
     }
 }

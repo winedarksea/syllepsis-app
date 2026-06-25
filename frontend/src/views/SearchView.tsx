@@ -1,4 +1,4 @@
-// The search-centred web of results: a query box, category facet filters, and ranked hits
+// The search-centred web of results: a query box, collapsible filter panel, and ranked hits
 // fused from exact + BM25 + vector retrieval (RRF). Selecting a hit previews its related
 // notes and opens it in the editor.
 // Also supports cross-book search across all tracked books.
@@ -7,86 +7,361 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
-import type { SearchResults, CrossBookNote } from '../types';
+import type { SearchResults, CrossBookNote, ObjectType, SearchFilter } from '../types';
+import { emptyFilter } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import './SearchView.css';
 
-function formatScore(score: number): string {
-  return score.toFixed(3);
+const ALL_OBJECT_TYPES: ObjectType[] = [
+  'note', 'quote', 'reference', 'todo', 'qa', 'commentary', 'table', 'picture', 'drawing', 'code',
+];
+
+const FRESHNESS_PRESETS: { label: string; days: number | null }[] = [
+  { label: 'Any time', days: null },
+  { label: 'Today', days: 1 },
+  { label: '7 days', days: 7 },
+  { label: '30 days', days: 30 },
+  { label: 'This year', days: 365 },
+];
+
+const LENGTH_PRESETS: { label: string; min: number | null; max: number | null }[] = [
+  { label: 'Any length', min: null, max: null },
+  { label: 'Short (< 200)', min: null, max: 200 },
+  { label: 'Medium (200–1000)', min: 200, max: 1000 },
+  { label: 'Long (> 1000)', min: 1000, max: null },
+];
+
+function activeFilterCount(
+  categories: string[],
+  freshnessIndex: number,
+  lengthIndex: number,
+  objectTypes: ObjectType[],
+  starredOnly: boolean,
+  allBooks: boolean,
+): number {
+  return (
+    (categories.length > 0 ? 1 : 0) +
+    (freshnessIndex > 0 ? 1 : 0) +
+    (lengthIndex > 0 ? 1 : 0) +
+    (objectTypes.length > 0 ? 1 : 0) +
+    (starredOnly ? 1 : 0) +
+    (allBooks ? 1 : 0)
+  );
 }
+
+function buildFilter(
+  categories: string[],
+  freshnessIndex: number,
+  lengthIndex: number,
+  objectTypes: ObjectType[],
+  starredOnly: boolean,
+): SearchFilter {
+  const preset = FRESHNESS_PRESETS[freshnessIndex];
+  const lenPreset = LENGTH_PRESETS[lengthIndex];
+  return {
+    categories,
+    updated_after: preset.days
+      ? new Date(Date.now() - preset.days * 24 * 3600 * 1000).toISOString()
+      : null,
+    min_body_len: lenPreset.min,
+    max_body_len: lenPreset.max,
+    object_types: objectTypes,
+    starred_only: starredOnly,
+  };
+}
+
+function relativeDate(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(diff / 86400000);
+  if (days === 0) return 'today';
+  if (days === 1) return '1d ago';
+  if (days < 30) return `${days}d ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+const WINDOW_SIZE = 15;
 
 export function SearchView() {
   const { openEditor } = useStore();
+
+  // Query
   const [query, setQuery] = useState('');
-  const [activeFacets, setActiveFacets] = useState<string[]>([]);
+
+  // Filter panel state
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [allBooks, setAllBooks] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [freshnessIndex, setFreshnessIndex] = useState(0);
+  const [lengthIndex, setLengthIndex] = useState(0);
+  const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
+  const [starredOnly, setStarredOnly] = useState(false);
+  const [showAllFacets, setShowAllFacets] = useState(false);
+
+  // Results
   const [results, setResults] = useState<SearchResults | null>(null);
   const [crossBookResults, setCrossBookResults] = useState<CrossBookNote[] | null>(null);
-  const [crossBookMode, setCrossBookMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+
+  // Windowing
+  const [visibleCount, setVisibleCount] = useState(WINDOW_SIZE);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const run = useCallback((q: string, facets: string[], crossBook: boolean) => {
-    if (!q.trim()) { setResults(null); setCrossBookResults(null); return; }
+  const numActive = activeFilterCount(categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks);
+
+  const run = useCallback((
+    q: string,
+    cats: string[],
+    freshIdx: number,
+    lenIdx: number,
+    types: ObjectType[],
+    starred: boolean,
+    crossBook: boolean,
+  ) => {
+    if (!q.trim()) {
+      setResults(null);
+      setCrossBookResults(null);
+      return;
+    }
     setLoading(true);
     setError(null);
+    setVisibleCount(WINDOW_SIZE);
     if (crossBook) {
       api.searchAcrossBooks(q)
         .then((r) => { setCrossBookResults(r); setResults(null); })
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
     } else {
-      api.search(q, facets)
+      const filter = buildFilter(cats, freshIdx, lenIdx, types, starred);
+      api.search(q, filter)
         .then((r) => { setResults(r); setCrossBookResults(null); setError(null); })
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
     }
   }, []);
 
-  // Debounced search-as-you-type.
+  // Debounced search on any filter/query change
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => run(query, activeFacets, crossBookMode), 300);
+    debounce.current = setTimeout(
+      () => run(query, categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks),
+      300,
+    );
     return () => { if (debounce.current) clearTimeout(debounce.current); };
-  }, [query, activeFacets, crossBookMode, run]);
+  }, [query, categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks, run]);
 
-  const toggleFacet = useCallback((cat: string) => {
-    setActiveFacets((prev) =>
+  // IntersectionObserver for windowed reveal
+  useEffect(() => {
+    if (observerRef.current) observerRef.current.disconnect();
+    const hits = results?.hits ?? [];
+    if (visibleCount >= hits.length) return;
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((c) => Math.min(c + WINDOW_SIZE, hits.length));
+        }
+      },
+      { threshold: 0.1 },
+    );
+    if (sentinelRef.current) observerRef.current.observe(sentinelRef.current);
+    return () => observerRef.current?.disconnect();
+  }, [results, visibleCount]);
+
+  const toggleCategory = useCallback((cat: string) => {
+    setCategories((prev) =>
       prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat],
     );
   }, []);
 
+  const toggleObjectType = useCallback((type: ObjectType) => {
+    setObjectTypes((prev) =>
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type],
+    );
+  }, []);
+
+  const clearAll = useCallback(() => {
+    setCategories([]);
+    setFreshnessIndex(0);
+    setLengthIndex(0);
+    setObjectTypes([]);
+    setStarredOnly(false);
+    setAllBooks(false);
+  }, []);
+
+  // Score display: normalized 0–100% relative to top hit
+  const topScore = results?.hits[0]?.score ?? 0;
+  function hitPct(score: number): string {
+    if (topScore <= 0) return '0%';
+    return `${Math.round((score / topScore) * 100)}%`;
+  }
+  function scoreTooltip(hit: SearchResults['hits'][0]): string {
+    const s = hit.ranking_signals;
+    return (
+      `RRF total ${s.total.toFixed(3)} = ` +
+      `exact ${s.exact.toFixed(3)} + bm25 ${s.bm25.toFixed(3)} + vector ${s.vector.toFixed(3)}` +
+      (s.vector_similarity > 0 ? ` | cos ${s.vector_similarity.toFixed(3)}` : '')
+    );
+  }
+
+  const visibleFacets = results?.facets ?? [];
+  const FACET_THRESHOLD = 8;
+  const displayedFacets = showAllFacets ? visibleFacets : visibleFacets.slice(0, FACET_THRESHOLD);
+
+  const hits = results?.hits ?? [];
+  const shownHits = hits.slice(0, visibleCount);
+
   return (
     <div className="sv-root">
+      {/* ── Header ── */}
       <div className="sv-header">
         <input
           className="sv-input"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={crossBookMode ? 'Search across all tracked books…' : 'Search your book — exact, keyword, and meaning…'}
+          placeholder={allBooks ? 'Search across all tracked books…' : 'Search your book — exact, keyword, and meaning…'}
           autoFocus
         />
         <button
-          className={`sv-cross-book-toggle ${crossBookMode ? 'active' : ''}`}
-          onClick={() => { setCrossBookMode((v) => !v); setResults(null); setCrossBookResults(null); }}
-          title="Search across all tracked books"
+          className={`sv-filter-toggle ${panelOpen ? 'active' : ''}`}
+          onClick={() => setPanelOpen((v) => !v)}
+          title="Toggle search filters"
         >
-          All books
+          Filters{numActive > 0 ? ` (${numActive})` : ''}
         </button>
       </div>
 
-      {!crossBookMode && results && results.facets.length > 0 && (
-        <div className="sv-facets">
-          {results.facets.map((f) => (
-            <button
-              key={f.category}
-              className={`sv-facet ${activeFacets.includes(f.category) ? 'active' : ''}`}
-              onClick={() => toggleFacet(f.category)}
+      {/* ── Collapsible filter panel ── */}
+      {panelOpen && (
+        <div className="sv-filter-panel">
+          <div className="sv-filter-row">
+            <label className="sv-filter-label">Updated</label>
+            <select
+              className="sv-filter-select"
+              value={freshnessIndex}
+              onChange={(e) => setFreshnessIndex(Number(e.target.value))}
             >
-              #{f.category} <span className="sv-facet-count">{f.count}</span>
+              {FRESHNESS_PRESETS.map((p, i) => (
+                <option key={p.label} value={i}>{p.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sv-filter-row">
+            <label className="sv-filter-label">Length</label>
+            <select
+              className="sv-filter-select"
+              value={lengthIndex}
+              onChange={(e) => setLengthIndex(Number(e.target.value))}
+            >
+              {LENGTH_PRESETS.map((p, i) => (
+                <option key={p.label} value={i}>{p.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sv-filter-row sv-filter-row--top">
+            <label className="sv-filter-label">Type</label>
+            <div className="sv-filter-checkgroup">
+              {ALL_OBJECT_TYPES.map((t) => (
+                <label key={t} className="sv-filter-check">
+                  <input
+                    type="checkbox"
+                    checked={objectTypes.includes(t)}
+                    onChange={() => toggleObjectType(t)}
+                  />
+                  {t}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="sv-filter-row">
+            <label className="sv-filter-check sv-filter-label">
+              <input
+                type="checkbox"
+                checked={starredOnly}
+                onChange={(e) => setStarredOnly(e.target.checked)}
+              />
+              Starred only
+            </label>
+          </div>
+
+          <div className="sv-filter-row">
+            <label className="sv-filter-check sv-filter-label">
+              <input
+                type="checkbox"
+                checked={allBooks}
+                onChange={(e) => setAllBooks(e.target.checked)}
+              />
+              Search all books
+            </label>
+          </div>
+
+          {/* Category facets inside the panel */}
+          {!allBooks && visibleFacets.length > 0 && (
+            <div className="sv-filter-row sv-filter-row--top">
+              <label className="sv-filter-label">Categories</label>
+              <div className="sv-facets-inline">
+                {displayedFacets.map((f) => (
+                  <button
+                    key={f.category}
+                    className={`sv-facet ${categories.includes(f.category) ? 'active' : ''}`}
+                    onClick={() => toggleCategory(f.category)}
+                  >
+                    #{f.category} <span className="sv-facet-count">{f.count}</span>
+                  </button>
+                ))}
+                {visibleFacets.length > FACET_THRESHOLD && (
+                  <button className="sv-facets-more" onClick={() => setShowAllFacets((v) => !v)}>
+                    {showAllFacets ? 'Show less' : `+${visibleFacets.length - FACET_THRESHOLD} more`}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {numActive > 0 && (
+            <div className="sv-filter-row sv-filter-actions">
+              <button className="sv-filter-clear" onClick={clearAll}>Clear all filters</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Active filter chips ── */}
+      {numActive > 0 && !panelOpen && (
+        <div className="sv-active-chips">
+          {categories.map((c) => (
+            <button key={c} className="sv-chip" onClick={() => toggleCategory(c)}>
+              #{c} ×
             </button>
           ))}
+          {freshnessIndex > 0 && (
+            <button className="sv-chip" onClick={() => setFreshnessIndex(0)}>
+              {FRESHNESS_PRESETS[freshnessIndex].label} ×
+            </button>
+          )}
+          {lengthIndex > 0 && (
+            <button className="sv-chip" onClick={() => setLengthIndex(0)}>
+              {LENGTH_PRESETS[lengthIndex].label} ×
+            </button>
+          )}
+          {objectTypes.map((t) => (
+            <button key={t} className="sv-chip" onClick={() => toggleObjectType(t)}>
+              {t} ×
+            </button>
+          ))}
+          {starredOnly && (
+            <button className="sv-chip" onClick={() => setStarredOnly(false)}>★ starred ×</button>
+          )}
+          {allBooks && (
+            <button className="sv-chip" onClick={() => setAllBooks(false)}>all books ×</button>
+          )}
         </div>
       )}
 
@@ -94,7 +369,7 @@ export function SearchView() {
         {error && <div className="sv-state sv-error">{error}</div>}
         {!query.trim() && (
           <div className="sv-state sv-hint">
-            {crossBookMode
+            {allBooks
               ? 'Search all your tracked books to find notes and create cross-book links.'
               : 'Type to search across every note.'}
           </div>
@@ -102,12 +377,12 @@ export function SearchView() {
         {loading && <div className="sv-state">Searching…</div>}
 
         {/* Current-book results */}
-        {!crossBookMode && results && results.hits.length === 0 && query.trim() && !loading && (
+        {!allBooks && results && hits.length === 0 && query.trim() && !loading && (
           <div className="sv-state">No matches.</div>
         )}
-        {!crossBookMode && results && results.hits.length > 0 && (
+        {!allBooks && hits.length > 0 && (
           <div className="sv-results">
-            {results.hits.map((hit) => (
+            {shownHits.map((hit) => (
               <div
                 key={hit.note_id}
                 className={`sv-hit ${preview === hit.note_id ? 'selected' : ''}`}
@@ -120,14 +395,20 @@ export function SearchView() {
                 <div className="sv-hit-header">
                   <span className="sv-hit-title">{displayTitle(hit.title, hit.summary)}</span>
                   <div className="sv-hit-meta">
+                    {hit.starred && <span className="sv-hit-star" title="Starred">★</span>}
+                    <span className="sv-hit-type">{hit.object_type}</span>
+                    <span className="sv-hit-date">{relativeDate(hit.updated)}</span>
                     <span
                       className="sv-hit-score"
-                      title={`RRF total ${formatScore(hit.ranking_signals.total)} = exact ${formatScore(hit.ranking_signals.exact)} + bm25 ${formatScore(hit.ranking_signals.bm25)} + vector ${formatScore(hit.ranking_signals.vector)}`}
+                      title={scoreTooltip(hit)}
                       aria-label="Ranking score details"
                     >
-                      {formatScore(hit.ranking_signals.total)}
+                      {hitPct(hit.score)}
                     </span>
-                    <button className="sv-hit-open" onClick={(e) => { e.stopPropagation(); openEditor(hit.note_id); }}>
+                    <button
+                      className="sv-hit-open"
+                      onClick={(e) => { e.stopPropagation(); openEditor(hit.note_id); }}
+                    >
                       Open
                     </button>
                   </div>
@@ -141,14 +422,18 @@ export function SearchView() {
                 )}
               </div>
             ))}
+            {/* Intersection sentinel for windowed reveal */}
+            {visibleCount < hits.length && (
+              <div ref={sentinelRef} className="sv-sentinel" aria-hidden="true" />
+            )}
           </div>
         )}
 
         {/* Cross-book results */}
-        {crossBookMode && crossBookResults !== null && crossBookResults.length === 0 && query.trim() && !loading && (
+        {allBooks && crossBookResults !== null && crossBookResults.length === 0 && query.trim() && !loading && (
           <div className="sv-state">No matches in other books.</div>
         )}
-        {crossBookMode && crossBookResults && crossBookResults.length > 0 && (
+        {allBooks && crossBookResults && crossBookResults.length > 0 && (
           <div className="sv-results">
             {crossBookResults.map((hit) => (
               <div key={`${hit.book_path}/${hit.note_id}`} className="sv-hit sv-hit-cross-book">
@@ -166,7 +451,7 @@ export function SearchView() {
         )}
       </div>
 
-      {!crossBookMode && preview && <RelatedCarousel noteId={preview} />}
+      {!allBooks && preview && <RelatedCarousel noteId={preview} />}
     </div>
   );
 }

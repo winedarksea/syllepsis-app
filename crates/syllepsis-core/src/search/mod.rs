@@ -9,11 +9,13 @@
 pub mod bm25;
 pub mod engine;
 pub mod exact;
+pub mod filter;
 pub mod results;
 pub mod rrf;
 pub mod sqlite_index;
 
 pub use engine::SearchEngine;
+pub use filter::SearchFilter;
 pub use results::{
     BlindSpot, DuplicatePair, EmbeddingDiagnostics, FacetCount, RelatedNote, SearchHit,
     SearchRankingSignals, SearchResults,

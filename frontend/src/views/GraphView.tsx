@@ -76,7 +76,7 @@ export function GraphView() {
     const clusterMode = result?.mode === 'pillars'
       || result?.mode === 'communities'
       || result?.mode === 'density';
-    if (!clusterMode || result.summary.embedded_note_count >= result.summary.note_count) return;
+    if (!clusterMode || result.provider.semantic) return;
     const refreshTimer = window.setInterval(
       () => setEmbeddingModelRevision((revision) => revision + 1),
       EMBEDDING_COVERAGE_REFRESH_MS,
@@ -150,6 +150,7 @@ export function GraphView() {
           result={result}
           semanticEdges={visibleSemanticEdges}
           showAllTitles={store.showAllGraphTitles}
+          showPriorRelationships={store.showGraphPriorRelationships}
           loading={loading}
           onOpenNote={store.openEditor}
         />

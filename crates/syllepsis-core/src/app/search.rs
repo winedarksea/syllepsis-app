@@ -12,7 +12,7 @@ use crate::embeddings::{category_vector, load_embedding_corpus, try_select_embed
 use crate::error::CoreResult;
 use crate::model::Note;
 use crate::search::{
-    EmbeddingDiagnostics, RelatedNote, SearchEngine, SearchResults, SqliteSearchIndex,
+    EmbeddingDiagnostics, RelatedNote, SearchEngine, SearchFilter, SearchResults, SqliteSearchIndex,
 };
 use crate::storage::layout;
 use crate::storage::{Book, NoteStore};
@@ -35,28 +35,27 @@ fn engine_for(book: &Book) -> CoreResult<(SearchEngine, EmbeddingCoverage)> {
     ))
 }
 
-/// Full search: exact + BM25 + vector fused with RRF, optionally narrowed to `category_filter`.
-pub fn search(book: &Book, query: &str, category_filter: &[String]) -> CoreResult<SearchResults> {
+/// Full search: exact + BM25 + vector fused with RRF, optionally narrowed by `filter`.
+pub fn search(book: &Book, query: &str, filter: &SearchFilter) -> CoreResult<SearchResults> {
     let query_embedding = try_select_embedder(book.models_root(), &book.config.embedding)
         .and_then(|provider| provider.try_embed_query(query))
         .ok();
-    search_with_query_embedding(book, query, category_filter, query_embedding.as_ref())
+    search_with_query_embedding(book, query, filter, query_embedding.as_ref())
 }
 
 pub fn search_with_query_embedding(
     book: &Book,
     query: &str,
-    category_filter: &[String],
+    filter: &SearchFilter,
     query_embedding: Option<&Embedding>,
 ) -> CoreResult<SearchResults> {
     let started = std::time::Instant::now();
     let (engine, _) = engine_for(book)?;
     let mut index = SqliteSearchIndex::open(&layout::derived_dir(&book.root))?;
     index.rebuild_from_engine(&engine)?;
-    let results = index.search(&engine, query, category_filter, query_embedding)?;
+    let results = index.search(&engine, query, filter, query_embedding)?;
     tracing::info!(
         query = query,
-        filters = category_filter.len(),
         hits = results.hits.len(),
         elapsed_ms = started.elapsed().as_millis(),
         "search: query complete"
@@ -123,6 +122,7 @@ mod tests {
     use super::*;
     use crate::app::commands::{create_note, update_note};
     use crate::model::ObjectType;
+    use crate::search::SearchFilter;
     use crate::storage::Book;
 
     fn book() -> (tempfile::TempDir, Book) {
@@ -149,7 +149,7 @@ mod tests {
         );
         add(&book, "Garden", "roses and compost", &["garden"]);
 
-        let results = search(&book, "breaker panel", &[]).unwrap();
+        let results = search(&book, "breaker panel", &SearchFilter::default()).unwrap();
         assert_eq!(results.hits[0].title, "Kitchen");
         assert!(results.facets.iter().any(|f| f.category == "electrical"));
         assert!(layout::derived_dir(&book.root)
@@ -165,7 +165,7 @@ mod tests {
         n.metadata.lifecycle.archived = true;
         update_note(&book, n).unwrap();
 
-        assert!(search(&book, "breaker panel", &[]).unwrap().hits.is_empty());
+        assert!(search(&book, "breaker panel", &SearchFilter::default()).unwrap().hits.is_empty());
     }
 
     #[test]
@@ -188,7 +188,7 @@ mod tests {
         crate::embeddings::repository::write_test_sidecars(&book, &notes);
 
         // Resolve the id of Compost A.
-        let hits = search(&book, "Compost A", &[]).unwrap();
+        let hits = search(&book, "Compost A", &SearchFilter::default()).unwrap();
         let id = &hits.hits[0].note_id;
         let related = related_notes(&book, id).unwrap();
         assert!(related.iter().any(|r| r.title == "Compost B"));
@@ -211,9 +211,9 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        let first = search(&book, "compost", &[]).unwrap();
+        let first = search(&book, "compost", &SearchFilter::default()).unwrap();
         let id = first.hits[0].note_id.clone();
-        let _ = search(&book, "compost", &[]).unwrap();
+        let _ = search(&book, "compost", &SearchFilter::default()).unwrap();
         let _ = related_notes(&book, &id).unwrap();
         let _ = embedding_diagnostics(&book).unwrap();
 

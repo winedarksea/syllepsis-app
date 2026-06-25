@@ -211,7 +211,7 @@ impl Default for SearchConfig {
             category_upweight: 1.25,
             bm25_k1: 1.2,
             bm25_b: 0.75,
-            result_limit: 50,
+            result_limit: 200,
             related_limit: 8,
             duplicate_similarity: 0.92,
             blind_spot_similarity: 0.15,

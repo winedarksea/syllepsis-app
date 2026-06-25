@@ -145,6 +145,8 @@ pub struct GraphTimelineMeta {
     pub ticks: Vec<GraphTimelineTick>,
     /// Notes with no resolvable date, parked in the left "undated" lane.
     pub undated_count: usize,
+    /// Number of time buckets actually used (for initial zoom calculation on the frontend).
+    pub bucket_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

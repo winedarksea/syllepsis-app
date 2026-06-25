@@ -12,6 +12,7 @@ use std::path::Path;
 use crate::embeddings::Embedding;
 use crate::error::{CoreError, CoreResult};
 use crate::search::exact::match_exact;
+use crate::search::filter::SearchFilter;
 use crate::search::results::{FacetCount, SearchHit, SearchRankingSignals, SearchResults};
 use crate::search::rrf::reciprocal_rank_fusion;
 use crate::search::SearchEngine;
@@ -108,34 +109,53 @@ impl SqliteSearchIndex {
         &self,
         engine: &SearchEngine,
         query: &str,
-        category_filter: &[String],
+        filter: &SearchFilter,
         query_embedding: Option<&Embedding>,
     ) -> CoreResult<SearchResults> {
         let exact = ids_only(match_exact(engine.documents(), query));
         let fts = self.fts_ranked_indices(query)?;
-        let vector = match query_embedding {
-            Some(query_embedding) => self.vector_ranked_indices(query_embedding)?,
+        let vector_scored = match query_embedding {
+            Some(emb) => self.vector_ranked_indices(emb)?,
             None => Vec::new(),
         };
+        let vector: Vec<usize> = vector_scored.iter().map(|(i, _)| *i).collect();
+        let vector_cosines: HashMap<usize, f32> = vector_scored.into_iter().collect();
+
         let exact_ranks = rank_map(&exact);
         let fts_ranks = rank_map(&fts);
         let vector_ranks = rank_map(&vector);
-        let fused = reciprocal_rank_fusion(&[exact, fts, vector], engine.search_config());
+
+        let mut fused = reciprocal_rank_fusion(&[exact, fts, vector], engine.search_config());
+
+        // Tiebreaker: among equal RRF scores, longer-body notes rank first (penalizes title-only
+        // notes — body length 0 — without touching the zero-centroid path).
+        fused.sort_by(|(a_idx, a_score), (b_idx, b_score)| {
+            b_score
+                .total_cmp(a_score)
+                .then_with(|| {
+                    engine.notes()[*b_idx]
+                        .body
+                        .len()
+                        .cmp(&engine.notes()[*a_idx].body.len())
+                })
+        });
+
         let facets = self.facet_counts(fused.iter().map(|(idx, _)| *idx))?;
         let hits: Vec<SearchHit> = fused
             .into_iter()
-            .filter(|(idx, _)| engine.passes_category_filter(*idx, category_filter))
+            .filter(|(idx, _)| engine.passes_filter(*idx, filter))
             .take(engine.search_config().result_limit)
             .map(|(idx, score)| {
-                let ranking_signals = ranking_signals(
+                let signals = ranking_signals(
                     idx,
                     score,
                     &exact_ranks,
                     &fts_ranks,
                     &vector_ranks,
                     engine.search_config().rrf_k,
+                    &vector_cosines,
                 );
-                engine.search_hit_for_index(idx, score, query, ranking_signals)
+                engine.search_hit_for_index(idx, score, query, signals)
             })
             .collect();
         Ok(SearchResults { hits, facets })
@@ -240,7 +260,9 @@ impl SqliteSearchIndex {
         Ok(out)
     }
 
-    fn vector_ranked_indices(&self, query: &Embedding) -> CoreResult<Vec<usize>> {
+    /// Returns `(note_index, best_cosine_similarity)` pairs, sorted descending by cosine.
+    /// The cosine scores are threaded through to `SearchRankingSignals::vector_similarity`.
+    fn vector_ranked_indices(&self, query: &Embedding) -> CoreResult<Vec<(usize, f32)>> {
         if query.magnitude() <= f32::EPSILON {
             return Ok(Vec::new());
         }
@@ -264,7 +286,7 @@ impl SqliteSearchIndex {
             }
         }
         best_by_note.sort_by(|a, b| b.1.total_cmp(&a.1));
-        Ok(best_by_note.into_iter().map(|(idx, _)| idx).collect())
+        Ok(best_by_note)
     }
 
     fn facet_counts(&self, indices: impl Iterator<Item = usize>) -> CoreResult<Vec<FacetCount>> {
@@ -352,6 +374,7 @@ fn ranking_signals(
     bm25_ranks: &HashMap<usize, usize>,
     vector_ranks: &HashMap<usize, usize>,
     rrf_k: f32,
+    vector_cosines: &HashMap<usize, f32>,
 ) -> SearchRankingSignals {
     let exact = exact_ranks
         .get(&note_index)
@@ -365,11 +388,13 @@ fn ranking_signals(
         .get(&note_index)
         .map(|rank| 1.0 / (rrf_k + *rank as f32 + 1.0))
         .unwrap_or(0.0);
+    let vector_similarity = vector_cosines.get(&note_index).copied().unwrap_or(0.0);
     SearchRankingSignals {
         exact,
         bm25,
         vector,
         total,
+        vector_similarity,
     }
 }
 
@@ -389,6 +414,7 @@ mod tests {
     use crate::config::Config;
     use crate::embeddings::HashingEmbedder;
     use crate::model::{Note, ObjectType};
+    use crate::search::filter::SearchFilter;
 
     fn note(title: &str, body: &str, cats: &[&str]) -> Note {
         let mut note = Note::new(ObjectType::Note, title, "syllepsis_001");
@@ -397,34 +423,214 @@ mod tests {
         note
     }
 
-    fn engine() -> SearchEngine {
+    fn engine_from(notes: Vec<Note>) -> SearchEngine {
         let config = Config::default();
         SearchEngine::build(
-            vec![
-                note("Kitchen wiring", "breaker panel outlets", &["electrical"]),
-                note("Garden", "compost roses soil", &["garden"]),
-            ],
+            notes,
             Box::new(HashingEmbedder::new(config.embedding.dimensions)),
             &config,
         )
     }
 
-    #[test]
-    fn rebuild_persists_notes_vectors_and_fts_results() {
+    fn engine() -> SearchEngine {
+        engine_from(vec![
+            note("Kitchen wiring", "breaker panel outlets", &["electrical"]),
+            note("Garden", "compost roses soil", &["garden"]),
+        ])
+    }
+
+    fn open_index(engine: &mut SearchEngine) -> (tempfile::TempDir, SqliteSearchIndex) {
         let dir = tempfile::tempdir().unwrap();
         let mut index = SqliteSearchIndex::open(dir.path()).unwrap();
-        let engine = engine();
-        index.rebuild_from_engine(&engine).unwrap();
+        index.rebuild_from_engine(engine).unwrap();
+        (dir, index)
+    }
+
+    #[test]
+    fn rebuild_persists_notes_vectors_and_fts_results() {
+        let mut eng = engine();
+        let (dir, index) = open_index(&mut eng);
 
         assert_eq!(index.persisted_note_count().unwrap(), 2);
         assert_eq!(index.vector_backend().unwrap(), "sqlite-blob-f32");
-        let query = engine.query_embedding("breaker panel");
+        let query_emb = eng.query_embedding("breaker panel");
         let results = index
-            .search(&engine, "breaker panel", &[], Some(&query))
+            .search(&eng, "breaker panel", &SearchFilter::default(), Some(&query_emb))
             .unwrap();
         assert_eq!(results.hits[0].title, "Kitchen wiring");
         assert!(results.facets.iter().any(|f| f.category == "electrical"));
         assert!(dir.path().join(SQLITE_SEARCH_DB).exists());
+    }
+
+    #[test]
+    fn vector_similarity_is_populated() {
+        let mut eng = engine();
+        let (_dir, index) = open_index(&mut eng);
+        let query_emb = eng.query_embedding("breaker panel");
+        let results = index
+            .search(&eng, "breaker panel", &SearchFilter::default(), Some(&query_emb))
+            .unwrap();
+        assert!(!results.hits.is_empty());
+        // The top hit should have a non-zero vector_similarity when a matching embedding exists.
+        assert!(
+            results.hits[0].ranking_signals.vector_similarity > 0.0,
+            "expected non-zero cosine similarity for a matching note"
+        );
+    }
+
+    #[test]
+    fn length_filter_excludes_title_only_note() {
+        // The tiebreaker only applies when RRF scores are equal; a title-only note can still
+        // legitimately outscore a full note on exact/BM25 for a query matching its title exactly.
+        // The correct user-facing lever is the length filter.
+        let full = note("Breaker panel wiring", "Install the breaker panel and run the outlets to each room. Use 20-amp breakers.", &["electrical"]);
+        let title_only = note("Breaker panel", "", &["electrical"]);
+        let mut eng = engine_from(vec![full, title_only]);
+        let (_dir, index) = open_index(&mut eng);
+        let query_emb = eng.query_embedding("breaker panel");
+
+        // Without a length filter both appear.
+        let all = index
+            .search(&eng, "breaker panel", &SearchFilter::default(), Some(&query_emb))
+            .unwrap();
+        assert_eq!(all.hits.len(), 2);
+
+        // With min_body_len the title-only note is filtered out.
+        let filter = SearchFilter {
+            min_body_len: Some(10),
+            ..Default::default()
+        };
+        let filtered = index
+            .search(&eng, "breaker panel", &filter, Some(&query_emb))
+            .unwrap();
+        assert_eq!(filtered.hits.len(), 1);
+        assert_eq!(filtered.hits[0].title, "Breaker panel wiring");
+    }
+
+    #[test]
+    fn updated_after_filter_narrows_hits() {
+        use chrono::Utc;
+        let mut notes = vec![
+            note("Old note", "old content about breaker", &["electrical"]),
+            note("New note", "new content about breaker", &["electrical"]),
+        ];
+        // Manually push the "New note" updated timestamp into the future.
+        let future = Utc::now() + chrono::Duration::hours(1);
+        notes[1].metadata.dates.updated = future;
+
+        let mut eng = engine_from(notes);
+        let (_dir, index) = open_index(&mut eng);
+        let query_emb = eng.query_embedding("breaker");
+
+        // Filter: only notes updated after "now" — should keep only the future-dated one.
+        let filter = SearchFilter {
+            updated_after: Some(Utc::now()),
+            ..Default::default()
+        };
+        let results = index
+            .search(&eng, "breaker", &filter, Some(&query_emb))
+            .unwrap();
+        assert_eq!(results.hits.len(), 1);
+        assert_eq!(results.hits[0].title, "New note");
+    }
+
+    #[test]
+    fn starred_only_filter_narrows_hits() {
+        let mut notes = vec![
+            note("Regular note", "content about breaker", &["electrical"]),
+            note("Starred note", "more content about breaker", &["electrical"]),
+        ];
+        notes[1].metadata.classification.starred = true;
+
+        let mut eng = engine_from(notes);
+        let (_dir, index) = open_index(&mut eng);
+        let query_emb = eng.query_embedding("breaker");
+
+        let filter = SearchFilter {
+            starred_only: true,
+            ..Default::default()
+        };
+        let results = index
+            .search(&eng, "breaker", &filter, Some(&query_emb))
+            .unwrap();
+        assert_eq!(results.hits.len(), 1);
+        assert_eq!(results.hits[0].title, "Starred note");
+        assert!(results.hits[0].starred);
+    }
+
+    #[test]
+    fn object_type_filter_narrows_hits() {
+        let mut notes = vec![
+            note("A note", "content about breaker", &["electrical"]),
+        ];
+        let mut todo = Note::new(ObjectType::Todo, "A todo", "syllepsis_001");
+        todo.body = "todo content about breaker".into();
+        todo.categories = vec!["electrical".into()];
+        notes.push(todo);
+
+        let mut eng = engine_from(notes);
+        let (_dir, index) = open_index(&mut eng);
+        let query_emb = eng.query_embedding("breaker");
+
+        let filter = SearchFilter {
+            object_types: vec![ObjectType::Todo],
+            ..Default::default()
+        };
+        let results = index
+            .search(&eng, "breaker", &filter, Some(&query_emb))
+            .unwrap();
+        assert_eq!(results.hits.len(), 1);
+        assert_eq!(results.hits[0].object_type, ObjectType::Todo);
+    }
+
+    #[test]
+    fn length_filter_narrows_hits() {
+        let notes = vec![
+            note("Short note", "breaker", &["electrical"]),
+            note("Long note", &"breaker panel wiring outlet ".repeat(20), &["electrical"]),
+        ];
+        let mut eng = engine_from(notes);
+        let (_dir, index) = open_index(&mut eng);
+        let query_emb = eng.query_embedding("breaker");
+
+        let filter = SearchFilter {
+            min_body_len: Some(50),
+            ..Default::default()
+        };
+        let results = index
+            .search(&eng, "breaker", &filter, Some(&query_emb))
+            .unwrap();
+        assert_eq!(results.hits.len(), 1);
+        assert_eq!(results.hits[0].title, "Long note");
+    }
+
+    #[test]
+    fn facets_remain_full_under_active_filter() {
+        // Both notes must match the query so they both appear in the fused (unfiltered) set.
+        // A category filter then narrows hits but facets should still include the filtered category.
+        let notes = vec![
+            note("Electrical note", "the breaker panel has outlets", &["electrical"]),
+            note("Garden note", "the garden has compost and roses", &["garden"]),
+        ];
+        let mut eng = engine_from(notes);
+        let (_dir, index) = open_index(&mut eng);
+
+        // "the" appears in both note bodies → both land in the fused set.
+        let filter = SearchFilter {
+            categories: vec!["electrical".into()],
+            ..Default::default()
+        };
+        let results = index
+            .search(&eng, "the", &filter, None)
+            .unwrap();
+        // Filtered hits contain only electrical.
+        assert!(results.hits.iter().all(|h| h.categories.contains(&"electrical".into())));
+        // But facets are from the unfiltered set, so both categories appear.
+        assert!(
+            results.facets.iter().any(|f| f.category == "garden"),
+            "garden facet should appear even when filtered to electrical"
+        );
+        assert!(results.facets.iter().any(|f| f.category == "electrical"));
     }
 
     #[test]

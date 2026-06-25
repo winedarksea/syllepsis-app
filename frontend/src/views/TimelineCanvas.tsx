@@ -13,6 +13,7 @@ import { useGraphCamera, type Camera2D } from './useGraphCamera';
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 40;
+const MIN_BUCKET_PX = 18;
 const TIMELINE_AXIS_SCREEN_Y = GRAPH_HEIGHT - 82;
 const TIMELINE_STACK_TOP = 24;
 const TIMELINE_STACK_BOTTOM = TIMELINE_AXIS_SCREEN_Y - 24;
@@ -51,9 +52,21 @@ export function TimelineCanvas({
     const end = timeline?.focus_end_x ?? 1;
     const worldStart = normalizedXToWorld(start);
     const worldWidth = Math.max(1, normalizedXToWorld(end) - worldStart);
-    const zoomX = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, GRAPH_WIDTH / worldWidth));
-    return { x: worldStart, y: 0, zoomX, zoomY: 1 };
-  }, [timeline?.focus_start_x, timeline?.focus_end_x]);
+    const zoomFromFocus = GRAPH_WIDTH / worldWidth;
+
+    const worldPerBucket = (GRAPH_WIDTH - GRAPH_PADDING_X * 2) / (timeline?.bucket_count ?? 1);
+    const zoomForBuckets = MIN_BUCKET_PX / worldPerBucket;
+
+    const zoomX = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.max(zoomFromFocus, zoomForBuckets)));
+
+    let x = worldStart;
+    if (zoomForBuckets > zoomFromFocus) {
+      const worldMid = normalizedXToWorld((start + end) / 2);
+      x = Math.max(0, Math.min(GRAPH_WIDTH - GRAPH_WIDTH / zoomX, worldMid - GRAPH_WIDTH / zoomX / 2));
+    }
+
+    return { x, y: 0, zoomX, zoomY: 1 };
+  }, [timeline?.focus_start_x, timeline?.focus_end_x, timeline?.granularity, timeline?.bucket_count]);
 
   const cameraController = useGraphCamera(svgRef, {
     width: GRAPH_WIDTH,

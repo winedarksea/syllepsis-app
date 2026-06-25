@@ -16,6 +16,7 @@ interface GraphCanvasProps {
   result: GraphAnalysisResult;
   semanticEdges: GraphSemanticEdge[];
   showAllTitles: boolean;
+  showPriorRelationships?: boolean;
   loading: boolean;
   onOpenNote: (id: string) => void;
 }
@@ -24,6 +25,7 @@ export function GraphCanvas({
   result,
   semanticEdges,
   showAllTitles,
+  showPriorRelationships = true,
   loading,
   onOpenNote,
 }: GraphCanvasProps) {
@@ -179,21 +181,23 @@ export function GraphCanvas({
           })}
         </g>
 
-        <g className="gv-prior-edges">
-          {result.prior_edges.map((edge) => {
-            const source = pointsById.get(edge.source);
-            const target = pointsById.get(edge.target);
-            if (!source || !target) return null;
-            const showCasing = themeStyle.graphEdge === 'weave'
-              && result.prior_edges.length <= WEAVE_LIMIT;
-            return (
-              <g key={`${edge.source}:${edge.target}`}>
-                {showCasing && <line x1={source.x} y1={source.y} x2={target.x} y2={target.y} className="gv-edge-casing" />}
-                <line x1={source.x} y1={source.y} x2={target.x} y2={target.y} className="gv-prior-edge" />
-              </g>
-            );
-          })}
-        </g>
+        {showPriorRelationships && (
+          <g className="gv-prior-edges">
+            {result.prior_edges.map((edge) => {
+              const source = pointsById.get(edge.source);
+              const target = pointsById.get(edge.target);
+              if (!source || !target) return null;
+              const showCasing = themeStyle.graphEdge === 'weave'
+                && result.prior_edges.length <= WEAVE_LIMIT;
+              return (
+                <g key={`${edge.source}:${edge.target}`}>
+                  {showCasing && <line x1={source.x} y1={source.y} x2={target.x} y2={target.y} className="gv-edge-casing" />}
+                  <line x1={source.x} y1={source.y} x2={target.x} y2={target.y} className="gv-prior-edge" />
+                </g>
+              );
+            })}
+          </g>
+        )}
 
         <g className="gv-nodes">
           {result.nodes.map((node) => {
@@ -230,7 +234,7 @@ export function GraphCanvas({
 
       <div className="gv-legend">
         <span><i className="gv-legend-line semantic" />Semantic similarity</span>
-        <span><i className="gv-legend-line prior" />Prior relationship</span>
+        {showPriorRelationships && <span><i className="gv-legend-line prior" />Prior relationship</span>}
         <span><i className="gv-legend-region" />Cluster</span>
         <span><i className="gv-legend-node outlier" />Outlier</span>
         <span><i className="gv-legend-node no-signal" />No semantic signal</span>

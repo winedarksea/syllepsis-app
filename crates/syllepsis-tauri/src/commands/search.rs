@@ -6,7 +6,7 @@ use tauri::State;
 
 use syllepsis_core::app::search as app;
 use syllepsis_core::graph_analysis::{GraphAnalysisRequest, GraphAnalysisResult};
-use syllepsis_core::search::{EmbeddingDiagnostics, RelatedNote, SearchResults};
+use syllepsis_core::search::{EmbeddingDiagnostics, RelatedNote, SearchFilter, SearchResults};
 use syllepsis_core::storage::{Book, NoteStore};
 
 use crate::state::{models_root_from_app_data, AppState};
@@ -31,12 +31,12 @@ macro_rules! with_book {
     }};
 }
 
-/// Run a full search; `category_filter` (possibly empty) narrows the hits.
+/// Run a full search; `filter` narrows the hits (empty filter = return all matches).
 #[tauri::command]
 pub async fn search(
     app_handle: tauri::AppHandle,
     query: String,
-    category_filter: Vec<String>,
+    filter: SearchFilter,
 ) -> Result<SearchResults, String> {
     use tauri::Manager;
     tauri::async_runtime::spawn_blocking(move || {
@@ -46,7 +46,7 @@ pub async fn search(
             app::search_with_query_embedding(
                 book,
                 &query,
-                &category_filter,
+                &filter,
                 query_embedding.as_ref(),
             )
             .map_err(|e| e.to_string())

@@ -154,6 +154,146 @@
   padding: 1px var(--sp-2);
 }
 
+/* ── Filter toggle button ── */
+.sv-filter-toggle {
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+.sv-filter-toggle:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.sv-filter-toggle.active {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-color: var(--color-accent);
+}
+
+/* ── Collapsible filter panel ── */
+.sv-filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  flex-shrink: 0;
+}
+
+.sv-filter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.sv-filter-row--top { align-items: flex-start; }
+
+.sv-filter-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  min-width: 72px;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.sv-filter-select {
+  font-size: var(--font-size-xs);
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--sp-2);
+}
+
+.sv-filter-checkgroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.sv-filter-check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sv-filter-check input { accent-color: var(--color-accent); cursor: pointer; }
+
+.sv-filter-actions { justify-content: flex-end; }
+
+.sv-filter-clear {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  padding: 2px var(--sp-2);
+}
+.sv-filter-clear:hover { color: var(--color-error); }
+
+/* Inline category facets inside the filter panel */
+.sv-facets-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.sv-facets-more {
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+  padding: 2px var(--sp-2);
+}
+
+/* ── Active filter chips ── */
+.sv-active-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  flex-shrink: 0;
+}
+
+.sv-chip {
+  font-size: var(--font-size-xs);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+  border-radius: var(--radius-pill, 999px);
+  padding: 2px var(--sp-3);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.sv-chip:hover { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+
+/* ── Hit metadata badges ── */
+.sv-hit-star {
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+}
+
+.sv-hit-type {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  opacity: 0.75;
+}
+
+.sv-hit-date {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  opacity: 0.75;
+}
+
+/* Windowing sentinel — invisible, just triggers IntersectionObserver */
+.sv-sentinel {
+  height: 1px;
+}
+
 /* Cross-book search toggle */
 .sv-cross-book-toggle {
   padding: var(--sp-1) var(--sp-3);

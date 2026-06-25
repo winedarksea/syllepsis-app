@@ -2,7 +2,10 @@
 //! [`crate::sort::RenderItem`]), so they are `Serialize`/`Deserialize` and hold owned,
 //! UI-ready strings rather than note handles.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::model::ObjectType;
 
 /// Per-retriever contribution to a hit's final reciprocal-rank-fusion score.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,6 +18,9 @@ pub struct SearchRankingSignals {
     pub vector: f32,
     /// Sum of the individual contributions (equal to `SearchHit::score`).
     pub total: f32,
+    /// Raw cosine similarity of the best matching chunk to the query embedding (0 when no vector
+    /// hit — e.g. empty note or no query embedding). Complements the rank-based `vector` signal.
+    pub vector_similarity: f32,
 }
 
 /// One result row: enough to render a card and open the note, plus its fused relevance score.
@@ -30,6 +36,14 @@ pub struct SearchHit {
     pub score: f32,
     /// Subtle explainability metadata for the ranking UI.
     pub ranking_signals: SearchRankingSignals,
+    /// The note's object type (note, todo, qa, …).
+    pub object_type: ObjectType,
+    /// When the note was last updated — ISO timestamp for the UI date badge.
+    pub updated: DateTime<Utc>,
+    /// Whether the note is starred.
+    pub starred: bool,
+    /// Body length in Unicode scalar values (characters), for the length filter feedback badge.
+    pub body_len: usize,
 }
 
 /// How many results fall under a category — the facet sidebar of [`SearchResults`].
