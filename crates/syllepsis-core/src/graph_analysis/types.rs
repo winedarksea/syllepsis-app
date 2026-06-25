@@ -43,6 +43,7 @@ pub enum TimelineColorBy {
 #[serde(default)]
 pub struct GraphAnalysisRequest {
     pub mode: GraphMode,
+    pub automatic_cluster_defaults: bool,
     pub umap_neighbors: usize,
     pub kmeans_k: usize,
     pub louvain_resolution: f64,
@@ -57,6 +58,7 @@ impl Default for GraphAnalysisRequest {
     fn default() -> Self {
         Self {
             mode: GraphMode::Categories,
+            automatic_cluster_defaults: true,
             umap_neighbors: 15,
             kmeans_k: 5,
             louvain_resolution: 1.0,

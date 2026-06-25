@@ -290,6 +290,7 @@ export type TimelineColorBy = 'category' | 'cluster';
 
 export interface GraphAnalysisRequest {
   mode: GraphMode;
+  automatic_cluster_defaults: boolean;
   umap_neighbors: number;
   kmeans_k: number;
   louvain_resolution: number;
@@ -485,6 +486,7 @@ export interface LocalAiWorkerStatus {
   pending_query_jobs: number;
   pending_note_jobs: number;
   blocked_note_jobs: number;
+  note_block_reason: string | null;
   power_source: 'ac' | 'battery' | 'unknown';
   policy: LocalAiDevicePolicy;
   recent_failures: LocalAiFailure[];
@@ -493,6 +495,8 @@ export interface LocalAiWorkerStatus {
 export interface LocalAiStatus {
   worker: LocalAiWorkerStatus;
   embedding_coverage: EmbeddingCoverage;
+  embedding_model_id: string;
+  embedding_model_cached: boolean;
 }
 
 export interface SearchConfig {

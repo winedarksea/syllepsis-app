@@ -123,6 +123,7 @@ fn empty_notes_are_marked_as_having_no_semantic_signal() {
 fn request_and_result_shapes_serialize() {
     let request_json = serde_json::to_string(&GraphAnalysisRequest::default()).unwrap();
     assert!(request_json.contains("\"mode\":\"categories\""));
+    assert!(request_json.contains("\"automatic_cluster_defaults\":true"));
     assert!(request_json.contains("\"timeline_primary_date\":\"created\""));
 
     let result = empty_result(GraphMode::Density, "hashing-bow");
@@ -130,6 +131,51 @@ fn request_and_result_shapes_serialize() {
     assert!(result_json.contains("\"semantic\":false"));
     // `timeline` is None for non-timeline modes and skipped.
     assert!(!result_json.contains("\"timeline\""));
+}
+
+#[test]
+fn cluster_modes_use_a_two_dimensional_category_fallback_until_embeddings_are_complete() {
+    let (_directory, book) = test_book();
+    for index in 0..9 {
+        let category = if index < 3 {
+            "garden"
+        } else if index < 6 {
+            "electrical"
+        } else {
+            "writing"
+        };
+        add_note(
+            &book,
+            &format!("Note {index}"),
+            "embedding pending",
+            category,
+        );
+    }
+
+    let corpus = SemanticGraphCorpus::build(&book).unwrap();
+    let result = corpus
+        .analyze(&GraphAnalysisRequest {
+            mode: GraphMode::Communities,
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert!(!result.provider.semantic);
+    assert_eq!(result.summary.embedded_note_count, 0);
+    assert_eq!(result.summary.no_signal_count, 9);
+    assert_eq!(result.summary.cluster_count, 3);
+    let distinct_x: HashSet<i32> = result
+        .nodes
+        .iter()
+        .map(|node| (node.x * 1_000.0).round() as i32)
+        .collect();
+    let distinct_y: HashSet<i32> = result
+        .nodes
+        .iter()
+        .map(|node| (node.y * 1_000.0).round() as i32)
+        .collect();
+    assert!(distinct_x.len() > 2, "fallback must not collapse to a line");
+    assert!(distinct_y.len() > 2, "fallback must not collapse to a line");
 }
 
 fn add_note_created(book: &Book, title: &str, created: chrono::DateTime<chrono::Utc>) -> String {

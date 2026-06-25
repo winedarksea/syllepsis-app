@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod local_ai;
+mod model_bootstrap;
 pub mod state;
 
 use commands::{
@@ -56,6 +57,7 @@ pub fn run() {
                     .local_ai
                     .configure_preferences_path(app_data_dir.join("local-ai-device-policy.json"));
             }
+            model_bootstrap::provision_default_embedding_model(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

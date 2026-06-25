@@ -1,29 +1,43 @@
 //! Device-local controls and observability for the serial model worker.
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use syllepsis_core::app::search as search_app;
+use syllepsis_core::onnx::{self, ModelCache};
 use syllepsis_core::storage::NoteStore;
 
 use crate::local_ai::{LocalAiDevicePolicy, LocalAiWorkerStatus};
-use crate::state::AppState;
+use crate::state::{models_root_from_app_data, AppState};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LocalAiStatus {
     pub worker: LocalAiWorkerStatus,
     pub embedding_coverage: syllepsis_core::embeddings::EmbeddingCoverage,
+    pub embedding_model_id: String,
+    pub embedding_model_cached: bool,
 }
 
 #[tauri::command]
-pub fn local_ai_status(state: State<AppState>) -> Result<LocalAiStatus, String> {
-    let mut coverage = {
+pub fn local_ai_status(app: AppHandle, state: State<AppState>) -> Result<LocalAiStatus, String> {
+    let (mut coverage, embedding_model_id) = {
         let guard = state.book.lock().unwrap();
         let book = guard
             .as_ref()
             .ok_or_else(|| "no book is open".to_string())?;
-        search_app::embedding_coverage(book).map_err(|error| error.to_string())?
+        (
+            search_app::embedding_coverage(book).map_err(|error| error.to_string())?,
+            book.config.embedding.model_id.clone(),
+        )
     };
+    let embedding_manifest = onnx::builtin(&embedding_model_id)
+        .ok_or_else(|| format!("unknown embedding model {embedding_model_id}"))?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("resolve app data dir: {error}"))?;
+    let embedding_model_cached =
+        ModelCache::new(models_root_from_app_data(&app_data_dir)).is_cached(&embedding_manifest);
     let worker = state.local_ai.status();
     let needs_embeddings =
         coverage.stale_notes + coverage.missing_notes + coverage.incompatible_notes;
@@ -37,6 +51,8 @@ pub fn local_ai_status(state: State<AppState>) -> Result<LocalAiStatus, String> 
     Ok(LocalAiStatus {
         worker,
         embedding_coverage: coverage,
+        embedding_model_id,
+        embedding_model_cached,
     })
 }
 

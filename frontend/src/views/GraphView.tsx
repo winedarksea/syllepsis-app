@@ -9,6 +9,7 @@ import { filterSemanticEdges } from './graphGeometry';
 import './GraphView.css';
 
 const EMBEDDINGGEMMA_MODEL_ID = 'embeddinggemma-300m';
+const EMBEDDING_COVERAGE_REFRESH_MS = 3_000;
 
 export function GraphView() {
   const store = useStore();
@@ -22,6 +23,7 @@ export function GraphView() {
 
   const request = useMemo<GraphAnalysisRequest>(() => ({
     mode: store.graphMode,
+    automatic_cluster_defaults: store.graphAutomaticClusterDefaults,
     umap_neighbors: store.graphMode === 'pillars'
       ? store.graphPillarsNeighbors
       : store.graphMode === 'communities'
@@ -38,6 +40,7 @@ export function GraphView() {
     timeline_color_by: store.timelineColorBy,
   }), [
     store.graphMode,
+    store.graphAutomaticClusterDefaults,
     store.graphPillarsNeighbors,
     store.graphCommunitiesNeighbors,
     store.graphDensityNeighbors,
@@ -68,6 +71,18 @@ export function GraphView() {
         }
       });
   }, [request, requestKey, embeddingModelRevision]);
+
+  useEffect(() => {
+    const clusterMode = result?.mode === 'pillars'
+      || result?.mode === 'communities'
+      || result?.mode === 'density';
+    if (!clusterMode || result.summary.embedded_note_count >= result.summary.note_count) return;
+    const refreshTimer = window.setInterval(
+      () => setEmbeddingModelRevision((revision) => revision + 1),
+      EMBEDDING_COVERAGE_REFRESH_MS,
+    );
+    return () => window.clearInterval(refreshTimer);
+  }, [result]);
 
   const downloadEmbeddingModel = async () => {
     setModelDownloadInProgress(true);
@@ -101,18 +116,22 @@ export function GraphView() {
         <div className="gv-error-banner">{modelDownloadError ?? error}</div>
       )}
       <div className="gv-provider-note">
-        {result.provider.semantic
+        {result.mode === 'categories' || result.mode === 'timeline'
+          ? `${result.mode === 'categories' ? 'Category' : 'Timeline'} layout · does not require embeddings`
+          : result.provider.semantic
           ? `Semantic layout · ${result.provider.id}`
           : (
             <>
-              <span>Lexical fallback · shared words only</span>
+              <span>
+                {`Embedding coverage ${result.summary.embedded_note_count}/${result.summary.note_count} · showing category fallback`}
+              </span>
               <button
                 className="gv-model-download"
                 type="button"
                 disabled={modelDownloadInProgress}
                 onClick={downloadEmbeddingModel}
               >
-                {modelDownloadInProgress ? 'Downloading EmbeddingGemma…' : 'Download EmbeddingGemma model'}
+                {modelDownloadInProgress ? 'Preparing EmbeddingGemma…' : 'Prepare embeddings'}
               </button>
             </>
           )}

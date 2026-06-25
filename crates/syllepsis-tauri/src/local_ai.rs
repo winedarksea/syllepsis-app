@@ -58,6 +58,7 @@ pub struct LocalAiWorkerStatus {
     pub pending_query_jobs: usize,
     pub pending_note_jobs: usize,
     pub blocked_note_jobs: usize,
+    pub note_block_reason: Option<String>,
     pub power_source: PowerSource,
     pub policy: LocalAiDevicePolicy,
     pub recent_failures: Vec<LocalAiFailure>,
@@ -92,6 +93,7 @@ struct WorkerState {
     query_jobs: VecDeque<QueryJob>,
     note_jobs: HashMap<String, NoteJob>,
     blocked_note_jobs: HashMap<String, NoteJob>,
+    note_block_reason: Option<String>,
     current_job: Option<String>,
     policy: LocalAiDevicePolicy,
     preferences_path: Option<PathBuf>,
@@ -116,6 +118,7 @@ impl LocalAiWorker {
                 query_jobs: VecDeque::new(),
                 note_jobs: HashMap::new(),
                 blocked_note_jobs: HashMap::new(),
+                note_block_reason: None,
                 current_job: None,
                 policy: LocalAiDevicePolicy::default(),
                 preferences_path: None,
@@ -228,6 +231,7 @@ impl LocalAiWorker {
             .read_all_notes()
             .map_err(|error| error.to_string())?;
         let ids = stale_or_missing_note_ids(book, &notes).map_err(|error| error.to_string())?;
+        self.shared.state.lock().unwrap().note_block_reason = None;
         for id in &ids {
             self.enqueue_note(book, id.clone(), expedite)?;
         }
@@ -292,17 +296,21 @@ impl LocalAiWorker {
         let power_source = detect_power_source();
         let state = self.shared.state.lock().unwrap();
         let policy_blocked = note_generation_blocked(&state.policy, &power_source);
+        let model_blocked = state.note_block_reason.is_some();
+        let pending_note_jobs = state.note_jobs.len() + state.blocked_note_jobs.len();
         LocalAiWorkerStatus {
             current_job: state.current_job.clone(),
             pending_llm_jobs: state.llm_jobs.len(),
             pending_query_jobs: state.query_jobs.len(),
-            pending_note_jobs: state.note_jobs.len() + state.blocked_note_jobs.len(),
-            blocked_note_jobs: state.blocked_note_jobs.len()
-                + if policy_blocked {
-                    state.note_jobs.len()
-                } else {
-                    0
-                },
+            pending_note_jobs,
+            blocked_note_jobs: if policy_blocked || model_blocked {
+                pending_note_jobs
+            } else {
+                state.blocked_note_jobs.len()
+            },
+            note_block_reason: state.note_block_reason.clone().or_else(|| {
+                policy_blocked.then(|| note_generation_block_reason(&state.policy, &power_source))
+            }),
             power_source,
             policy: state.policy.clone(),
             recent_failures: state.recent_failures.iter().cloned().collect(),
@@ -350,7 +358,9 @@ fn worker_loop(shared: Arc<Shared>) {
                     state.current_job = Some("embedding:search-query".into());
                     break NextJob::Query(job);
                 }
-                if !note_generation_blocked(&state.policy, &power) {
+                if !note_generation_blocked(&state.policy, &power)
+                    && state.note_block_reason.is_none()
+                {
                     if let Some((key, job)) = next_ready_note_job(&state.note_jobs) {
                         state.note_jobs.remove(&key);
                         state.current_job = Some(format!("embedding:note:{}", job.note_id));
@@ -393,6 +403,7 @@ fn worker_loop(shared: Arc<Shared>) {
                     let key = note_job_key(&job.book_root, &job.note_id);
                     let mut state = shared.state.lock().unwrap();
                     state.blocked_note_jobs.insert(key, job);
+                    state.note_block_reason = error;
                     (label, None)
                 } else {
                     (label, error)
@@ -513,6 +524,16 @@ fn note_job_key(book_root: &Path, note_id: &str) -> String {
 fn note_generation_blocked(policy: &LocalAiDevicePolicy, power: &PowerSource) -> bool {
     !policy.generate_note_embeddings
         || (policy.pause_note_embeddings_on_battery && *power == PowerSource::Battery)
+}
+
+fn note_generation_block_reason(policy: &LocalAiDevicePolicy, power: &PowerSource) -> String {
+    if !policy.generate_note_embeddings {
+        return "Note embedding generation is disabled on this device".into();
+    }
+    if policy.pause_note_embeddings_on_battery && *power == PowerSource::Battery {
+        return "Note embedding generation is paused while on battery".into();
+    }
+    "Note embedding generation is paused".into()
 }
 
 fn model_unavailable(message: &str) -> bool {

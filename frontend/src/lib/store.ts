@@ -96,6 +96,8 @@ interface AppStore {
   setGraphSimilarityThreshold: (threshold: number) => void;
   graphAdvancedOpen: boolean;
   setGraphAdvancedOpen: (open: boolean) => void;
+  graphAutomaticClusterDefaults: boolean;
+  setGraphAutomaticClusterDefaults: (automatic: boolean) => void;
   graphPillarsNeighbors: number;
   setGraphPillarsNeighbors: (neighbors: number) => void;
   graphCommunitiesNeighbors: number;
@@ -206,6 +208,9 @@ export const useStore = create<AppStore>((set) => ({
   setGraphSimilarityThreshold: (graphSimilarityThreshold) => set({ graphSimilarityThreshold }),
   graphAdvancedOpen: false,
   setGraphAdvancedOpen: (graphAdvancedOpen) => set({ graphAdvancedOpen }),
+  graphAutomaticClusterDefaults: true,
+  setGraphAutomaticClusterDefaults: (graphAutomaticClusterDefaults) =>
+    set({ graphAutomaticClusterDefaults }),
   graphPillarsNeighbors: 50,
   setGraphPillarsNeighbors: (graphPillarsNeighbors) => set({ graphPillarsNeighbors }),
   graphCommunitiesNeighbors: 8,
@@ -219,7 +224,7 @@ export const useStore = create<AppStore>((set) => ({
   graphHdbscanMinClusterSize: 5,
   setGraphHdbscanMinClusterSize: (graphHdbscanMinClusterSize) =>
     set({ graphHdbscanMinClusterSize }),
-  clustersPreset: 'pillars',
+  clustersPreset: 'communities',
   setClustersPreset: (clustersPreset) => set({ clustersPreset }),
   timelinePrimaryDate: 'created',
   setTimelinePrimaryDate: (timelinePrimaryDate) => set({ timelinePrimaryDate }),

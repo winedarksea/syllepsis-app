@@ -1,4 +1,5 @@
 mod algorithms;
+mod layout;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -13,8 +14,11 @@ use crate::model::{Category, Note};
 use crate::storage::{Book, NoteStore};
 
 use algorithms::{
-    circle_layout, cosine_distance_matrix, deterministic_kmeans, hdbscan_labels, louvain_labels,
-    normalize_layout, umap_layout,
+    cosine_distance_matrix, deterministic_kmeans, hdbscan_labels, louvain_labels, umap_layout,
+};
+use layout::{
+    automatic_minimum_cluster_size, automatic_neighbor_count, automatic_theme_count,
+    category_layout_for_notes, ensure_useful_cluster_layout,
 };
 pub use types::{
     GraphAnalysisNode, GraphAnalysisRequest, GraphAnalysisResult, GraphAnalysisSummary,
@@ -23,7 +27,6 @@ pub use types::{
 };
 
 const MAX_SEMANTIC_NEIGHBORS: usize = 30;
-type CategoryLayoutAnalysis = (Vec<(f32, f32)>, Vec<Option<usize>>, Vec<bool>);
 
 #[derive(Debug, Clone)]
 pub struct SemanticGraphCorpus {
@@ -91,19 +94,27 @@ impl SemanticGraphCorpus {
         if request.mode == GraphMode::Timeline {
             return Ok(self.timeline_analysis(request));
         }
+        if request.mode == GraphMode::Categories {
+            return Ok(self.embedding_coverage_fallback(GraphMode::Categories));
+        }
         let embedded_vectors: Vec<Embedding> = self
             .embedded_note_indices
             .iter()
             .map(|index| self.centroids[*index].clone())
             .collect();
         let embedded_count = embedded_vectors.len();
+        if request.mode != GraphMode::Categories && embedded_count < self.notes.len() {
+            return Ok(self.embedding_coverage_fallback(request.mode));
+        }
         let default_neighbors = match request.mode {
             GraphMode::Pillars => 50,
             GraphMode::Communities => 8,
             GraphMode::Density => 15,
             GraphMode::Categories | GraphMode::Timeline => request.umap_neighbors,
         };
-        let requested_neighbors = if request.umap_neighbors == 0 {
+        let requested_neighbors = if request.automatic_cluster_defaults {
+            automatic_neighbor_count(request.mode, embedded_count)
+        } else if request.umap_neighbors == 0 {
             default_neighbors
         } else {
             request.umap_neighbors
@@ -111,38 +122,66 @@ impl SemanticGraphCorpus {
         .clamp(2, 100);
 
         let (positions, embedded_cluster_labels, embedded_outliers) = match request.mode {
-            GraphMode::Categories => self.category_analysis(),
+            GraphMode::Categories => unreachable!("category mode is handled before this match"),
             GraphMode::Pillars => {
                 let positions = umap_layout(&embedded_vectors, requested_neighbors)?;
+                let requested_k = if request.automatic_cluster_defaults {
+                    automatic_theme_count(embedded_count)
+                } else {
+                    request.kmeans_k
+                };
                 let labels = deterministic_kmeans(
                     &embedded_vectors,
-                    request.kmeans_k.clamp(2, 12).min(embedded_count.max(1)),
+                    requested_k.clamp(2, 12).min(embedded_count.max(1)),
                 );
+                let optional_labels: Vec<Option<usize>> =
+                    labels.iter().copied().map(Some).collect();
                 (
-                    positions,
-                    labels.into_iter().map(Some).collect(),
+                    ensure_useful_cluster_layout(positions, &optional_labels),
+                    optional_labels,
                     vec![false; embedded_count],
                 )
             }
             GraphMode::Communities => {
                 let positions = umap_layout(&embedded_vectors, requested_neighbors)?;
                 let distances = cosine_distance_matrix(&embedded_vectors);
-                let labels =
+                let mut labels =
                     louvain_labels(&distances, requested_neighbors, request.louvain_resolution);
+                if request.automatic_cluster_defaults
+                    && embedded_count >= 4
+                    && labels.iter().copied().collect::<HashSet<_>>().len() < 2
+                {
+                    // A fully connected small corpus can make Louvain's default resolution return
+                    // one community. Preserve the embeddings-based result, but use deterministic
+                    // k-means as the automatic presentation fallback so "Communities" remains
+                    // informative. Manual mode always exposes the raw Louvain parameters.
+                    labels = deterministic_kmeans(
+                        &embedded_vectors,
+                        automatic_theme_count(embedded_count),
+                    );
+                }
+                let optional_labels: Vec<Option<usize>> =
+                    labels.iter().copied().map(Some).collect();
                 (
-                    positions,
-                    labels.into_iter().map(Some).collect(),
+                    ensure_useful_cluster_layout(positions, &optional_labels),
+                    optional_labels,
                     vec![false; embedded_count],
                 )
             }
             GraphMode::Density => {
                 let positions = umap_layout(&embedded_vectors, requested_neighbors)?;
-                let labels = hdbscan_labels(
-                    &embedded_vectors,
-                    request.hdbscan_min_cluster_size.clamp(2, 50),
-                )?;
+                let minimum_cluster_size = if request.automatic_cluster_defaults {
+                    automatic_minimum_cluster_size(embedded_count)
+                } else {
+                    request.hdbscan_min_cluster_size
+                };
+                let labels = hdbscan_labels(&embedded_vectors, minimum_cluster_size.clamp(2, 50))?;
                 let outliers = labels.iter().map(Option::is_none).collect();
-                (positions, labels, outliers)
+                (
+                    ensure_useful_cluster_layout(positions, &labels),
+                    labels,
+                    outliers,
+                )
             }
             GraphMode::Timeline => unreachable!("timeline mode is handled before this match"),
         };
@@ -213,54 +252,51 @@ impl SemanticGraphCorpus {
         })
     }
 
-    fn category_analysis(&self) -> CategoryLayoutAnalysis {
-        let mut category_ids = BTreeMap::new();
-        for note_index in &self.embedded_note_indices {
-            let key = self.notes[*note_index]
-                .categories
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "uncategorized".into());
-            let next = category_ids.len();
-            category_ids.entry(key).or_insert(next);
+    fn embedding_coverage_fallback(&self, mode: GraphMode) -> GraphAnalysisResult {
+        let (positions, labels, outliers) = category_layout_for_notes(&self.notes);
+        let clusters =
+            cluster_descriptions(mode, &self.notes, &labels, &self.category_display_names);
+        let nodes = self
+            .notes
+            .iter()
+            .enumerate()
+            .map(|(index, note)| GraphAnalysisNode {
+                id: note.id.to_string(),
+                title: if note.title.trim().is_empty() {
+                    "(untitled)".into()
+                } else {
+                    note.title.clone()
+                },
+                categories: note.categories.clone(),
+                x: positions[index].0,
+                y: positions[index].1,
+                cluster_id: labels[index],
+                outlier: outliers[index],
+                no_semantic_signal: self.centroids[index].magnitude() <= f32::EPSILON,
+            })
+            .collect();
+        let semantic_edges =
+            semantic_edges(&self.notes, &self.centroids, &self.embedded_note_indices);
+        GraphAnalysisResult {
+            mode,
+            nodes,
+            clusters: clusters.clone(),
+            semantic_edges: semantic_edges.clone(),
+            prior_edges: prior_edges(&self.notes),
+            provider: GraphProviderMetadata {
+                id: self.provider_id.clone(),
+                semantic: false,
+            },
+            summary: GraphAnalysisSummary {
+                note_count: self.notes.len(),
+                embedded_note_count: self.embedded_note_indices.len(),
+                cluster_count: clusters.len(),
+                outlier_count: 0,
+                no_signal_count: self.notes.len() - self.embedded_note_indices.len(),
+                semantic_edge_candidate_count: semantic_edges.len(),
+            },
+            timeline: None,
         }
-        let mut labels = Vec::with_capacity(self.embedded_note_indices.len());
-        let mut positions = Vec::with_capacity(self.embedded_note_indices.len());
-        let group_count = category_ids.len().max(1);
-        let mut members_by_group: HashMap<usize, Vec<usize>> = HashMap::new();
-        for (embedded_index, note_index) in self.embedded_note_indices.iter().enumerate() {
-            let key = self.notes[*note_index]
-                .categories
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "uncategorized".into());
-            let group = category_ids[&key];
-            labels.push(Some(group));
-            members_by_group
-                .entry(group)
-                .or_default()
-                .push(embedded_index);
-            positions.push((0.0, 0.0));
-        }
-        for (group, members) in members_by_group {
-            let group_angle = group as f32 / group_count as f32 * std::f32::consts::TAU;
-            let center = (
-                0.5 + group_angle.cos() * 0.30,
-                0.5 + group_angle.sin() * 0.30,
-            );
-            let local = circle_layout(members.len());
-            for (local_index, embedded_index) in members.iter().enumerate() {
-                positions[*embedded_index] = (
-                    center.0 + (local[local_index].0 - 0.5) * 0.22,
-                    center.1 + (local[local_index].1 - 0.5) * 0.22,
-                );
-            }
-        }
-        (
-            normalize_layout(&positions),
-            labels,
-            vec![false; self.embedded_note_indices.len()],
-        )
     }
 
     /// Lay notes along a horizontal time axis. Needs only dates + categories (no embeddings),

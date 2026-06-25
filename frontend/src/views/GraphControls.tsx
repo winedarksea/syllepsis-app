@@ -221,22 +221,36 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
 
       {store.graphAdvancedOpen && topMode === 'clusters' && (
         <div className="gv-advanced-panel">
+          <label className="gv-title-control">
+            <span>Automatic defaults</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={store.graphAutomaticClusterDefaults}
+              className={`gv-switch${store.graphAutomaticClusterDefaults ? ' on' : ''}`}
+              onClick={() =>
+                store.setGraphAutomaticClusterDefaults(!store.graphAutomaticClusterDefaults)}
+            >
+              <span className="gv-switch-knob" />
+            </button>
+          </label>
           <GraphNumberControl
             label="UMAP neighbors"
             value={relevantNeighbors}
             min={store.graphMode === 'communities' ? 3 : 5}
             max={100}
             step={1}
+            disabled={store.graphAutomaticClusterDefaults}
             onChange={setRelevantNeighbors}
           />
           {store.graphMode === 'pillars' && (
-            <GraphNumberControl label="Themes" value={store.graphKmeansK} min={2} max={12} step={1} onChange={store.setGraphKmeansK} />
+            <GraphNumberControl label="Themes" value={store.graphKmeansK} min={2} max={12} step={1} disabled={store.graphAutomaticClusterDefaults} onChange={store.setGraphKmeansK} />
           )}
           {store.graphMode === 'communities' && (
-            <GraphNumberControl label="Resolution" value={store.graphLouvainResolution} min={0.25} max={2} step={0.05} onChange={store.setGraphLouvainResolution} />
+            <GraphNumberControl label="Resolution" value={store.graphLouvainResolution} min={0.25} max={2} step={0.05} disabled={store.graphAutomaticClusterDefaults} onChange={store.setGraphLouvainResolution} />
           )}
           {store.graphMode === 'density' && (
-            <GraphNumberControl label="Minimum cluster" value={store.graphHdbscanMinClusterSize} min={2} max={50} step={1} onChange={store.setGraphHdbscanMinClusterSize} />
+            <GraphNumberControl label="Minimum cluster" value={store.graphHdbscanMinClusterSize} min={2} max={50} step={1} disabled={store.graphAutomaticClusterDefaults} onChange={store.setGraphHdbscanMinClusterSize} />
           )}
         </div>
       )}
@@ -244,18 +258,19 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
   );
 }
 
-function GraphNumberControl({ label, value, min, max, step, onChange }: {
+function GraphNumberControl({ label, value, min, max, step, disabled, onChange }: {
   label: string;
   value: number;
   min: number;
   max: number;
   step: number;
+  disabled?: boolean;
   onChange: (value: number) => void;
 }) {
   return (
     <label className="gv-number-control">
       <span>{label}</span>
-      <input type="number" value={value} min={min} max={max} step={step} onChange={(event) => onChange(Number(event.target.value))} />
+      <input type="number" value={value} min={min} max={max} step={step} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} />
     </label>
   );
 }

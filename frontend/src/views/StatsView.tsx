@@ -161,15 +161,24 @@ export function StatsView() {
               value={`${localAi.worker.pending_llm_jobs} LLM, ${localAi.worker.pending_query_jobs} search`}
             />
             <SummaryRow
+              label="Embedding block"
+              value={localAi.worker.note_block_reason ?? 'None'}
+            />
+            <SummaryRow
               label="Latest failure"
               value={localAi.worker.recent_failures[0]?.message ?? 'None'}
             />
           </div>
           <button className="stats-refresh-btn" onClick={async () => {
+            if (!localAi.embedding_model_cached) {
+              await api.downloadBuiltinModel(localAi.embedding_model_id);
+            }
             await api.enqueueAllStaleEmbeddings();
             await load();
           }}>
-            Queue stale embeddings
+            {localAi.embedding_model_cached
+              ? 'Queue stale embeddings'
+              : 'Download model and resume'}
           </button>
         </section>
       )}
