@@ -18,8 +18,8 @@ use syllepsis_core::embeddings::{
     EmbeddingProvider,
 };
 use syllepsis_core::id::NoteId;
-use syllepsis_core::llm::{select_llm_provider, LlmService, LlmTask, Proposal};
 use syllepsis_core::llm::prompts::LlmTaskOptions;
+use syllepsis_core::llm::{select_llm_provider, LlmService, LlmTask, Proposal};
 use syllepsis_core::storage::{Book, NoteStore};
 
 use power::detect_power_source;

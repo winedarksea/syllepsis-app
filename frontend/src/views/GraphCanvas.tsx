@@ -8,6 +8,9 @@ import {
   GRAPH_HEIGHT, GRAPH_WIDTH, graphNodePoint, paddedHullPath, zoomCameraAtPoint,
   type GraphCamera, type GraphPoint,
 } from './graphGeometry';
+import {
+  findNearestActivatablePoint, GRAPH_DRAG_THRESHOLD_PX,
+} from './graphInteraction';
 
 const WEAVE_LIMIT = 140;
 const INITIAL_CAMERA: GraphCamera = { x: 0, y: 0, zoom: 1 };
@@ -34,6 +37,7 @@ export function GraphCanvas({
   const activePointers = useRef(new Map<number, GraphPoint>());
   const dragState = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const pinchState = useRef<{ distance: number } | null>(null);
+  const activationState = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const suppressClick = useRef(false);
   const [camera, setCamera] = useState(INITIAL_CAMERA);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -75,9 +79,11 @@ export function GraphCanvas({
     suppressClick.current = false;
     if (activePointers.current.size === 1) {
       dragState.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+      activationState.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
     } else if (activePointers.current.size === 2) {
       pinchState.current = { distance: pointerDistance([...activePointers.current.values()]) };
       dragState.current = null;
+      activationState.current = null;
     }
   };
 
@@ -101,7 +107,7 @@ export function GraphCanvas({
     if (!drag || drag.pointerId !== event.pointerId || !rect) return;
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
-    if (Math.hypot(dx, dy) > 3) suppressClick.current = true;
+    if (Math.hypot(dx, dy) > GRAPH_DRAG_THRESHOLD_PX) suppressClick.current = true;
     setCamera((current) => ({
       ...current,
       x: current.x - dx / rect.width * (GRAPH_WIDTH / current.zoom),
@@ -111,6 +117,19 @@ export function GraphCanvas({
   };
 
   const handlePointerEnd = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const activation = activationState.current;
+    if (
+      activation
+      && activation.pointerId === event.pointerId
+      && !suppressClick.current
+      && activePointers.current.size === 1
+      && Math.hypot(event.clientX - activation.x, event.clientY - activation.y)
+        <= GRAPH_DRAG_THRESHOLD_PX
+    ) {
+      const activatedNodeId = findNearestGraphNode(event.clientX, event.clientY);
+      if (activatedNodeId) onOpenNote(activatedNodeId);
+    }
+    if (activation?.pointerId === event.pointerId) activationState.current = null;
     activePointers.current.delete(event.pointerId);
     if (activePointers.current.size < 2) pinchState.current = null;
     if (activePointers.current.size === 1) {
@@ -121,12 +140,37 @@ export function GraphCanvas({
     }
   };
 
+  const handlePointerCancel = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (activationState.current?.pointerId === event.pointerId) activationState.current = null;
+    handlePointerEnd(event);
+  };
+
   const zoomBy = (factor: number) => {
     const center = {
       x: camera.x + GRAPH_WIDTH / camera.zoom / 2,
       y: camera.y + GRAPH_HEIGHT / camera.zoom / 2,
     };
     setCamera((current) => zoomCameraAtPoint(current, center, current.zoom * factor));
+  };
+
+  const findNearestGraphNode = (clientX: number, clientY: number): string | null => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const visibleWidth = GRAPH_WIDTH / camera.zoom;
+    const visibleHeight = GRAPH_HEIGHT / camera.zoom;
+    const screenPoint = {
+      x: (clientX - rect.left) / rect.width * GRAPH_WIDTH,
+      y: (clientY - rect.top) / rect.height * GRAPH_HEIGHT,
+    };
+    const points = result.nodes.map((node) => {
+      const point = pointsById.get(node.id)!;
+      return {
+        id: node.id,
+        x: (point.x - camera.x) / visibleWidth * GRAPH_WIDTH,
+        y: (point.y - camera.y) / visibleHeight * GRAPH_HEIGHT,
+      };
+    });
+    return findNearestActivatablePoint(points, screenPoint);
   };
 
   return (
@@ -139,7 +183,7 @@ export function GraphCanvas({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
-        onPointerCancel={handlePointerEnd}
+        onPointerCancel={handlePointerCancel}
       >
         <g className="gv-cluster-regions">
           {result.clusters.map((cluster) => {
@@ -209,10 +253,6 @@ export function GraphCanvas({
                 key={node.id}
                 transform={`translate(${point.x} ${point.y})`}
                 className={`gv-node${clusterClass}${active ? ' gv-node-active' : ''}${node.outlier ? ' gv-node-outlier' : ''}${node.no_semantic_signal ? ' gv-node-no-signal' : ''}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (!suppressClick.current) onOpenNote(node.id);
-                }}
                 onMouseEnter={() => setHoveredNodeId(node.id)}
                 onMouseLeave={() => setHoveredNodeId((current) => current === node.id ? null : current)}
               >

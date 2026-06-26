@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Icon } from '../components/Icon';
 import type {
   GraphAnalysisNode, GraphAnalysisResult, GraphTimelineTick, TimelineColorBy,
@@ -10,10 +11,12 @@ import {
   formatTimelineDateSource, formatTimelineNodeDate,
 } from './timelinePresentation';
 import { useGraphCamera, type Camera2D } from './useGraphCamera';
+import {
+  findNearestActivatablePoint, GRAPH_DRAG_THRESHOLD_PX,
+} from './graphInteraction';
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 40;
-const MIN_BUCKET_PX = 18;
 const TIMELINE_AXIS_SCREEN_Y = GRAPH_HEIGHT - 82;
 const TIMELINE_STACK_TOP = 24;
 const TIMELINE_STACK_BOTTOM = TIMELINE_AXIS_SCREEN_Y - 24;
@@ -44,6 +47,8 @@ export function TimelineCanvas({
   onOpenNote,
 }: TimelineCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const activationPointers = useRef(new Map<number, { x: number; y: number }>());
+  const activationState = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const timeline = result.timeline;
 
@@ -53,20 +58,10 @@ export function TimelineCanvas({
     const worldStart = normalizedXToWorld(start);
     const worldWidth = Math.max(1, normalizedXToWorld(end) - worldStart);
     const zoomFromFocus = GRAPH_WIDTH / worldWidth;
+    const zoomX = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomFromFocus));
 
-    const worldPerBucket = (GRAPH_WIDTH - GRAPH_PADDING_X * 2) / (timeline?.bucket_count ?? 1);
-    const zoomForBuckets = MIN_BUCKET_PX / worldPerBucket;
-
-    const zoomX = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.max(zoomFromFocus, zoomForBuckets)));
-
-    let x = worldStart;
-    if (zoomForBuckets > zoomFromFocus) {
-      const worldMid = normalizedXToWorld((start + end) / 2);
-      x = Math.max(0, Math.min(GRAPH_WIDTH - GRAPH_WIDTH / zoomX, worldMid - GRAPH_WIDTH / zoomX / 2));
-    }
-
-    return { x, y: 0, zoomX, zoomY: 1 };
-  }, [timeline?.focus_start_x, timeline?.focus_end_x, timeline?.granularity, timeline?.bucket_count]);
+    return { x: worldStart, y: 0, zoomX, zoomY: 1 };
+  }, [timeline?.focus_start_x, timeline?.focus_end_x, timeline?.granularity]);
 
   const cameraController = useGraphCamera(svgRef, {
     width: GRAPH_WIDTH,
@@ -91,6 +86,77 @@ export function TimelineCanvas({
     ])),
     [result.nodes],
   );
+
+  const clientToScreenPoint = (clientX: number, clientY: number) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return {
+      x: (clientX - rect.left) / rect.width * GRAPH_WIDTH,
+      y: (clientY - rect.top) / rect.height * GRAPH_HEIGHT,
+    };
+  };
+
+  const findNearestTimelineNode = (clientX: number, clientY: number): string | null => {
+    const screenPoint = clientToScreenPoint(clientX, clientY);
+    if (!screenPoint) return null;
+    const points = result.nodes.map((node) => {
+      const worldPoint = pointsById.get(node.id)!;
+      return {
+        id: node.id,
+        x: projectX(worldPoint.x),
+        y: projectY(worldPoint.y),
+      };
+    });
+    return findNearestActivatablePoint(points, screenPoint);
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
+    cameraController.handlers.onPointerDown(event);
+    activationPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (activationPointers.current.size === 1) {
+      activationState.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    } else {
+      activationState.current = null;
+    }
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    cameraController.handlers.onPointerMove(event);
+    if (!activationPointers.current.has(event.pointerId)) return;
+    activationPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const activation = activationState.current;
+    if (
+      activation?.pointerId === event.pointerId
+      && Math.hypot(event.clientX - activation.x, event.clientY - activation.y)
+        > GRAPH_DRAG_THRESHOLD_PX
+    ) {
+      activationState.current = null;
+    }
+  };
+
+  const handlePointerEnd = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const activation = activationState.current;
+    if (
+      activation
+      && activation.pointerId === event.pointerId
+      && !cameraController.suppressClick.current
+      && activationPointers.current.size === 1
+      && Math.hypot(event.clientX - activation.x, event.clientY - activation.y)
+        <= GRAPH_DRAG_THRESHOLD_PX
+    ) {
+      const activatedNodeId = findNearestTimelineNode(event.clientX, event.clientY);
+      if (activatedNodeId) onOpenNote(activatedNodeId);
+    }
+    if (activation?.pointerId === event.pointerId) activationState.current = null;
+    activationPointers.current.delete(event.pointerId);
+    cameraController.handlers.onPointerUp(event);
+  };
+
+  const handlePointerCancel = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (activationState.current?.pointerId === event.pointerId) activationState.current = null;
+    activationPointers.current.delete(event.pointerId);
+    cameraController.handlers.onPointerCancel(event);
+  };
 
   const visibleTicks = useMemo(() => {
     if (!timeline?.ticks?.length) return [] as GraphTimelineTick[];
@@ -120,7 +186,11 @@ export function TimelineCanvas({
         ref={svgRef}
         viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`}
         className="gv-svg tl-svg"
-        {...cameraController.handlers}
+        onWheel={cameraController.handlers.onWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerCancel}
       >
         <defs>
           <clipPath id="timeline-plot-clip">
@@ -207,10 +277,6 @@ export function TimelineCanvas({
                   key={node.id}
                   transform={`translate(${x} ${y})`}
                   className={`gv-node${clusterClass}${active ? ' gv-node-active' : ''}${node.no_semantic_signal ? ' gv-node-no-signal' : ''}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (!cameraController.suppressClick.current) onOpenNote(node.id);
-                  }}
                   onMouseEnter={() => setHoveredNodeId(node.id)}
                   onMouseLeave={() =>
                     setHoveredNodeId((current) => current === node.id ? null : current)}

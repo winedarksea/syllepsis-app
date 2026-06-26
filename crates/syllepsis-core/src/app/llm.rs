@@ -15,9 +15,9 @@ use crate::config::ModelRef;
 use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::llm::prompts;
+use crate::llm::prompts::LlmTaskOptions;
 use crate::llm::selection::select_llm_provider;
 use crate::llm::service::parse_category_list;
-use crate::llm::prompts::LlmTaskOptions;
 use crate::llm::{LlmService, LlmTask, Proposal};
 use crate::model::{Note, ObjectType};
 use crate::onnx::{manifest, ModelCache};
@@ -720,8 +720,7 @@ mod tests {
             ..Default::default()
         };
 
-        let commentary =
-            create_proposal_commentary(&book, &proposal, "job-123", &options).unwrap();
+        let commentary = create_proposal_commentary(&book, &proposal, "job-123", &options).unwrap();
 
         assert_eq!(commentary.object_type, ObjectType::Commentary);
         assert!(commentary.body.contains("syllepsis-llm-job:job-123"));

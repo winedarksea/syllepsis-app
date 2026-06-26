@@ -87,12 +87,7 @@ pub fn enqueue_llm_job(
         },
     );
 
-    tauri::async_runtime::spawn(run_queued_llm_job(
-        app_handle,
-        job_id,
-        request,
-        options,
-    ));
+    tauri::async_runtime::spawn(run_queued_llm_job(app_handle, job_id, request, options));
 
     Ok(initial)
 }
@@ -162,13 +157,9 @@ pub fn accept_llm_job_result(
     };
 
     with_book!(state, book, {
-        let updated = app::accept_proposal(
-            book,
-            &proposal,
-            store_old_as_commentary,
-            fact_check_passed,
-        )
-        .map_err(|e| e.to_string())?;
+        let updated =
+            app::accept_proposal(book, &proposal, store_old_as_commentary, fact_check_passed)
+                .map_err(|e| e.to_string())?;
         let _ = state.local_ai.enqueue_note(book, updated.id.clone(), false);
         state.invalidate_graph_corpus();
         if let Some(record) = state.llm_jobs.lock().unwrap().get_mut(&job_id) {
@@ -197,7 +188,9 @@ fn task_options_with_style_card(
         return Ok(options);
     };
     let guard = state.book.lock().unwrap();
-    let book = guard.as_ref().ok_or_else(|| "no book is open".to_string())?;
+    let book = guard
+        .as_ref()
+        .ok_or_else(|| "no book is open".to_string())?;
     let Some(card) = style_cards::style_card_for_book(&book.root, style_card_id)? else {
         return Err(format!("style card not found: {style_card_id}"));
     };
@@ -209,7 +202,11 @@ fn task_options_with_style_card(
         perspective: card.perspective,
         reading_level: card.reading_level,
         voice: card.voice,
-        patterns: card.patterns.into_iter().map(|pattern| pattern.text).collect(),
+        patterns: card
+            .patterns
+            .into_iter()
+            .map(|pattern| pattern.text)
+            .collect(),
         exemplars: card
             .exemplars
             .into_iter()
@@ -234,14 +231,11 @@ async fn run_queued_llm_job(
                 let commentary_error = if options.store_result_as_commentary {
                     let guard = state.book.lock().unwrap();
                     match guard.as_ref() {
-                        Some(book) => app::create_proposal_commentary(
-                            book,
-                            &proposal,
-                            &job_id,
-                            &options,
-                        )
-                        .map(|_| ())
-                        .map_err(|error| error.to_string()),
+                        Some(book) => {
+                            app::create_proposal_commentary(book, &proposal, &job_id, &options)
+                                .map(|_| ())
+                                .map_err(|error| error.to_string())
+                        }
                         None => Err("no book is open".to_string()),
                     }
                 } else {
@@ -290,7 +284,9 @@ fn run_queued_llm_job_inner(
 ) -> Result<Proposal, String> {
     let route = {
         let guard = state.book.lock().unwrap();
-        let book = guard.as_ref().ok_or_else(|| "no book is open".to_string())?;
+        let book = guard
+            .as_ref()
+            .ok_or_else(|| "no book is open".to_string())?;
         app::llm_route_statuses(book)
             .into_iter()
             .find(|route| route.task == request.task)
@@ -315,7 +311,9 @@ fn run_queued_llm_job_inner(
         app::LlmExecutionMode::Local => {
             let (book_root, models_root) = {
                 let guard = state.book.lock().unwrap();
-                let book = guard.as_ref().ok_or_else(|| "no book is open".to_string())?;
+                let book = guard
+                    .as_ref()
+                    .ok_or_else(|| "no book is open".to_string())?;
                 let models_root = book
                     .models_root()
                     .ok_or_else(|| "local model directory unavailable".to_string())?
@@ -331,9 +329,10 @@ fn run_queued_llm_job_inner(
                 options.clone(),
             )
         }
-        app::LlmExecutionMode::Disabled | app::LlmExecutionMode::Unavailable => {
-            Err(format!("No runnable LLM is configured for {}.", request.task.as_str()))
-        }
+        app::LlmExecutionMode::Disabled | app::LlmExecutionMode::Unavailable => Err(format!(
+            "No runnable LLM is configured for {}.",
+            request.task.as_str()
+        )),
     }
 }
 
@@ -364,9 +363,13 @@ pub async fn generate_proposal(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         with_book!(state, book, {
-            state
-                .local_ai
-                .submit_llm(book, note_id, task, model_override, LlmTaskOptions::default())
+            state.local_ai.submit_llm(
+                book,
+                note_id,
+                task,
+                model_override,
+                LlmTaskOptions::default(),
+            )
         })
     })
     .await

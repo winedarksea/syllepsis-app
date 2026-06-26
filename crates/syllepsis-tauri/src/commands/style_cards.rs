@@ -26,7 +26,9 @@ pub struct StyleCardEntry {
     pub source_urls: Vec<String>,
 }
 
-fn default_version() -> u32 { 1 }
+fn default_version() -> u32 {
+    1
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StylePattern {

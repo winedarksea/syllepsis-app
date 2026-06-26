@@ -61,7 +61,10 @@ impl LlmTask {
     /// Whether accepting this task's proposal replaces the note body (Grammar/Rewrite) versus
     /// attaching an annotation alongside it (the rest).
     pub fn replaces_body(self) -> bool {
-        matches!(self, LlmTask::Grammar | LlmTask::Rewrite | LlmTask::GenerateFromSummary)
+        matches!(
+            self,
+            LlmTask::Grammar | LlmTask::Rewrite | LlmTask::GenerateFromSummary
+        )
     }
 }
 

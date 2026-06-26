@@ -21,12 +21,20 @@ const THEME_ID_KEY = 'syllepsis.themeId';
 const CUSTOM_THEMES_KEY = 'syllepsis.customThemes';
 const HIDE_UNSORTED_BADGE_KEY = 'syllepsis.hideUnsortedBadge';
 
+function browserStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function readSystemTheme(): 'light' | 'dark' {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 function readThemePref(): ThemePref {
-  const stored = localStorage.getItem(THEME_PREF_KEY);
+  const stored = browserStorage()?.getItem(THEME_PREF_KEY);
   return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
 }
 
@@ -36,7 +44,7 @@ function resolveTheme(pref: ThemePref): 'light' | 'dark' {
 
 function readCustomThemes(): Theme[] {
   try {
-    const raw = localStorage.getItem(CUSTOM_THEMES_KEY);
+    const raw = browserStorage()?.getItem(CUSTOM_THEMES_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? (parsed as Theme[]) : [];
   } catch {
@@ -45,7 +53,7 @@ function readCustomThemes(): Theme[] {
 }
 
 function readThemeId(custom: Theme[]): string {
-  const stored = localStorage.getItem(THEME_ID_KEY);
+  const stored = browserStorage()?.getItem(THEME_ID_KEY);
   // Fall back to the default if the stored family was deleted or never existed.
   return stored && themeById(stored, custom) ? stored : DEFAULT_THEME_ID;
 }
@@ -71,6 +79,7 @@ interface AppStore {
   // Note open in the editor
   editingNoteId: string | null;
   editingMode: NoteScreenMode;
+  editorReturnView: View | null;
   openEditor: (id: string, mode?: NoteScreenMode) => void;
   closeEditor: () => void;
   // Bumped to force a reload of the currently-open note (e.g. after Apply from job tray)
@@ -164,7 +173,7 @@ export const useStore = create<AppStore>((set) => ({
     // Seed the diagnostics badge from the persisted count so it shows without visiting the view.
     let diagnosticsIssueCount = 0;
     if (book) {
-      const stored = parseInt(localStorage.getItem(`syllepsis.diag.issueCount.${book.path}`) ?? '0', 10);
+      const stored = parseInt(browserStorage()?.getItem(`syllepsis.diag.issueCount.${book.path}`) ?? '0', 10);
       if (!isNaN(stored)) diagnosticsIssueCount = stored;
     }
     set({ book, diagnosticsIssueCount });
@@ -175,6 +184,7 @@ export const useStore = create<AppStore>((set) => ({
     view: 'unsorted',
     editingNoteId: null,
     editingMode: 'read',
+    editorReturnView: null,
     activeCategory: null,
     activeWorld: null,
     categories: [],
@@ -193,8 +203,21 @@ export const useStore = create<AppStore>((set) => ({
 
   editingNoteId: null,
   editingMode: 'read',
-  openEditor: (id, mode = 'read') => set({ editingNoteId: id, editingMode: mode, view: 'editor' }),
-  closeEditor: () => set({ editingNoteId: null, editingMode: 'read', view: 'unsorted' }),
+  editorReturnView: null,
+  openEditor: (id, mode = 'read') =>
+    set((state) => ({
+      editingNoteId: id,
+      editingMode: mode,
+      editorReturnView: state.view === 'editor' ? state.editorReturnView : state.view,
+      view: 'editor',
+    })),
+  closeEditor: () =>
+    set((state) => ({
+      editingNoteId: null,
+      editingMode: 'read',
+      editorReturnView: null,
+      view: state.editorReturnView ?? 'unsorted',
+    })),
   noteReloadSignal: 0,
   bumpNoteReload: () => set((s) => ({ noteReloadSignal: s.noteReloadSignal + 1 })),
 
@@ -203,9 +226,9 @@ export const useStore = create<AppStore>((set) => ({
 
   unsortedCount: 0,
   setUnsortedCount: (unsortedCount) => set({ unsortedCount }),
-  hideUnsortedBadge: localStorage.getItem(HIDE_UNSORTED_BADGE_KEY) === 'true',
+  hideUnsortedBadge: browserStorage()?.getItem(HIDE_UNSORTED_BADGE_KEY) === 'true',
   setHideUnsortedBadge: (hideUnsortedBadge) => {
-    localStorage.setItem(HIDE_UNSORTED_BADGE_KEY, String(hideUnsortedBadge));
+    browserStorage()?.setItem(HIDE_UNSORTED_BADGE_KEY, String(hideUnsortedBadge));
     set({ hideUnsortedBadge });
   },
 
@@ -261,13 +284,13 @@ export const useStore = create<AppStore>((set) => ({
   themePref: readThemePref(),
   theme: resolveTheme(readThemePref()),
   setThemePref: (themePref) => {
-    localStorage.setItem(THEME_PREF_KEY, themePref);
+    browserStorage()?.setItem(THEME_PREF_KEY, themePref);
     set({ themePref, theme: resolveTheme(themePref) });
   },
   toggleTheme: () =>
     set((s) => {
       const next = s.theme === 'light' ? 'dark' : 'light';
-      localStorage.setItem(THEME_PREF_KEY, next);
+      browserStorage()?.setItem(THEME_PREF_KEY, next);
       return { themePref: next, theme: next };
     }),
   syncSystemTheme: () =>
@@ -276,24 +299,24 @@ export const useStore = create<AppStore>((set) => ({
   themeId: readThemeId(readCustomThemes()),
   customThemes: readCustomThemes(),
   setThemeId: (themeId) => {
-    localStorage.setItem(THEME_ID_KEY, themeId);
+    browserStorage()?.setItem(THEME_ID_KEY, themeId);
     set({ themeId });
   },
   addCustomTheme: (theme) =>
     set((s) => {
       // Replace any existing theme with the same id, then select the imported one.
       const customThemes = [...s.customThemes.filter((t) => t.id !== theme.id), theme];
-      localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(customThemes));
-      localStorage.setItem(THEME_ID_KEY, theme.id);
+      browserStorage()?.setItem(CUSTOM_THEMES_KEY, JSON.stringify(customThemes));
+      browserStorage()?.setItem(THEME_ID_KEY, theme.id);
       return { customThemes, themeId: theme.id };
     }),
   removeCustomTheme: (id) =>
     set((s) => {
       const customThemes = s.customThemes.filter((t) => t.id !== id);
-      localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(customThemes));
+      browserStorage()?.setItem(CUSTOM_THEMES_KEY, JSON.stringify(customThemes));
       // If the deleted family was active, fall back to the default.
       const themeId = s.themeId === id ? DEFAULT_THEME_ID : s.themeId;
-      localStorage.setItem(THEME_ID_KEY, themeId);
+      browserStorage()?.setItem(THEME_ID_KEY, themeId);
       return { customThemes, themeId };
     }),
 }));

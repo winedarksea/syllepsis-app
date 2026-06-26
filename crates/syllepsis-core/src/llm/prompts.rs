@@ -257,8 +257,12 @@ mod tests {
 
     #[test]
     fn generate_from_summary_uses_summary_without_body() {
-        let (_sys, user) =
-            build_with_options(LlmTask::GenerateFromSummary, &note(), &[], &Default::default());
+        let (_sys, user) = build_with_options(
+            LlmTask::GenerateFromSummary,
+            &note(),
+            &[],
+            &Default::default(),
+        );
         assert!(user.contains("Turn off power first"));
         assert!(!user.contains("switch off the breaker"));
     }

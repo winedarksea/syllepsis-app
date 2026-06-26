@@ -93,7 +93,9 @@ mod tests {
             perspective: Perspective::SecondPerson,
             reading_level: ReadingLevel::Accessible,
             voice: Voice::Active,
-            patterns: vec![Pattern { text: "Short declarative sentences.".into() }],
+            patterns: vec![Pattern {
+                text: "Short declarative sentences.".into(),
+            }],
             exemplars: vec![Exemplar {
                 text: "We suffer more in imagination than in reality.".into(),
             }],

@@ -373,6 +373,124 @@ fn timeline_buckets_are_calendar_aware() {
         next_bucket(ms(2024, 1, 1), TimelineGranularity::Year),
         ms(2025, 1, 1)
     );
+    assert_eq!(
+        previous_bucket(ms(2024, 3, 1), TimelineGranularity::Month),
+        ms(2024, 2, 1)
+    );
+    assert_eq!(
+        previous_bucket(ms(2024, 1, 1), TimelineGranularity::Month),
+        ms(2023, 12, 1)
+    );
+    assert_eq!(
+        previous_bucket(ms(2024, 1, 1), TimelineGranularity::Year),
+        ms(2023, 1, 1)
+    );
+}
+
+#[test]
+fn timeline_day_focus_includes_bucket_padding() {
+    use chrono::TimeZone;
+    let (_directory, book) = test_book();
+    add_note_created(
+        &book,
+        "Start",
+        chrono::Utc.with_ymd_and_hms(2024, 5, 1, 0, 0, 0).unwrap(),
+    );
+    add_note_created(
+        &book,
+        "Middle",
+        chrono::Utc.with_ymd_and_hms(2024, 5, 3, 0, 0, 0).unwrap(),
+    );
+    add_note_created(
+        &book,
+        "End",
+        chrono::Utc.with_ymd_and_hms(2024, 5, 5, 0, 0, 0).unwrap(),
+    );
+
+    let corpus = SemanticGraphCorpus::build(&book).unwrap();
+    let result = corpus
+        .analyze(&GraphAnalysisRequest {
+            mode: GraphMode::Timeline,
+            timeline_granularity: TimelineGranularity::Day,
+            ..Default::default()
+        })
+        .unwrap();
+    let meta = result.timeline.as_ref().unwrap();
+
+    assert_eq!(meta.granularity, TimelineGranularity::Day);
+    assert_eq!(
+        meta.start_ms,
+        chrono::Utc
+            .with_ymd_and_hms(2024, 4, 29, 0, 0, 0)
+            .unwrap()
+            .timestamp_millis()
+    );
+    assert_eq!(
+        meta.end_ms,
+        chrono::Utc
+            .with_ymd_and_hms(2024, 5, 8, 0, 0, 0)
+            .unwrap()
+            .timestamp_millis()
+    );
+    assert!(result.nodes.iter().all(|node| {
+        node.timeline_date.is_some() && node.x >= meta.focus_start_x && node.x <= meta.focus_end_x
+    }));
+}
+
+#[test]
+fn timeline_month_focus_includes_bucket_padding_and_undated_lane() {
+    use chrono::{NaiveDate, TimeZone};
+    let (_directory, book) = test_book();
+    for (title, month) in [("January", 1), ("March", 3), ("May", 5)] {
+        let mut note = book.new_note(ObjectType::Note, title).unwrap();
+        note.metadata.dates.completed = Some(crate::model::FlexDate {
+            date: Some(NaiveDate::from_ymd_opt(2024, month, 1).unwrap()),
+            ..Default::default()
+        });
+        book.save_note(&note).unwrap();
+    }
+    let mut undated = book.new_note(ObjectType::Note, "Undated").unwrap();
+    undated.metadata.dates.completed = None;
+    book.save_note(&undated).unwrap();
+
+    let corpus = SemanticGraphCorpus::build(&book).unwrap();
+    let result = corpus
+        .analyze(&GraphAnalysisRequest {
+            mode: GraphMode::Timeline,
+            timeline_primary_date: TimelineDateField::Completed,
+            timeline_fallback_date: None,
+            timeline_granularity: TimelineGranularity::Month,
+            ..Default::default()
+        })
+        .unwrap();
+    let meta = result.timeline.as_ref().unwrap();
+
+    assert_eq!(meta.granularity, TimelineGranularity::Month);
+    assert_eq!(meta.undated_count, 1);
+    assert_eq!(meta.focus_start_x, 0.0);
+    assert_eq!(
+        meta.start_ms,
+        chrono::Utc
+            .with_ymd_and_hms(2023, 11, 1, 0, 0, 0)
+            .unwrap()
+            .timestamp_millis()
+    );
+    assert_eq!(
+        meta.end_ms,
+        chrono::Utc
+            .with_ymd_and_hms(2024, 8, 1, 0, 0, 0)
+            .unwrap()
+            .timestamp_millis()
+    );
+    assert!(result
+        .nodes
+        .iter()
+        .filter(|node| node.timeline_date.is_some())
+        .all(|node| {
+            node.timeline_date.is_some()
+                && node.x >= meta.focus_start_x
+                && node.x <= meta.focus_end_x
+        }));
 }
 
 #[test]

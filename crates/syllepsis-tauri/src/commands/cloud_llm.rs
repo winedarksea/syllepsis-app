@@ -154,7 +154,13 @@ pub fn generate_cloud_proposal(
     task: LlmTask,
     model_override: Option<ModelRef>,
 ) -> Result<Proposal, String> {
-    generate_cloud_proposal_for_state(&state, note_id, task, model_override, &LlmTaskOptions::default())
+    generate_cloud_proposal_for_state(
+        &state,
+        note_id,
+        task,
+        model_override,
+        &LlmTaskOptions::default(),
+    )
 }
 
 pub(crate) fn generate_cloud_proposal_for_state(

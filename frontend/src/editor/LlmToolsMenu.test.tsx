@@ -31,6 +31,7 @@ vi.mock('../lib/api', () => ({
         available: true,
       },
     ]),
+    cloudLlmProviderDescriptors: vi.fn(async () => []),
     listStyleCards: vi.fn(async () => [
       {
         id: 'style-1',
@@ -64,7 +65,7 @@ describe('LlmToolsMenu', () => {
 
     fireEvent.change(screen.getByLabelText(/^Mode$/), { target: { value: 'simplify' } });
     fireEvent.change(screen.getByLabelText(/style card/i), { target: { value: 'style-1' } });
-    fireEvent.change(screen.getByLabelText(/style overrides/i), {
+    fireEvent.change(screen.getByPlaceholderText(/additional one-run style notes/i), {
       target: { value: 'Use shorter paragraphs.' },
     });
 
@@ -76,7 +77,13 @@ describe('LlmToolsMenu', () => {
       task: 'rewrite',
       model_override: null,
       style_card_id: 'style-1',
-      style_overrides: 'Use shorter paragraphs.',
+      style_overrides: [
+        'verbosity: succinct',
+        'perspective: second_person',
+        'reading_level: accessible',
+        'voice: active',
+        'Use shorter paragraphs.',
+      ].join('\n'),
       summary_variant: 'plain',
       rewrite_mode: 'simplify',
       store_result_as_commentary: true,

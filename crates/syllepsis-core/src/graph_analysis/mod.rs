@@ -350,9 +350,10 @@ impl SemanticGraphCorpus {
             let min_ms = *dated.iter().min().unwrap();
             let max_ms = *dated.iter().max().unwrap();
             let granularity = resolve_granularity(request.timeline_granularity, min_ms, max_ms);
-            let start_ms = floor_to_bucket(min_ms, granularity);
+            let first_dated_bucket = floor_to_bucket(min_ms, granularity);
             let max_bucket = floor_to_bucket(max_ms, granularity);
-            let end_ms = next_bucket(max_bucket, granularity);
+            let start_ms = step_bucket_back(first_dated_bucket, granularity, 2);
+            let end_ms = step_bucket_forward(max_bucket, granularity, 3);
             let span = (end_ms - start_ms).max(1) as f32;
             let map_x = |ms: i64| -> f32 {
                 (time_x_start + (ms - start_ms) as f32 / span * (TIME_X_END - time_x_start))
@@ -396,7 +397,8 @@ impl SemanticGraphCorpus {
             // Axis ticks at bucket centers, thinned so labels never crowd.
             let mut boundaries = Vec::new();
             let mut cursor = start_ms;
-            while cursor <= max_bucket {
+            let last_axis_bucket = step_bucket_back(end_ms, granularity, 1);
+            while cursor <= last_axis_bucket {
                 boundaries.push(cursor);
                 cursor = next_bucket(cursor, granularity);
             }
@@ -416,18 +418,25 @@ impl SemanticGraphCorpus {
                 })
                 .collect();
 
-            // Initial camera frames the 1st–99th percentile of dated notes (plus the lane).
+            // Initial camera frames the 1st-99th percentile, expanded by real bucket steps.
             let mut sorted = dated.clone();
             sorted.sort_unstable();
             let percentile = |q: f32| -> i64 {
                 let idx = ((sorted.len() - 1) as f32 * q).round() as usize;
                 sorted[idx]
             };
-            let raw_lo = map_x(percentile(0.01));
-            let raw_hi = map_x(percentile(0.99));
-            let pad = ((raw_hi - raw_lo) * 0.04).max(0.01);
-            let mut focus_start_x = (raw_lo - pad).max(0.0);
-            let mut focus_end_x = (raw_hi + pad).min(1.0);
+            let focus_start_bucket = step_bucket_back(
+                floor_to_bucket(percentile(0.01), granularity),
+                granularity,
+                2,
+            );
+            let focus_end_boundary = step_bucket_forward(
+                floor_to_bucket(percentile(0.99), granularity),
+                granularity,
+                3,
+            );
+            let mut focus_start_x = map_x(focus_start_bucket);
+            let mut focus_end_x = map_x(focus_end_boundary);
             if focus_end_x - focus_start_x < 0.05 {
                 focus_start_x = 0.0;
                 focus_end_x = 1.0;
@@ -878,6 +887,52 @@ fn next_bucket(bucket_start: i64, granularity: TimelineGranularity) -> i64 {
         }
         TimelineGranularity::Auto => bucket_start + MS_PER_DAY,
     }
+}
+
+fn previous_bucket(bucket_start: i64, granularity: TimelineGranularity) -> i64 {
+    use chrono::{Datelike, TimeZone};
+    match granularity {
+        TimelineGranularity::Hour => bucket_start - MS_PER_HOUR,
+        TimelineGranularity::Day => bucket_start - MS_PER_DAY,
+        TimelineGranularity::Month => {
+            let dt = chrono::DateTime::from_timestamp_millis(bucket_start).unwrap_or_default();
+            let (year, month) = if dt.month() == 1 {
+                (dt.year() - 1, 12)
+            } else {
+                (dt.year(), dt.month() - 1)
+            };
+            chrono::Utc
+                .with_ymd_and_hms(year, month, 1, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        }
+        TimelineGranularity::Year => {
+            let dt = chrono::DateTime::from_timestamp_millis(bucket_start).unwrap_or_default();
+            chrono::Utc
+                .with_ymd_and_hms(dt.year() - 1, 1, 1, 0, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        }
+        TimelineGranularity::Auto => bucket_start - MS_PER_DAY,
+    }
+}
+
+fn step_bucket_forward(
+    mut bucket_start: i64,
+    granularity: TimelineGranularity,
+    steps: usize,
+) -> i64 {
+    for _ in 0..steps {
+        bucket_start = next_bucket(bucket_start, granularity);
+    }
+    bucket_start
+}
+
+fn step_bucket_back(mut bucket_start: i64, granularity: TimelineGranularity, steps: usize) -> i64 {
+    for _ in 0..steps {
+        bucket_start = previous_bucket(bucket_start, granularity);
+    }
+    bucket_start
 }
 
 fn format_tick(bucket_start: i64, granularity: TimelineGranularity) -> String {
