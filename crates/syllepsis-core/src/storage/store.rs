@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
@@ -107,7 +108,23 @@ impl NoteStore for FsNoteStore {
         let path = self
             .path_for(id)
             .ok_or_else(|| CoreError::NotFound(id.to_string()))?;
-        let content = fs::read_to_string(&path)?;
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                self.refresh()?;
+                let path = self
+                    .path_for(id)
+                    .ok_or_else(|| CoreError::NotFound(id.to_string()))?;
+                fs::read_to_string(&path).map_err(|error| {
+                    if error.kind() == ErrorKind::NotFound {
+                        CoreError::NotFound(id.to_string())
+                    } else {
+                        error.into()
+                    }
+                })?
+            }
+            Err(error) => return Err(error.into()),
+        };
         frontmatter::parse_note(&content)
     }
 
@@ -142,7 +159,11 @@ impl NoteStore for FsNoteStore {
         let path = self
             .path_for(id)
             .ok_or_else(|| CoreError::NotFound(id.to_string()))?;
-        fs::remove_file(&path)?;
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         self.index
             .write()
             .expect("index lock poisoned")
@@ -151,17 +172,31 @@ impl NoteStore for FsNoteStore {
     }
 
     fn read_all_notes(&self) -> CoreResult<Vec<Note>> {
-        let paths: Vec<PathBuf> = self
+        let indexed_paths: Vec<(String, PathBuf)> = self
             .index
             .read()
             .expect("index lock poisoned")
-            .values()
-            .cloned()
+            .iter()
+            .map(|(ulid, path)| (ulid.clone(), path.clone()))
             .collect();
-        let mut notes = Vec::with_capacity(paths.len());
-        for path in paths {
-            let content = fs::read_to_string(&path)?;
+        let mut notes = Vec::with_capacity(indexed_paths.len());
+        let mut missing_ulids = Vec::new();
+        for (ulid, path) in indexed_paths {
+            let content = match fs::read_to_string(&path) {
+                Ok(content) => content,
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    missing_ulids.push(ulid);
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
             notes.push(frontmatter::parse_note(&content)?);
+        }
+        if !missing_ulids.is_empty() {
+            let mut index = self.index.write().expect("index lock poisoned");
+            for ulid in missing_ulids {
+                index.remove(&ulid);
+            }
         }
         Ok(notes)
     }
@@ -372,6 +407,22 @@ mod tests {
         store.refresh().unwrap();
 
         assert_eq!(store.read_note(&note.id).unwrap().body, "x");
+    }
+
+    #[test]
+    fn external_delete_is_pruned_from_aggregate_reads() {
+        let (dir, store) = temp_store();
+        let mut note = Note::new(ObjectType::Note, "n", "syllepsis_001");
+        note.body = "x".into();
+        store.write_note(&note).unwrap();
+
+        fs::remove_file(dir.path().join(layout::note_filename(&note.id))).unwrap();
+
+        assert!(store.read_all_notes().unwrap().is_empty());
+        assert!(matches!(
+            store.read_note(&note.id).unwrap_err(),
+            CoreError::NotFound(_)
+        ));
     }
 
     #[test]

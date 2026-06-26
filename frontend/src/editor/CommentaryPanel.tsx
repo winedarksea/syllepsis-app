@@ -207,7 +207,7 @@ export function CommentaryPanel({
                   <button className="picker-btn picker-btn-primary" onClick={() => apply(false)} disabled={busy}>
                     Apply
                   </button>
-                  {note.metadata.lifecycle.lock === 'fact_check_gate' && (
+                  {note.metadata.lifecycle?.lock === 'fact_check_gate' && (
                     <button className="picker-btn picker-btn-secondary" onClick={() => apply(false, true)} disabled={busy}>
                       Apply with fact-check approval
                     </button>

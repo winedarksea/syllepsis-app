@@ -105,7 +105,7 @@ export interface Metadata {
   dates: DateMetadata;
   authorship: Authorship;
   fork?: ForkInfo;
-  lifecycle: Lifecycle;
+  lifecycle?: Lifecycle;
   packs: PackMembership;
   kanban: Kanban;
 }
