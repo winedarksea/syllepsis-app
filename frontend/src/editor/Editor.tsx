@@ -704,27 +704,55 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
     <div className="editor-container selectable">
       {/* ── Top toolbar ── */}
       <div className="editor-toolbar">
-        <button className="editor-back" onClick={handleBack}>
-          <Icon name="arrow_back" size={16} />
-          <span>Back</span>
-        </button>
-        <button
-          className="editor-nav-btn"
-          disabled={!neighbors.previous}
-          title={neighbors.previous ? `Previous: ${displayNeighbor(neighbors.previous)}` : 'No previous sorted note'}
-          onClick={() => neighbors.previous && openEditor(neighbors.previous.id, 'read')}
-        >
-          <Icon name="chevron_left" size={18} />
-        </button>
-        <button
-          className="editor-nav-btn"
-          disabled={!neighbors.next}
-          title={neighbors.next ? `Next: ${displayNeighbor(neighbors.next)}` : 'No next sorted note'}
-          onClick={() => neighbors.next && openEditor(neighbors.next.id, 'read')}
-        >
-          <Icon name="chevron_right" size={18} />
-        </button>
-        <div className="editor-toolbar-center">
+        <div className="editor-toolbar-row1">
+          <div className="editor-toolbar-nav">
+            <button className="editor-back" onClick={handleBack}>
+              <Icon name="arrow_back" size={16} />
+              <span>Back</span>
+            </button>
+            <button
+              className="editor-nav-btn"
+              disabled={!neighbors.previous}
+              title={neighbors.previous ? `Previous: ${displayNeighbor(neighbors.previous)}` : 'No previous sorted note'}
+              onClick={() => neighbors.previous && openEditor(neighbors.previous.id, 'read')}
+            >
+              <Icon name="chevron_left" size={18} />
+            </button>
+            <button
+              className="editor-nav-btn"
+              disabled={!neighbors.next}
+              title={neighbors.next ? `Next: ${displayNeighbor(neighbors.next)}` : 'No next sorted note'}
+              onClick={() => neighbors.next && openEditor(neighbors.next.id, 'read')}
+            >
+              <Icon name="chevron_right" size={18} />
+            </button>
+          </div>
+          <div className="editor-toolbar-actions">
+            <button className="editor-tool-btn" onClick={() => setFindOpen((open) => !open)} title="Find in note">
+              <Icon name="search" size={16} />
+            </button>
+            <button className="editor-tool-btn" onClick={() => setMergeDialogOpen(true)} title="Merge another note into this note">
+              Merge
+            </button>
+            <button
+              className="editor-tool-btn"
+              onClick={() => setSplitDialogOpen(true)}
+              title="Split this note at an offset"
+              disabled={isTable || isImageObject}
+            >
+              Split
+            </button>
+            <LlmToolsMenu noteId={noteId} />
+            <button className="editor-delete-btn" onClick={handleDelete} title="Delete note">
+              <Icon name="delete" size={16} />
+            </button>
+            {dirty && <span className="editor-dirty-dot" title="Unsaved changes" />}
+            <button className="editor-save-btn" onClick={save} disabled={saving || !dirty}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+        <div className="editor-toolbar-row2">
           <NoteModeSwitcher mode={mode} disabled={isImageObject} onChange={switchMode} />
           <span className="editor-type-badge">{note.type}</span>
           {noteActivity && (
@@ -732,30 +760,6 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
               {activityLabel(noteActivity.kind)} {formatRelativeTime(noteActivity.happened_at)}
             </span>
           )}
-        </div>
-        <div className="editor-toolbar-actions">
-          <button className="editor-tool-btn" onClick={() => setFindOpen((open) => !open)} title="Find in note">
-            <Icon name="search" size={16} />
-          </button>
-          <button className="editor-tool-btn" onClick={() => setMergeDialogOpen(true)} title="Merge another note into this note">
-            Merge
-          </button>
-          <button
-            className="editor-tool-btn"
-            onClick={() => setSplitDialogOpen(true)}
-            title="Split this note at an offset"
-            disabled={isTable || isImageObject}
-          >
-            Split
-          </button>
-          <LlmToolsMenu noteId={noteId} />
-          <button className="editor-delete-btn" onClick={handleDelete} title="Delete note">
-            <Icon name="delete" size={16} />
-          </button>
-          {dirty && <span className="editor-dirty-dot" title="Unsaved changes" />}
-          <button className="editor-save-btn" onClick={save} disabled={saving || !dirty}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
         </div>
       </div>
 

@@ -15,13 +15,35 @@
 
 .editor-toolbar {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  flex-direction: column;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
   flex-shrink: 0;
+}
+
+/* Row 1: navigation (back + arrows) left, actions (save etc.) right */
+.editor-toolbar-row1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+}
+
+.editor-toolbar-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Row 2: mode switcher + meta chips */
+.editor-toolbar-row2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-4) var(--sp-2);
+  border-top: 1px solid var(--color-border);
+  overflow-x: auto;
 }
 
 .editor-back {
@@ -52,15 +74,6 @@
 .editor-nav-btn:hover:not(:disabled),
 .editor-tool-btn:hover:not(:disabled) { color: var(--color-text); border-color: var(--color-accent); }
 .editor-nav-btn:disabled { opacity: 0.35; cursor: default; }
-
-.editor-toolbar-center {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  min-width: 0;
-}
 
 .editor-mode-switcher {
   display: inline-flex;
@@ -106,7 +119,6 @@
 .editor-toolbar-actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: var(--sp-2);
 }
 
@@ -1268,19 +1280,18 @@ pre.plugin-block {
   font: inherit;
 }
 
+@media (max-width: 900px) {
+  /* The floating sidebar toggle (44px + ~12px left offset) would overlap the Back button.
+     Push both toolbar rows past it. */
+  .editor-toolbar-row1,
+  .editor-toolbar-row2 {
+    padding-left: calc(44px + max(var(--sp-3), env(safe-area-inset-left)) + var(--sp-3));
+  }
+}
+
 @media (max-width: 760px) {
-  .editor-toolbar {
-    flex-wrap: wrap;
-    align-items: flex-start;
-  }
-  .editor-toolbar-center {
-    order: 3;
-    flex-basis: 100%;
-    justify-content: flex-start;
-    overflow-x: auto;
-  }
+  /* Actions can wrap on very narrow screens; each item has a min-width so they stay usable. */
   .editor-toolbar-actions {
-    margin-left: auto;
     flex-wrap: wrap;
     justify-content: flex-end;
   }
