@@ -8,10 +8,10 @@ import type { GraphMode, TimelineDateField, TimelineGranularity } from '../types
 
 type TopMode = 'categories' | 'clusters' | 'timeline';
 
-const TOP_MODES: { id: TopMode; label: string; description: string }[] = [
-  { id: 'categories', label: 'Categories', description: 'Your declared organization' },
-  { id: 'clusters', label: 'Clusters', description: 'Emergent groups from note embeddings' },
-  { id: 'timeline', label: 'Timeline', description: 'Notes laid out by date' },
+const TOP_MODES: { id: TopMode; label: string }[] = [
+  { id: 'categories', label: 'Categories' },
+  { id: 'clusters', label: 'Clusters' },
+  { id: 'timeline', label: 'Timeline' },
 ];
 
 // The three clustering algorithms, surfaced as presets under "Clusters".
@@ -78,9 +78,6 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
         <SidebarMenuButton />
         <div className="gv-heading">
           <h2 className="gv-title">Graph</h2>
-          <span className="gv-mode-description">
-            {TOP_MODES.find((mode) => mode.id === topMode)?.description}
-          </span>
         </div>
 
         <div className="gv-mode-segments" role="group" aria-label="Graph organization">

@@ -62,7 +62,7 @@
 }
 
 .uq-add-btn {
-  padding: var(--sp-2) var(--sp-4);
+  padding: var(--sp-1) var(--sp-4);
   background: var(--color-accent);
   color: var(--color-text-inverse);
   border-radius: var(--radius-md);
