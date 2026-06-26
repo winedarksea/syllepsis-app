@@ -12,7 +12,7 @@ import {
 } from './timelinePresentation';
 import { useGraphCamera, type Camera2D } from './useGraphCamera';
 import {
-  findNearestActivatablePoint, SvgActivationTracker,
+  findNearestActivatablePoint, SvgActivationTracker, svgUserPointToClient,
 } from './graphInteraction';
 
 const MIN_ZOOM = 0.25;
@@ -86,24 +86,21 @@ export function TimelineCanvas({
     [result.nodes],
   );
 
-  const clientToScreenPoint = (clientX: number, clientY: number) => {
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return null;
-    return {
-      x: (clientX - rect.left) / rect.width * GRAPH_WIDTH,
-      y: (clientY - rect.top) / rect.height * GRAPH_HEIGHT,
-    };
-  };
-
   const findNearestTimelineNode = (clientX: number, clientY: number): string | null => {
-    const screenPoint = clientToScreenPoint(clientX, clientY);
-    if (!screenPoint) return null;
+    const svg = svgRef.current;
+    const screenPoint = { x: clientX, y: clientY };
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
     const points = result.nodes.map((node) => {
       const worldPoint = pointsById.get(node.id)!;
+      const x = projectX(worldPoint.x);
+      const y = projectY(worldPoint.y);
+      const clientPoint = svgUserPointToClient(svg, x, y);
+      if (clientPoint) return { id: node.id, ...clientPoint };
       return {
         id: node.id,
-        x: projectX(worldPoint.x),
-        y: projectY(worldPoint.y),
+        x: rect.left + x / GRAPH_WIDTH * rect.width,
+        y: rect.top + y / GRAPH_HEIGHT * rect.height,
       };
     });
     return findNearestActivatablePoint(points, screenPoint);

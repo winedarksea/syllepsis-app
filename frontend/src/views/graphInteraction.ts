@@ -112,6 +112,28 @@ export function findNearestActivatablePoint(
   return nearestId;
 }
 
+export function svgClientPoint(svg: SVGSVGElement, clientX: number, clientY: number): GraphScreenPoint | null {
+  if (!svg.getScreenCTM || !svg.createSVGPoint) return null;
+  const matrix = svg.getScreenCTM();
+  if (!matrix) return null;
+  const point = svg.createSVGPoint();
+  point.x = clientX;
+  point.y = clientY;
+  const transformed = point.matrixTransform(matrix.inverse());
+  return { x: transformed.x, y: transformed.y };
+}
+
+export function svgUserPointToClient(svg: SVGSVGElement, x: number, y: number): GraphScreenPoint | null {
+  if (!svg.getScreenCTM || !svg.createSVGPoint) return null;
+  const matrix = svg.getScreenCTM();
+  if (!matrix) return null;
+  const point = svg.createSVGPoint();
+  point.x = x;
+  point.y = y;
+  const transformed = point.matrixTransform(matrix);
+  return { x: transformed.x, y: transformed.y };
+}
+
 function distance(a: GraphScreenPoint, b: GraphScreenPoint): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }

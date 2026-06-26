@@ -9,7 +9,7 @@ import {
   type GraphCamera, type GraphPoint,
 } from './graphGeometry';
 import {
-  findNearestActivatablePoint, SvgActivationTracker,
+  findNearestActivatablePoint, SvgActivationTracker, svgUserPointToClient,
 } from './graphInteraction';
 
 const WEAVE_LIMIT = 140;
@@ -142,20 +142,20 @@ export function GraphCanvas({
   };
 
   const findNearestGraphNode = (clientX: number, clientY: number): string | null => {
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return null;
+    const svg = svgRef.current;
+    const rect = svg?.getBoundingClientRect();
+    if (!svg || !rect) return null;
     const visibleWidth = GRAPH_WIDTH / camera.zoom;
     const visibleHeight = GRAPH_HEIGHT / camera.zoom;
-    const screenPoint = {
-      x: (clientX - rect.left) / rect.width * GRAPH_WIDTH,
-      y: (clientY - rect.top) / rect.height * GRAPH_HEIGHT,
-    };
+    const screenPoint = { x: clientX, y: clientY };
     const points = result.nodes.map((node) => {
       const point = pointsById.get(node.id)!;
+      const clientPoint = svgUserPointToClient(svg, point.x, point.y);
+      if (clientPoint) return { id: node.id, ...clientPoint };
       return {
         id: node.id,
-        x: (point.x - camera.x) / visibleWidth * GRAPH_WIDTH,
-        y: (point.y - camera.y) / visibleHeight * GRAPH_HEIGHT,
+        x: rect.left + (point.x - camera.x) / visibleWidth * rect.width,
+        y: rect.top + (point.y - camera.y) / visibleHeight * rect.height,
       };
     });
     return findNearestActivatablePoint(points, screenPoint);

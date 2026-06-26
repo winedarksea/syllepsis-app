@@ -1,5 +1,5 @@
-import { fireEvent, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphCanvas } from './GraphCanvas';
 import { TimelineCanvas } from './TimelineCanvas';
 import { WorldStage } from './WorldStage';
@@ -23,12 +23,35 @@ const worldSvgRect = {
   height: 620,
 } as DOMRect;
 
+let worldTranslateY = 0;
+
 beforeEach(() => {
+  worldTranslateY = 0;
   Object.defineProperty(SVGElement.prototype, 'getBoundingClientRect', {
     configurable: true,
     value() {
       return this.classList?.contains('wv-svg-stage') ? worldSvgRect : graphSvgRect;
     },
+  });
+  Object.defineProperty(SVGElement.prototype, 'getScreenCTM', {
+    configurable: true,
+    value() {
+      if (this.classList?.contains('wv-svg-stage')) return svgMatrix(1, 0, worldTranslateY);
+      return svgMatrix(1, 100, 0);
+    },
+  });
+  Object.defineProperty(SVGElement.prototype, 'createSVGPoint', {
+    configurable: true,
+    value: () => ({
+      x: 0,
+      y: 0,
+      matrixTransform(this: { x: number; y: number }, matrix: { a: number; d: number; e: number; f: number }) {
+        return {
+          x: this.x * matrix.a + matrix.e,
+          y: this.y * matrix.d + matrix.f,
+        };
+      },
+    }),
   });
   Object.defineProperty(SVGElement.prototype, 'setPointerCapture', {
     configurable: true,
@@ -42,6 +65,10 @@ beforeEach(() => {
     configurable: true,
     value: () => true,
   });
+});
+
+afterEach(() => {
+  cleanup();
 });
 
 describe('note activation in SVG views', () => {
@@ -60,6 +87,25 @@ describe('note activation in SVG views', () => {
 
     fireEvent.pointerDown(svg, { pointerId: 1, clientX: 600, clientY: 360 });
     fireEvent.pointerUp(svg, { pointerId: 1, clientX: 600, clientY: 360 });
+
+    expect(onOpenNote).toHaveBeenCalledWith('note-1');
+  });
+
+  it('opens graph nodes when the SVG drawing is letterboxed', () => {
+    const onOpenNote = vi.fn();
+    const { container } = render(
+      <GraphCanvas
+        result={graphResult({ x: 0, y: 0.5 })}
+        semanticEdges={[]}
+        showAllTitles={false}
+        loading={false}
+        onOpenNote={onOpenNote}
+      />,
+    );
+    const svg = container.querySelector('svg')!;
+
+    fireEvent.pointerDown(svg, { pointerId: 1, clientX: 170, clientY: 360 });
+    fireEvent.pointerUp(svg, { pointerId: 1, clientX: 170, clientY: 360 });
 
     expect(onOpenNote).toHaveBeenCalledWith('note-1');
   });
@@ -111,17 +157,42 @@ describe('note activation in SVG views', () => {
     fireEvent.pointerUp(svg, { pointerId: 3, clientX: 640, clientY: 310 });
     expect(onOpenNote).toHaveBeenCalledTimes(1);
   });
+
+  it('opens custom world pins when the SVG drawing is letterboxed', () => {
+    worldTranslateY = 50;
+    const onOpenNote = vi.fn();
+    const { getByRole } = render(
+      <WorldStage
+        overlay={worldOverlay()}
+        backdrop={null}
+        showGrid={false}
+        onOpenNote={onOpenNote}
+        onOpenCategory={vi.fn()}
+      />,
+    );
+    const svg = getByRole('img', { name: 'Test world' });
+
+    fireEvent.pointerDown(svg, { pointerId: 1, clientX: 600, clientY: 360 });
+    fireEvent.pointerUp(svg, { pointerId: 1, clientX: 600, clientY: 360 });
+
+    expect(onOpenNote).toHaveBeenCalledWith('note-1');
+  });
 });
 
-function graphResult(overrides: { mode?: GraphAnalysisResult['mode']; includeTimeline?: boolean } = {}): GraphAnalysisResult {
+function graphResult(overrides: {
+  mode?: GraphAnalysisResult['mode'];
+  includeTimeline?: boolean;
+  x?: number;
+  y?: number;
+} = {}): GraphAnalysisResult {
   return {
     mode: overrides.mode ?? 'categories',
     nodes: [{
       id: 'note-1',
       title: 'Note one',
       categories: [],
-      x: 0.5,
-      y: 0.5,
+      x: overrides.x ?? 0.5,
+      y: overrides.y ?? 0.5,
       outlier: false,
       no_semantic_signal: false,
       timeline_date: overrides.includeTimeline
@@ -152,6 +223,18 @@ function graphResult(overrides: { mode?: GraphAnalysisResult['mode']; includeTim
         bucket_count: 1,
       }
       : undefined,
+  };
+}
+
+function svgMatrix(scale: number, translateX: number, translateY: number) {
+  return {
+    a: scale,
+    d: scale,
+    e: translateX,
+    f: translateY,
+    inverse() {
+      return svgMatrix(1 / scale, -translateX / scale, -translateY / scale);
+    },
   };
 }
 

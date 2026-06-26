@@ -5,10 +5,12 @@ import type {
 import type { Overlay, OverlayRegion, Pin, WorldPoint } from '../types';
 import lowDetailEarthUrl from '../assets/earth/countries-equal-earth-low.svg';
 import highDetailEarthUrl from '../assets/earth/countries-equal-earth-high.svg';
-import { useWorldCamera } from './useWorldCamera';
+import { useWorldCamera, type WorldCamera } from './useWorldCamera';
 import { WorldGrid } from './WorldGrid';
 import { equalEarthInverseNormalized, equalEarthNormalized } from './worldProjection';
-import { findNearestActivatablePoint, SvgActivationTracker } from './graphInteraction';
+import {
+  findNearestActivatablePoint, SvgActivationTracker, svgClientPoint, svgUserPointToClient,
+} from './graphInteraction';
 
 const STAGE_WIDTH = 1200;
 const EARTH_HEIGHT = 620;
@@ -40,6 +42,8 @@ export function WorldStage({
   const clientToStagePoint = (
     event: Pick<ReactMouseEvent<SVGSVGElement> | ReactPointerEvent<SVGSVGElement>, 'currentTarget' | 'clientX' | 'clientY'>,
   ) => {
+    const svgPoint = svgClientPoint(event.currentTarget, event.clientX, event.clientY);
+    if (svgPoint) return svgPoint;
     const rectangle = event.currentTarget.getBoundingClientRect();
     return {
       x: camera.x + (event.clientX - rectangle.left) / rectangle.width * STAGE_WIDTH / camera.zoom,
@@ -47,12 +51,14 @@ export function WorldStage({
     };
   };
 
-  const stageToLocalScreenPoint = (
+  const stageToClientPoint = (
     stagePoint: { x: number; y: number },
-    rectangle: DOMRect,
+    svg: SVGSVGElement,
   ) => ({
-    x: (stagePoint.x - camera.x) / (STAGE_WIDTH / camera.zoom) * rectangle.width,
-    y: (stagePoint.y - camera.y) / (height / camera.zoom) * rectangle.height,
+    ...(
+      svgUserPointToClient(svg, stagePoint.x, stagePoint.y)
+      ?? fallbackStageToClientPoint(stagePoint, svg.getBoundingClientRect(), camera, height)
+    ),
   });
 
   const updateCursor = (event: ReactMouseEvent<SVGSVGElement>) => {
@@ -68,20 +74,17 @@ export function WorldStage({
   };
 
   const resolveActivationTarget = (event: ReactPointerEvent<SVGSVGElement>) => {
-    const rectangle = event.currentTarget.getBoundingClientRect();
-    const localScreenPoint = {
-      x: event.clientX - rectangle.left,
-      y: event.clientY - rectangle.top,
-    };
+    const svg = event.currentTarget;
+    const screenPoint = { x: event.clientX, y: event.clientY };
     const stagePoint = clientToStagePoint(event);
 
     const pinPoints = overlay.pins.map((pin, index) => ({
       id: String(index),
-      ...stageToLocalScreenPoint(project(pin.point, STAGE_WIDTH, height), rectangle),
+      ...stageToClientPoint(project(pin.point, STAGE_WIDTH, height), svg),
     }));
     const nearestPinIndex = findNearestActivatablePoint(
       pinPoints,
-      localScreenPoint,
+      screenPoint,
       WORLD_PIN_ACTIVATION_RADIUS_PX,
     );
     if (nearestPinIndex !== null) return overlay.pins[Number(nearestPinIndex)].target;
@@ -92,11 +95,11 @@ export function WorldStage({
 
     const regionMarkerPoints = overlay.regions.map((region, index) => ({
       id: String(index),
-      ...stageToLocalScreenPoint(project(region.anchor, STAGE_WIDTH, height), rectangle),
+      ...stageToClientPoint(project(region.anchor, STAGE_WIDTH, height), svg),
     }));
     const nearestRegionIndex = findNearestActivatablePoint(
       regionMarkerPoints,
-      localScreenPoint,
+      screenPoint,
       WORLD_REGION_MARKER_ACTIVATION_RADIUS_PX,
     );
     if (nearestRegionIndex !== null) {
@@ -194,6 +197,18 @@ function project(point: WorldPoint, width: number, height: number) {
   if (point.kind === 'plane') return { x: point.x * width, y: point.y * height };
   const [x, y] = equalEarthNormalized(point.lon, point.lat);
   return { x: x * width, y: y * height };
+}
+
+function fallbackStageToClientPoint(
+  stagePoint: { x: number; y: number },
+  rectangle: DOMRect,
+  camera: WorldCamera,
+  height: number,
+) {
+  return {
+    x: rectangle.left + (stagePoint.x - camera.x) / (STAGE_WIDTH / camera.zoom) * rectangle.width,
+    y: rectangle.top + (stagePoint.y - camera.y) / (height / camera.zoom) * rectangle.height,
+  };
 }
 
 function isStagePointInsideRegion(
