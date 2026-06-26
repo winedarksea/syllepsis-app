@@ -208,6 +208,12 @@
   font-size: var(--font-size-lg);
   color: var(--color-text);
   line-height: var(--line-height-loose);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bv-rendered-note {
+  max-width: 100%;
 }
 
 .bv-empty-body {
@@ -232,17 +238,24 @@
 .bv-code-block code { font: inherit; }
 
 /* Plugin-rendered code blocks (syntax-highlight output) */
-.bv-plugin-block {
+.bv-rendered-note .syl-plugin-render--code-block,
+.bv-rendered-note pre.plugin-codeblock {
+  max-width: 100%;
+}
+.bv-rendered-note .syl-plugin-render--code-block {
   margin: var(--sp-3) 0;
+  overflow-x: auto;
   cursor: default;
 }
-.bv-plugin-block pre.plugin-codeblock {
+.bv-rendered-note .syl-plugin-render--code-block pre.plugin-codeblock,
+.bv-rendered-note > pre.plugin-codeblock {
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: var(--sp-3) var(--sp-4);
+  margin: 0;
   overflow-x: auto;
   white-space: pre;
   color: var(--color-text);

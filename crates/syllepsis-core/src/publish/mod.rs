@@ -22,7 +22,7 @@ pub fn render_site(title: &str, body_markdown: &str) -> String {
 }
 
 /// Like [`render_site`] but routes fenced code blocks through `render_code_block`. If it returns
-/// `Some(html)`, that raw HTML replaces the plain `<pre><code>` block; `None` falls back to
+/// `Some(html)`, that raw HTML is wrapped in host-owned code-block chrome; `None` falls back to
 /// standard pulldown_cmark rendering.
 pub fn render_site_with_plugins(
     title: &str,
@@ -75,8 +75,8 @@ pre {{ background: #f4f4f4; padding: 12px; border-radius: 4px; overflow-x: auto;
 }
 
 /// Walk a pulldown_cmark event stream, intercept fenced code blocks, and route them through
-/// `render_code_block(language, code) -> Option<html>`. A `Some` result emits raw HTML in-place;
-/// `None` reconstructs the standard `<pre><code>` events.
+/// `render_code_block(language, code) -> Option<html>`. A `Some` result emits plugin HTML inside a
+/// host-owned wrapper; `None` reconstructs the standard `<pre><code>` events.
 pub fn push_html_with_plugins<'a>(
     output: &mut String,
     markdown: &'a str,
@@ -97,7 +97,9 @@ pub fn push_html_with_plugins<'a>(
                     if let Some(plugin_html) =
                         render_code_block(&lang, code_buf.trim_end_matches('\n'))
                     {
-                        events.push(Event::Html(plugin_html.into()));
+                        events.push(Event::Html(
+                            wrap_plugin_code_block_html(&lang, &plugin_html).into(),
+                        ));
                         code_buf.clear();
                     } else {
                         let kind = if lang.is_empty() {
@@ -127,6 +129,14 @@ pub fn push_html_with_plugins<'a>(
     }
 
     html::push_html(output, events.into_iter());
+}
+
+fn wrap_plugin_code_block_html(language: &str, plugin_html: &str) -> String {
+    format!(
+        "<div class=\"syl-plugin-render syl-plugin-render--code-block\" data-language=\"{}\">{}</div>",
+        escape_html(language),
+        plugin_html
+    )
 }
 
 /// Minimal, dependency-free reading styles for the published page.
@@ -225,6 +235,49 @@ mod tests {
     fn title_is_escaped() {
         let html = render_site("A & B <x>", "");
         assert!(html.contains("A &amp; B &lt;x&gt;"));
+    }
+
+    #[test]
+    fn plugin_code_blocks_are_wrapped_in_host_owned_markup() {
+        let mut html = String::new();
+        push_html_with_plugins(
+            &mut html,
+            "Before\n\n```python\nprint('hello')\n```\n\nAfter",
+            Options::empty(),
+            &|lang, code| {
+                assert_eq!(lang, "python");
+                assert_eq!(code, "print('hello')");
+                Some("<pre class=\"plugin-codeblock\"><code>print('hello')</code></pre>".to_string())
+            },
+        );
+
+        assert!(
+            html.contains(
+                "<div class=\"syl-plugin-render syl-plugin-render--code-block\" data-language=\"python\">"
+            ),
+            "expected host wrapper around plugin HTML, got: {html}"
+        );
+        assert!(html.contains("<pre class=\"plugin-codeblock\"><code>print('hello')</code></pre>"));
+        assert!(html.contains("Before"));
+        assert!(html.contains("After"));
+    }
+
+    #[test]
+    fn long_plugin_code_block_preserves_plugin_html_inside_wrapper() {
+        let long_line = "x = 'this_is_a_very_long_python_string_that_should_scroll_inside_the_code_block_instead_of_expanding_the_book_view'";
+        let markdown = format!("```python\n{long_line}\n```");
+        let mut html = String::new();
+
+        push_html_with_plugins(&mut html, &markdown, Options::empty(), &|lang, code| {
+            assert_eq!(lang, "python");
+            assert_eq!(code, long_line);
+            Some(format!("<pre class=\"plugin-codeblock\"><code>{code}</code></pre>"))
+        });
+
+        assert!(html.contains("syl-plugin-render--code-block"));
+        assert!(html.contains("data-language=\"python\""));
+        assert!(html.contains(long_line));
+        assert!(html.contains("<pre class=\"plugin-codeblock\"><code>"));
     }
 
     #[test]
