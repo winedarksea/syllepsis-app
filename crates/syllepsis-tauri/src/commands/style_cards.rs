@@ -10,25 +10,32 @@ use crate::state::AppState;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StyleCardEntry {
     pub id: String,
+    #[serde(default = "default_version")]
     pub version: u32,
+    pub name: String,
     pub short_description: String,
-    pub field: String,
-    pub tenor: String,
-    pub mode: String,
-    pub density: String,
-    pub texture: String,
-    pub organization: String,
+    pub verbosity: String,
+    pub perspective: String,
+    pub reading_level: String,
+    pub voice: String,
+    #[serde(default)]
+    pub patterns: Vec<StylePattern>,
     #[serde(default)]
     pub exemplars: Vec<StyleExemplar>,
     #[serde(default)]
     pub source_urls: Vec<String>,
 }
 
+fn default_version() -> u32 { 1 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StylePattern {
+    pub text: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StyleExemplar {
     pub text: String,
-    #[serde(default)]
-    pub note: String,
 }
 
 fn cards_dir(book_root: &std::path::Path) -> PathBuf {

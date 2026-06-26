@@ -116,6 +116,19 @@ exemplars:
     - text: "1–3 sentence snippet"
       note: "What this snippet demonstrates"
 ---
+short_description: a sentence or two describing the style. Recommend including the overall tone (e.g., enthusiastic, cynical, objective, urgent, empathetic) and formality (e.g. conversational, legalese).
+verbosity: succinct | standard | expansive
+perspective: first_person_singular | first_person_plural | first_person_soliloquy | second_person | third_person_objective | third_person_omniscient | third_person_limited
+reading_level: elementary | accessible | advanced | expert
+voice: active | passive
+patterns:
+	- text: 1 sentence description of common style element. May also include anti-patterns (words or patterns to avoid). Examples include use (or not) of figurative language, preference for grammatical tense, and punctuation preferences.
+exemplars:
+    - text: "1–3 sentence snippet"
+      note: "What this snippet demonstrates"
+
+Shakespearan Narrator (Chorus/Presenter), Shakespearan Comedic Sidekick (Mercutio, maybe Puck), Shakespearan Hero, Shakespearan Villain, Administrative Email, TED Talk
+
 
 Text Objects and General Metadata:
 One key idea is that text objects have two "views" of the same concept: a summary and a full text description (ie a paragraph view, although not necessarily full paragraphs). This would enable users to view stories or categories only seeing the summary, then click on cards to see the full description, rather like a flashcard.

@@ -1,99 +1,76 @@
 //! Style cards (llm-ai-features.md): capture the writing style of a corpus so an LLM can
 //! generate or rewrite text in that style, and so a note's style can be graded against it.
-//!
-//! The struct ships now; the creation workflow (corpus → embeddings → exemplar discovery →
-//! LLM draft → human finalize) and prompt-and-rerank land in the LLM phase. Cards are
-//! **versioned** to support future attribute changes, and may store one style vector per
-//! embedding model (keyed by model id) so multiple embedders can coexist.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Field {
-    Technical,
-    Instructional,
-    Persuasive,
-    Narrative,
-    Reflective,
-    Administrative,
+pub enum Verbosity {
+    Succinct,
+    Standard,
+    Expansive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Tenor {
-    Intimate,
-    Peer,
-    ExpertToPeer,
-    ExpertToNovice,
-    Institutional,
+pub enum Perspective {
+    FirstPersonSingular,
+    FirstPersonPlural,
+    FirstPersonSoliloquy,
+    SecondPerson,
+    ThirdPersonObjective,
+    ThirdPersonOmniscient,
+    ThirdPersonLimited,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Mode {
-    Spoken,
-    ConversationalWritten,
-    EditedWritten,
-    FormalWritten,
+pub enum ReadingLevel {
+    Elementary,
+    Accessible,
+    Advanced,
+    Expert,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Density {
-    Sparse,
-    Moderate,
-    Dense,
+pub enum Voice {
+    Active,
+    Passive,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Texture {
-    Plain,
-    Polished,
-    Vivid,
-    Aphoristic,
-    Procedural,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Organization {
-    ConclusionFirst,
-    Stepwise,
-    Narrative,
-    CompareContrast,
-    ProblemSolution,
-}
-
-/// A short, representative snippet that exemplifies the style, with a note on what it shows.
+/// A short, representative snippet that exemplifies the style.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Exemplar {
     pub text: String,
-    #[serde(default)]
-    pub note: String,
+}
+
+/// A description of a recurring pattern or anti-pattern in the style.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pattern {
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StyleCard {
-    /// Schema version of the card itself (for future attribute migrations).
+    /// Schema version (for future migrations).
     #[serde(default = "default_card_version")]
     pub version: u32,
+    pub name: String,
     pub short_description: String,
-    pub field: Field,
-    pub tenor: Tenor,
-    pub mode: Mode,
-    pub density: Density,
-    pub texture: Texture,
-    pub organization: Organization,
+    pub verbosity: Verbosity,
+    pub perspective: Perspective,
+    pub reading_level: ReadingLevel,
+    pub voice: Voice,
+    #[serde(default)]
+    pub patterns: Vec<Pattern>,
     #[serde(default)]
     pub exemplars: Vec<Exemplar>,
-    /// Openly accessible source texts for the style (e.g. Shakespeare sonnets URLs).
+    /// Openly accessible source texts for the style.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub source_urls: Vec<String>,
-    /// Style vector per embedding model, keyed by model id — so the vector is always
-    /// interpreted against the model that produced it. Populated during creation.
+    /// Style vector per embedding model, keyed by model id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub style_vectors: BTreeMap<String, Vec<f32>>,
 }
@@ -110,16 +87,15 @@ mod tests {
     fn round_trips() {
         let card = StyleCard {
             version: 1,
+            name: "Terse Stoic".into(),
             short_description: "Terse, aphoristic life advice.".into(),
-            field: Field::Reflective,
-            tenor: Tenor::ExpertToNovice,
-            mode: Mode::EditedWritten,
-            density: Density::Dense,
-            texture: Texture::Aphoristic,
-            organization: Organization::ConclusionFirst,
+            verbosity: Verbosity::Succinct,
+            perspective: Perspective::SecondPerson,
+            reading_level: ReadingLevel::Accessible,
+            voice: Voice::Active,
+            patterns: vec![Pattern { text: "Short declarative sentences.".into() }],
             exemplars: vec![Exemplar {
                 text: "We suffer more in imagination than in reality.".into(),
-                note: "Compression + concrete contrast.".into(),
             }],
             source_urls: vec![],
             style_vectors: BTreeMap::new(),

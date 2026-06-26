@@ -305,8 +305,68 @@
   line-height: var(--line-height-loose);
 }
 
-.sc-exemplar-note {
+/* Section labels in sidebar */
+.sc-list-section-label {
   font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
   color: var(--color-text-tertiary);
+  padding: var(--sp-3) var(--sp-5) var(--sp-1);
+  flex-shrink: 0;
+}
+
+/* Built-in badge */
+.sc-detail-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.sc-detail-name {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--color-heading);
   margin: 0;
 }
+.sc-builtin-badge {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--sp-2);
+}
+
+/* Patterns list */
+.sc-patterns-list {
+  margin: 0;
+  padding-left: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.sc-pattern-item {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  line-height: var(--line-height-loose);
+}
+
+/* Plain subhead (no button) */
+.sc-subhead-plain {
+  justify-content: flex-start;
+}
+
+/* Pattern editor input */
+.sc-pattern-input {
+  flex: 1;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  resize: vertical;
+}
+.sc-pattern-input:focus { border-color: var(--color-accent); outline: none; }

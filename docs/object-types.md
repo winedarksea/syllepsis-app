@@ -201,7 +201,7 @@ Fields like `assignee` and `magnitude` are included for completeness to support 
 
 ## Cleanup
 
-- **Archive**: hides notes from RAG and default views; togglable. Not for pictures (those are deleted, not archived).
+- **Archive**: hides notes from RAG and default views; togglable. Not for pictures (those are deleted, not archived, with a delete confirmation dialogue).
 - **Vanishing notes**: self-delete after a configurable number of days (default 180), set at creation.
 - **Deletion**: "mark for deletion" → permanent removal after configurable delay (default 30 days). Runs on startup or user action; no need for exact timing.
 

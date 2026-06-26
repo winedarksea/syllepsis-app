@@ -1011,28 +1011,36 @@ export interface BookStats {
 
 // ── Style cards (mirrors syllepsis_core::model::style_card) ──
 
-export type StyleField = 'technical' | 'instructional' | 'persuasive' | 'narrative' | 'reflective' | 'administrative';
-export type StyleTenor = 'intimate' | 'peer' | 'expert_to_peer' | 'expert_to_novice' | 'institutional';
-export type StyleMode = 'spoken' | 'conversational_written' | 'edited_written' | 'formal_written';
-export type StyleDensity = 'sparse' | 'moderate' | 'dense';
-export type StyleTexture = 'plain' | 'polished' | 'vivid' | 'aphoristic' | 'procedural';
-export type StyleOrganization = 'conclusion_first' | 'stepwise' | 'narrative' | 'compare_contrast' | 'problem_solution';
+export type StyleVerbosity = 'succinct' | 'standard' | 'expansive';
+export type StylePerspective =
+  | 'first_person_singular'
+  | 'first_person_plural'
+  | 'first_person_soliloquy'
+  | 'second_person'
+  | 'third_person_objective'
+  | 'third_person_omniscient'
+  | 'third_person_limited';
+export type StyleReadingLevel = 'elementary' | 'accessible' | 'advanced' | 'expert';
+export type StyleVoice = 'active' | 'passive';
+
+export interface StylePattern {
+  text: string;
+}
 
 export interface StyleExemplar {
   text: string;
-  note: string;
 }
 
 export interface StyleCard {
   id: string;
   version: number;
+  name: string;
   short_description: string;
-  field: StyleField;
-  tenor: StyleTenor;
-  mode: StyleMode;
-  density: StyleDensity;
-  texture: StyleTexture;
-  organization: StyleOrganization;
+  verbosity: StyleVerbosity;
+  perspective: StylePerspective;
+  reading_level: StyleReadingLevel;
+  voice: StyleVoice;
+  patterns: StylePattern[];
   exemplars: StyleExemplar[];
   source_urls: string[];
 }
