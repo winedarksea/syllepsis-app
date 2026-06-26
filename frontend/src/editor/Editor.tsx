@@ -29,7 +29,7 @@ import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
-import type { Category, LookupEntry, NoteDto, NoteEmbeddingDetails, NoteNeighbors, NoteScreenMode, NoteSyncActivity, NoteTokenCount } from '../types';
+import type { Category, LookupEntry, NoteDto, NoteEmbeddingDetails, NoteNeighbors, NoteScreenMode, NoteSyncActivity } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import { MetaPanel } from './MetaPanel';
 import { LlmToolsMenu } from './LlmToolsMenu';
@@ -280,7 +280,7 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
   const [noteActivity, setNoteActivity] = useState<NoteSyncActivity | null>(null);
   const [imageData, setImageData] = useState<string | null>(null);
   const [neighbors, setNeighbors] = useState<NoteNeighbors>({});
-  const [tokenCount, setTokenCount] = useState<NoteTokenCount | null>(null);
+  const [charCount, setCharCount] = useState<number | null>(null);
   const [embeddingDetails, setEmbeddingDetails] = useState<NoteEmbeddingDetails | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findPattern, setFindPattern] = useState('');
@@ -526,21 +526,18 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
   }, [markDirty]);
 
   const bodyForRead = useMemo(
-    () => mode === 'source' ? rawText : getCurrentBody.current(),
+    () => mode === 'source' ? rawText : mode === 'read' ? body : getCurrentBody.current(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mode, rawText, revision],
+    [mode, rawText, revision, body],
   );
 
   useEffect(() => {
     if (mode === 'read' || isImageObjectType(noteTypeRef.current)) {
-      setTokenCount(null);
+      setCharCount(null);
       return;
     }
     const text = mode === 'source' ? rawText : getCurrentBody.current();
-    const timer = setTimeout(() => {
-      api.noteTokenCount({ text }).then(setTokenCount).catch(() => setTokenCount(null));
-    }, 600);
-    return () => clearTimeout(timer);
+    setCharCount(text.length);
   }, [mode, rawText, revision]);
 
   // Read mode: count comes from MarkdownRenderer via onMatchCount callback (DOM-accurate).
@@ -793,7 +790,7 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
       {/* ── Body / Data area ── */}
       <div className="editor-body-header">
         <span className="editor-body-label">{isTable ? 'Data' : (isImageObject ? 'Description' : 'Body')}</span>
-        <BodyStats count={tokenCount} visible={mode !== 'read' && !isImageObject} />
+        <BodyStats count={charCount} visible={mode !== 'read' && !isImageObject} />
       </div>
 
       {isImageObject ? (
@@ -1141,12 +1138,12 @@ function SplitDialog({
   );
 }
 
-function BodyStats({ count, visible }: { count: NoteTokenCount | null; visible: boolean }) {
-  if (!visible || !count) return null;
+function BodyStats({ count, visible }: { count: number | null; visible: boolean }) {
+  if (!visible || count === null) return null;
+  const cls = count > 8000 ? ' warning' : count > 6500 ? ' caution' : '';
   return (
-    <span className={`editor-body-stats${count.warning ? ' warning' : ''}`}>
-      {count.count.toLocaleString()} tokens
-      {count.method === 'shared_tokenizer' ? ' approx' : ''}
+    <span className={`editor-body-stats${cls}`}>
+      {count.toLocaleString()} chars
     </span>
   );
 }

@@ -8,6 +8,8 @@ import './Sidebar.css';
 interface Props {
   onNewNote: (type?: ObjectType) => void;
   onImportImage: () => void;
+  isMobileOpen?: boolean;
+  onClose?: () => void;
 }
 
 // Object types a user can create directly from the New menu. (Picture/Drawing need asset
@@ -36,35 +38,63 @@ const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[]
   { view: 'diagnostics', icon: 'monitor_heart', label: 'Diagnostics' },
 ];
 
-export function Sidebar({ onNewNote, onImportImage }: Props) {
+export function Sidebar({ onNewNote, onImportImage, isMobileOpen = false, onClose }: Props) {
   const { view, setView, categories, unsortedCount, hideUnsortedBadge, diagnosticsIssueCount, activeCategory, setActiveCategory, theme, toggleTheme, closeBook } = useStore();
   const [newMenuOpen, setNewMenuOpen] = useState(false);
+
+  const closeMobileDrawer = useCallback(() => {
+    setNewMenuOpen(false);
+    onClose?.();
+  }, [onClose]);
+
+  const handleView = useCallback((nextView: Parameters<typeof setView>[0]) => {
+    setView(nextView);
+    closeMobileDrawer();
+  }, [closeMobileDrawer, setView]);
 
   const handleCategory = useCallback((cat: Category) => {
     setActiveCategory(cat.name);
     setView('category');
-  }, [setActiveCategory, setView]);
+    closeMobileDrawer();
+  }, [closeMobileDrawer, setActiveCategory, setView]);
 
   const createType = useCallback((type: ObjectType) => {
     setNewMenuOpen(false);
     onNewNote(type);
-  }, [onNewNote]);
+    onClose?.();
+  }, [onClose, onNewNote]);
+
+  const handleNewNote = useCallback(() => {
+    onNewNote('note');
+    closeMobileDrawer();
+  }, [closeMobileDrawer, onNewNote]);
+
+  const handleImportImage = useCallback(() => {
+    setNewMenuOpen(false);
+    onImportImage();
+    onClose?.();
+  }, [onClose, onImportImage]);
+
+  const handleCloseBook = useCallback(() => {
+    closeBook();
+    closeMobileDrawer();
+  }, [closeBook, closeMobileDrawer]);
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isMobileOpen ? 'mobile-open' : ''}`} aria-label="Workspace navigation">
       <div className="sidebar-header">
         <span className="sidebar-app-name">Syllepsis</span>
         <div className="sidebar-header-actions">
           <button
             className={`sidebar-theme-btn ${view === 'settings' ? 'active' : ''}`}
-            onClick={() => setView('settings')}
+            onClick={() => handleView('settings')}
             title="Settings"
           >
             <Icon name="settings" size={18} />
           </button>
           <button
             className="sidebar-theme-btn"
-            onClick={closeBook}
+            onClick={handleCloseBook}
             title="Close book — back to launch screen"
           >
             <Icon name="logout" size={18} />
@@ -76,6 +106,14 @@ export function Sidebar({ onNewNote, onImportImage }: Props) {
           >
             <Icon name={theme === 'light' ? 'dark_mode' : 'light_mode'} size={18} />
           </button>
+          <button
+            className="sidebar-theme-btn sidebar-mobile-close"
+            onClick={closeMobileDrawer}
+            title="Close navigation"
+            aria-label="Close navigation"
+          >
+            <Icon name="close" size={18} />
+          </button>
         </div>
       </div>
 
@@ -84,7 +122,7 @@ export function Sidebar({ onNewNote, onImportImage }: Props) {
           <button
             key={item.view}
             className={`sidebar-item ${view === item.view ? 'active' : ''}`}
-            onClick={() => setView(item.view as Parameters<typeof setView>[0])}
+            onClick={() => handleView(item.view as Parameters<typeof setView>[0])}
           >
             <Icon name={item.icon} slot={item.slot} className="sidebar-item-icon" size={19} />
             <span>{item.label}</span>
@@ -119,7 +157,7 @@ export function Sidebar({ onNewNote, onImportImage }: Props) {
 
       <div className="sidebar-footer">
         <div className="sidebar-new-group">
-          <button className="sidebar-new-note" onClick={() => onNewNote('note')}>
+          <button className="sidebar-new-note" onClick={handleNewNote}>
             <Icon name="add" slot="new" size={18} />
             <span>New Note</span>
           </button>
@@ -140,7 +178,7 @@ export function Sidebar({ onNewNote, onImportImage }: Props) {
               ))}
               <button
                 className="sidebar-new-menu-item"
-                onClick={() => { setNewMenuOpen(false); onImportImage(); }}
+                onClick={handleImportImage}
               >
                 Import Image…
               </button>

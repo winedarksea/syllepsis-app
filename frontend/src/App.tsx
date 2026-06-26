@@ -376,12 +376,22 @@ function WizardShell({ title, onCancel, children }: { title: string; onCancel: (
 // ──────────────────────────────────────────────
 function Workspace() {
   const { view, editingNoteId, editingMode, setCategories, setUnsortedCount, openEditor, setPluginRenderLanguages, setPluginsLoaded } = useStore();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Refresh sidebar data on view change (i.e. when returning from the editor).
   useEffect(() => {
     api.allCategories().then(setCategories).catch(console.error);
     api.unsortedNotes().then((ns) => setUnsortedCount(ns.length)).catch(console.error);
   }, [view, setCategories, setUnsortedCount]);
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileSidebarOpen(false);
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [mobileSidebarOpen]);
 
   // Load the set of code languages that render plugins claim (once per workspace).
   // setPluginsLoaded(true) on both success and error so the editor never waits forever.
@@ -415,8 +425,30 @@ function Workspace() {
   }, [openEditor]);
 
   return (
-    <div className="workspace">
-      <Sidebar onNewNote={handleNewNote} onImportImage={handleImportImage} />
+    <div className={`workspace ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}>
+      <Sidebar
+        onNewNote={handleNewNote}
+        onImportImage={handleImportImage}
+        isMobileOpen={mobileSidebarOpen}
+        onClose={() => setMobileSidebarOpen(false)}
+      />
+      <button
+        className="mobile-sidebar-toggle"
+        type="button"
+        onClick={() => setMobileSidebarOpen(true)}
+        aria-label="Open navigation"
+        aria-expanded={mobileSidebarOpen}
+      >
+        <Icon name="menu" size={22} />
+      </button>
+      {mobileSidebarOpen && (
+        <button
+          className="mobile-sidebar-backdrop"
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
       <main className="workspace-main">
         {view === 'editor' && editingNoteId ? (
           <Editor noteId={editingNoteId} initialMode={editingMode} />

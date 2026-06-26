@@ -643,6 +643,7 @@
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
 }
+.editor-body-stats.caution { color: var(--color-tertiary); }
 .editor-body-stats.warning { color: var(--color-error); }
 
 .editor-raw-toggle {
