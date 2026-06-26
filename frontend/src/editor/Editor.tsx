@@ -253,7 +253,7 @@ interface Props {
 }
 
 export function Editor({ noteId, initialMode = 'read' }: Props) {
-  const { closeEditor, openEditor, setCategories, setActiveCategory, setView, categories, pluginRenderLanguages, pluginsLoaded } = useStore();
+  const { closeEditor, openEditor, setCategories, setActiveCategory, setView, categories, pluginRenderLanguages, pluginsLoaded, noteReloadSignal } = useStore();
 
   // Map plugin-claimed code languages to a rendered PluginBlockNode; all other code fences keep
   // the built-in behavior. Used for both import (init) and export (save) so the markdown round-trips.
@@ -285,6 +285,7 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
   const [findOpen, setFindOpen] = useState(false);
   const [findPattern, setFindPattern] = useState('');
   const [findIndex, setFindIndex] = useState(0);
+  const [readModeMatchCount, setReadModeMatchCount] = useState(0);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
 
@@ -307,7 +308,7 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
         }
       })
       .catch((e) => setError(String(e)));
-  }, [initialMode, noteId]);
+  }, [initialMode, noteId, noteReloadSignal]);
 
   useEffect(() => {
     api.listNotes().then(setAllNotes).catch(() => {});
@@ -524,7 +525,11 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
     markDirty();
   }, [markDirty]);
 
-  const bodyForRead = mode === 'source' ? rawText : getCurrentBody.current();
+  const bodyForRead = useMemo(
+    () => mode === 'source' ? rawText : getCurrentBody.current(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mode, rawText, revision],
+  );
 
   useEffect(() => {
     if (mode === 'read' || isImageObjectType(noteTypeRef.current)) {
@@ -534,18 +539,21 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
     const text = mode === 'source' ? rawText : getCurrentBody.current();
     const timer = setTimeout(() => {
       api.noteTokenCount({ text }).then(setTokenCount).catch(() => setTokenCount(null));
-    }, 250);
+    }, 600);
     return () => clearTimeout(timer);
   }, [mode, rawText, revision]);
 
+  // Read mode: count comes from MarkdownRenderer via onMatchCount callback (DOM-accurate).
+  // Other modes: count against the raw text.
   const findMatchCount = useMemo(() => {
     if (!findPattern.trim()) return 0;
+    if (mode === 'read') return readModeMatchCount;
     try {
       return [...bodyForRead.matchAll(new RegExp(findPattern, 'g'))].length;
     } catch {
       return 0;
     }
-  }, [bodyForRead, findPattern]);
+  }, [bodyForRead, findPattern, mode, readModeMatchCount]);
 
   const findError = useMemo(() => {
     if (!findPattern.trim()) return null;
@@ -568,8 +576,14 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
         while ((match = regex.exec(rawTextRef.current)) !== null) {
           if (index === next) {
             requestAnimationFrame(() => {
-              rawTextareaRef.current?.focus();
-              rawTextareaRef.current?.setSelectionRange(match!.index, match!.index + match![0].length);
+              const el = rawTextareaRef.current;
+              if (!el) return;
+              el.focus();
+              el.setSelectionRange(match!.index, match!.index + match![0].length);
+              // Scroll so the selection is visible
+              const lineHeight = parseInt(getComputedStyle(el).lineHeight || '20', 10);
+              const linesBefore = rawTextRef.current.slice(0, match!.index).split('\n').length - 1;
+              el.scrollTop = Math.max(0, linesBefore * lineHeight - el.clientHeight / 2);
             });
             break;
           }
@@ -773,8 +787,7 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
             </button>
           ))}
         </div>
-        <MetaPanel note={note} categories={categories} allNotes={allNotes} onChange={handleMetaChange} />
-        <AdvancedMetadata embeddingDetails={embeddingDetails} />
+        <MetaPanel note={note} categories={categories} allNotes={allNotes} embeddingDetails={embeddingDetails} onChange={handleMetaChange} />
       </div>
 
       {/* ── Body / Data area ── */}
@@ -816,6 +829,7 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
             className="editor-read-body"
             findPattern={findError ? '' : findPattern}
             findMatchIndex={findIndex}
+            onMatchCount={setReadModeMatchCount}
           />
         </div>
       ) : isTable && mode !== 'source' ? (
@@ -1137,34 +1151,6 @@ function BodyStats({ count, visible }: { count: NoteTokenCount | null; visible: 
   );
 }
 
-function AdvancedMetadata({ embeddingDetails }: { embeddingDetails: NoteEmbeddingDetails | null }) {
-  return (
-    <details className="editor-advanced-meta">
-      <summary>Advanced</summary>
-      {!embeddingDetails ? (
-        <div className="editor-advanced-empty">Embedding details unavailable.</div>
-      ) : (
-        <div className="editor-embedding-details">
-          <div>Status: {embeddingDetails.status}</div>
-          <div>Model: {embeddingDetails.model_id ?? 'unknown'}</div>
-          <div>Dimensions: {embeddingDetails.dimensions ?? 'unknown'}</div>
-          <VectorPreview label="Summary vector" vector={embeddingDetails.summary_vector ?? null} />
-          <VectorPreview label="Body vector" vector={embeddingDetails.full_note_vector ?? null} />
-        </div>
-      )}
-    </details>
-  );
-}
-
-function VectorPreview({ label, vector }: { label: string; vector: number[] | null }) {
-  if (!vector) return <div>{label}: none</div>;
-  return (
-    <details className="editor-vector-preview">
-      <summary>{label}: {vector.length} values</summary>
-      <code>{vector.map((value) => Number(value).toFixed(4)).join(', ')}</code>
-    </details>
-  );
-}
 
 function formatRelativeTime(value: string) {
   const timestamp = new Date(value).getTime();

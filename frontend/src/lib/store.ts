@@ -73,6 +73,9 @@ interface AppStore {
   editingMode: NoteScreenMode;
   openEditor: (id: string, mode?: NoteScreenMode) => void;
   closeEditor: () => void;
+  // Bumped to force a reload of the currently-open note (e.g. after Apply from job tray)
+  noteReloadSignal: number;
+  bumpNoteReload: () => void;
 
   // Cached category list (refreshed when categories change)
   categories: Category[];
@@ -192,6 +195,8 @@ export const useStore = create<AppStore>((set) => ({
   editingMode: 'read',
   openEditor: (id, mode = 'read') => set({ editingNoteId: id, editingMode: mode, view: 'editor' }),
   closeEditor: () => set({ editingNoteId: null, editingMode: 'read', view: 'unsorted' }),
+  noteReloadSignal: 0,
+  bumpNoteReload: () => set((s) => ({ noteReloadSignal: s.noteReloadSignal + 1 })),
 
   categories: [],
   setCategories: (categories) => set({ categories }),

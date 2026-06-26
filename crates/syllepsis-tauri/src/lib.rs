@@ -128,6 +128,7 @@ pub fn run() {
             generate_proposal,
             enqueue_llm_job,
             list_llm_jobs,
+            list_all_llm_jobs,
             get_llm_job,
             accept_llm_job_result,
             dismiss_llm_job_result,

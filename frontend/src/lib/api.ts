@@ -144,6 +144,7 @@ export const api = {
   enqueueLlmJob: (request: QueuedLlmJobRequest) =>
     invoke<QueuedLlmJobResult>('enqueue_llm_job', { request }),
   listLlmJobs: () => invoke<QueuedLlmJobResult[]>('list_llm_jobs'),
+  listAllLlmJobs: () => invoke<QueuedLlmJobResult[]>('list_all_llm_jobs'),
   getLlmJob: (jobId: string) => invoke<QueuedLlmJobResult | null>('get_llm_job', { jobId }),
   acceptLlmJobResult: (jobId: string, storeOldAsCommentary = false, factCheckPassed = false) =>
     invoke<NoteDto>('accept_llm_job_result', {

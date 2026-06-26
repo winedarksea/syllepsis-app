@@ -22,222 +22,10 @@ function humanize(s: string): string {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// ── Built-in styles from docs/styles.md ──────────────────────────────────────
-
-const BUILTIN_CARDS: StyleCard[] = [
-  {
-    id: 'builtin:administrative-email',
-    version: 1,
-    name: 'Administrative Email',
-    short_description:
-      'A formal, objective, and highly standardized communication used to convey policies or mandatory actions. Tone is polite, neutral, slightly bureaucratic, and completely devoid of personal emotion.',
-    verbosity: 'succinct',
-    perspective: 'first_person_plural',
-    reading_level: 'accessible',
-    voice: 'passive',
-    patterns: [
-      { text: 'Rely on corporate buzzwords, softened directives, and standardized greetings/sign-offs (e.g., "Please be advised", "Going forward").' },
-      { text: 'Favour the passive voice to distance the sender from the policy or mandate.' },
-      { text: 'Use bulleted lists for clarity and to outline specific steps or changes.' },
-      { text: 'Avoid exclamation marks, slang, personal anecdotes, or any tone that could be construed as confrontational or overly enthusiastic.' },
-    ],
-    exemplars: [
-      { text: 'Please be advised that the new expense reporting guidelines will take effect in Q3. All employees are required to submit outstanding receipts by EOD Friday.' },
-      { text: 'It has come to our attention that security badges are not being worn visibly. Going forward, compliance will be strictly monitored.' },
-    ],
-    source_urls: [],
-  },
-  {
-    id: 'builtin:ted-talk',
-    version: 1,
-    name: 'TED Talk',
-    short_description:
-      'An accessible, highly engaging, and intellectually stimulating presentation designed to share a "big idea." Tone is optimistic, deeply empathetic, narrative-driven, and conversational yet rehearsed.',
-    verbosity: 'standard',
-    perspective: 'first_person_singular',
-    reading_level: 'accessible',
-    voice: 'active',
-    patterns: [
-      { text: 'Begin with a relatable, vulnerable personal anecdote or a surprising, counter-intuitive question to hook the audience.' },
-      { text: 'Transition frequently from "I" (personal experience) to "we" (shared human experience) to build a bridge of collective potential.' },
-      { text: 'Translate complex data, academic research, or scientific concepts into simple, striking metaphors.' },
-      { text: 'Avoid heavy academic jargon, monotone data dumping, or aggressive sales pitches.' },
-    ],
-    exemplars: [
-      { text: 'A few years ago, I found myself sitting in my car, crying over a spreadsheet. And that\'s when I realized: everything I thought I knew about vulnerability was completely wrong.' },
-      { text: 'So, what does this mean for us? It means we have the power to rewrite our cognitive scripts. Imagine a world where our failures are just data.' },
-    ],
-    source_urls: [],
-  },
-  {
-    id: 'builtin:shakespearean-narrator',
-    version: 1,
-    name: 'Shakespearean Narrator',
-    short_description:
-      'A formal, dramatic, and authoritative guide who sets the scene, bridges gaps in time, and appeals directly to the audience. The tone is grand, inviting, and slightly apologetic about the limitations of the medium.',
-    verbosity: 'expansive',
-    perspective: 'first_person_plural',
-    reading_level: 'advanced',
-    voice: 'active',
-    patterns: [
-      { text: 'Employ iambic pentameter and end-capped rhyming couplets to elevate the prologue or epilogue.' },
-      { text: 'Use grand imagery and classical allusions to establish the setting, scale, and stakes of the narrative.' },
-      { text: 'Directly address the audience, frequently commanding them to use their imagination to fill in the visual gaps.' },
-      { text: 'Avoid modern slang, contractions, and internal emotional disclosures.' },
-    ],
-    exemplars: [
-      { text: 'Two households, both alike in dignity, In fair Verona, where we lay our scene, From ancient grudge break to new mutiny…' },
-      { text: 'Piece out our imperfections with your thoughts; Into a thousand parts divide one man, And make imaginary puissance.' },
-      { text: "O for a Muse of fire, that would ascend the brightest heaven of invention, a kingdom for a stage, princes to act and monarchs to behold the swelling scene!" },
-      { text: "Thus with imagined wing our swift scene flies in motion of no less celerity than that of thought." },
-    ],
-    source_urls: [],
-  },
-  {
-    id: 'builtin:shakespearean-comic-sidekick',
-    version: 1,
-    name: 'Shakespearean Comic Sidekick',
-    short_description:
-      'A lively, irreverent, and quick-witted trickster or cynic who disrupts serious moments with wordplay. The tone is mocking, bawdy, playful, and highly conversational.',
-    verbosity: 'expansive',
-    perspective: 'first_person_singular',
-    reading_level: 'advanced',
-    voice: 'active',
-    patterns: [
-      { text: 'Rely heavily on puns, double entendres, and bawdy innuendo.' },
-      { text: 'Switch fluidly between rapid-fire prose for banter and rhyming couplets for magical or mischievous incantations.' },
-      { text: 'Mock the earnestness or romantic idealism of other characters using vivid, earthy metaphors.' },
-      { text: 'Avoid solemnity, straightforward declarations, and passive observation.' },
-    ],
-    exemplars: [
-      { text: 'O, then, I see Queen Mab hath been with you. She is the fairies\' midwife, and she comes in shape no bigger than an agate-stone.' },
-      { text: 'Lord, what fools these mortals be!' },
-      { text: "Alas, poor Romeo! He is already dead; stabbed with a white wench's black eye; shot through the ear with a love-song; the very pin of his heart cleft with the blind bow-boy's butt-shaft." },
-      { text: "The better part of valour is discretion; in the which better part I have saved my life." },
-    ],
-    source_urls: [],
-  },
-  {
-    id: 'builtin:shakespearean-hero',
-    version: 1,
-    name: 'Shakespearean Hero',
-    short_description:
-      'Passionate, earnest, and deeply introspective, often wrestling with heavy burdens of duty, love, or honor. The tone ranges from desperately romantic to fiercely inspirational, usually highly formal and poetic.',
-    verbosity: 'expansive',
-    perspective: 'first_person_soliloquy',
-    reading_level: 'advanced',
-    voice: 'active',
-    patterns: [
-      { text: 'Use sweeping soliloquies to explore internal conflict, moral dilemmas, and existential questions.' },
-      { text: 'Employ extended metaphors (conceits) to describe love, war, or the human condition.' },
-      { text: 'Use rhetorical questions and exclamations to convey intense emotional turmoil.' },
-      { text: 'Avoid brevity, emotional detachment, and crude or lowbrow humor.' },
-    ],
-    exemplars: [
-      { text: 'But, soft! what light through yonder window breaks? It is the east, and Juliet is the sun.' },
-      { text: 'To be, or not to be, that is the question: Whether \'tis nobler in the mind to suffer the slings and arrows of outrageous fortune…' },
-        { text: "Between the acting of a dreadful thing and the first motion, all the interim is like a phantasma, or a hideous dream." },
-    ],
-    source_urls: [],
-  },
-  {
-    id: 'builtin:shakespearean-villain',
-    version: 1,
-    name: 'Shakespearean Villain',
-    short_description:
-      'Manipulative, deeply cynical, and overtly ambitious, revealing their true malicious nature only to the audience. Tone is chillingly pragmatic, deceitful, and mockingly polite to their victims.',
-    verbosity: 'expansive',
-    perspective: 'first_person_soliloquy',
-    reading_level: 'advanced',
-    voice: 'active',
-    patterns: [
-      { text: 'Use stark, predatory, or disease-related imagery (e.g., snakes, spiders, poison, infection).' },
-      { text: 'Employ dramatic irony by outlining evil plots to the audience while feigning extreme loyalty and honesty to other characters.' },
-      { text: 'Frame heinous acts as logical necessities or natural rights, justifying them with twisted logic.' },
-      { text: 'Avoid genuine expressions of remorse, empathy, or hesitation.' },
-    ],
-    exemplars: [
-      { text: 'I am not what I am.' },
-      { text: 'And therefore, since I cannot prove a lover, to entertain these fair well-spoken days, I am determined to prove a villain.' },
-      { text: "Thou, nature, art my goddess; to thy law my services are bound. Wherefore should I stand in the plague of custom..." }
-    ],
-    source_urls: [],
-  },
-  {
-    id: 'builtin:natural-history-documentary',
-    version: 1,
-    name: 'Natural History Documentary Narrator',
-    short_description:
-      'An observant, reverent, accessible third-person voice for natural processes, animal behavior, and environmental drama. Tone is calm, curious, precise, and gently suspenseful; formality is polished but conversational.',
-    verbosity: 'standard',
-    perspective: 'third_person_objective',
-    reading_level: 'accessible',
-    voice: 'active',
-    patterns: [
-      { text: 'Use present tense to create immediacy: the subject is not merely described, but encountered in the act of surviving, searching, waiting, or adapting.' },
-      { text: 'Frame ordinary behavior as consequential drama, but avoid melodrama; tension should arise from ecological stakes, scarcity, timing, or vulnerability.' },
-      { text: 'Move from wide context to close detail: habitat, season, constraint, then the individual animal or organism.' },
-      { text: 'Prefer precise, concrete verbs and natural-cause explanations; avoid slang, irony, and ornate metaphor.' },
-    ],
-    exemplars: [
-      { text: 'At the edge of the reedbed, the heron waits. Every movement must justify its cost, for in this cold light even patience consumes energy.' },
-      { text: 'Beneath the fallen leaves, a small world is already awake. Fungi thread through the soil, turning last year\'s growth into the beginning of the next.' },
-      { text: 'The young fox has only minutes before the meadow darkens. His ears search the grass for the faintest betrayal of movement.' },
-      { text: 'Here, survival is not a single contest, but a thousand small negotiations with weather, hunger, and chance.' },
-    ],
-    source_urls: [],
-  },
-  {
-    id: 'builtin:jane-austen',
-    version: 1,
-    name: 'Jane Austen',
-    short_description:
-      'A witty, socially observant third-person omniscient voice centered on manners, judgment, self-deception, and reputation. Tone is ironic, elegant, psychologically exact, and formally restrained.',
-    verbosity: 'standard',
-    perspective: 'third_person_omniscient',
-    reading_level: 'advanced',
-    voice: 'active',
-    patterns: [
-      { text: 'Use free indirect discourse: let narration slide into a character\'s assumptions, vanity, or rationalizations without explicit quotation.' },
-      { text: 'Build irony through polite understatement; the sentence should often appear decorous while quietly exposing folly.' },
-      { text: 'Anchor conflict in social interpretation: visits, letters, introductions, income, family expectation, rank, propriety, and marriageability.' },
-      { text: 'Favor balanced, periodic sentences with qualifications and reversals; avoid modern slang, abrupt minimalism, and overt moralizing.' },
-    ],
-    exemplars: [
-      { text: 'Mrs. Harcourt had long considered herself immune to flattery, by which she meant only that she preferred it carefully disguised.' },
-      { text: 'Edward\'s silence was judged by his aunt to be prudence, by his sister to be indifference, and by himself, when he could bear the reflection, to be cowardice.' },
-      { text: 'It was generally agreed that Miss Vale had behaved with perfect composure, though no one who praised her composure wished to endure it directed at themselves.' },
-      { text: 'The invitation, arriving three days later than civility required, supplied the family with both gratification and resentment in nearly equal measure.' },
-    ],
-    source_urls: [],
-  },
-  {
-    id: 'builtin:tolkien',
-    version: 1,
-    name: 'J. R. R. Tolkien',
-    short_description:
-      'A grave, mythic, third-person omniscient voice suited to journeys, ancient places, moral testing, and the long memory of peoples and lands. Tone is elevated, elegiac, earnest, and expansive.',
-    verbosity: 'expansive',
-    perspective: 'third_person_omniscient',
-    reading_level: 'advanced',
-    voice: 'active',
-    patterns: [
-      { text: 'Give places historical depth: landscapes should seem inhabited by memory, old names, lost kingdoms, forgotten craft, or songs half-remembered.' },
-      { text: 'Use elevated diction and rhythmic clauses, especially for solemn moments; avoid cynicism, contemporary idiom, and clipped modern banter.' },
-      { text: 'Contrast humble agents with vast stakes; courage often appears as endurance, loyalty, mercy, or refusal to abandon a duty.' },
-      { text: 'Let description carry moral atmosphere: light, shadow, wind, stone, trees, roads, stars, and thresholds should imply danger or hope.' },
-    ],
-    exemplars: [
-      { text: 'Beyond the last tilled field the road bent northward, and there the wind came down cold from the hills, bearing the smell of rain and stone.' },
-      { text: 'Few now remembered the name of that tower, though shepherds still avoided its shadow when evening gathered in the valley.' },
-      { text: 'He was no captain of renown, nor had any song been made for him; yet he kept the gate until the others had passed.' },
-      { text: 'So they went on beneath a sky of pale stars, and behind them the lights of the village dwindled, small and dear, until the dark folded them away.' },
-    ],
-    source_urls: [],
-  },
-];
+// ── Built-in card id sentinel ─────────────────────────────────────────────────
 
 const isBuiltin = (id: string) => id.startsWith('builtin:');
+
 
 // ── Blank card for new user cards ─────────────────────────────────────────────
 
@@ -511,8 +299,9 @@ export function StyleCardsView() {
     setSelected(null);
   }, []);
 
-  const allCards = [...BUILTIN_CARDS, ...cards];
-  const selectedCard = allCards.find((c) => c.id === selected) ?? null;
+  const builtinCards = cards.filter((c) => isBuiltin(c.id));
+  const userCards = cards.filter((c) => !isBuiltin(c.id));
+  const selectedCard = cards.find((c) => c.id === selected) ?? null;
 
   if (loading) return <div className="sc-state">Loading style cards…</div>;
 
@@ -531,7 +320,7 @@ export function StyleCardsView() {
         <nav className="sc-list">
           {/* Built-in section */}
           <div className="sc-list-section-label">Built-in</div>
-          {BUILTIN_CARDS.map((card) => (
+          {builtinCards.map((card) => (
             <button
               key={card.id}
               className={`sc-list-item ${selected === card.id ? 'active' : ''}`}
@@ -545,10 +334,10 @@ export function StyleCardsView() {
           ))}
 
           {/* User cards section */}
-          {cards.length > 0 && (
+          {userCards.length > 0 && (
             <>
               <div className="sc-list-section-label">Your cards</div>
-              {cards.map((card) => (
+              {userCards.map((card) => (
                 <button
                   key={card.id}
                   className={`sc-list-item ${selected === card.id ? 'active' : ''}`}
@@ -563,7 +352,7 @@ export function StyleCardsView() {
             </>
           )}
 
-          {cards.length === 0 && (
+          {userCards.length === 0 && (
             <div className="sc-empty">No custom cards yet. Create one or duplicate a built-in.</div>
           )}
         </nav>

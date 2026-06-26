@@ -5,8 +5,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { Icon } from '../components/Icon';
 import type {
-  LlmRouteStatus, LlmTask, ModelRef, QueuedLlmJobResult, RewriteMode, StyleCard, SummaryVariant,
+  CloudLlmProviderDescriptor, LlmRouteStatus, LlmTask, ModelRef, QueuedLlmJobResult,
+  RewriteMode, StyleCard, StylePerspective, StyleReadingLevel, StyleVerbosity, StyleVoice,
+  SummaryVariant,
 } from '../types';
+
+const LOCAL_PROVIDER = 'local';
 
 const TASKS: { task: LlmTask; label: string }[] = [
   { task: 'summarize', label: 'Generate summary' },
@@ -18,6 +22,18 @@ const TASKS: { task: LlmTask; label: string }[] = [
   { task: 'devils_advocate', label: "Devil's advocate" },
 ];
 
+const VERBOSITIES: StyleVerbosity[] = ['succinct', 'standard', 'expansive'];
+const PERSPECTIVES: StylePerspective[] = [
+  'first_person_singular', 'first_person_plural', 'first_person_soliloquy',
+  'second_person', 'third_person_objective', 'third_person_omniscient', 'third_person_limited',
+];
+const READING_LEVELS: StyleReadingLevel[] = ['elementary', 'accessible', 'advanced', 'expert'];
+const VOICES: StyleVoice[] = ['active', 'passive'];
+
+function humanize(s: string) {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 interface Props {
   noteId: string;
   onQueued?: (job: QueuedLlmJobResult) => void;
@@ -26,13 +42,25 @@ interface Props {
 export function LlmToolsMenu({ noteId, onQueued }: Props) {
   const [open, setOpen] = useState(false);
   const [routes, setRoutes] = useState<LlmRouteStatus[]>([]);
+  const [descriptors, setDescriptors] = useState<CloudLlmProviderDescriptor[]>([]);
   const [styleCards, setStyleCards] = useState<StyleCard[]>([]);
   const [task, setTask] = useState<LlmTask>('summarize');
-  const [modelOverride, setModelOverride] = useState<ModelRef | null>(null);
+
+  // Provider override: '' = use route default
+  const [overrideProvider, setOverrideProvider] = useState('');
+  const [overrideModel, setOverrideModel] = useState('');
+
   const [summaryVariant, setSummaryVariant] = useState<SummaryVariant>('plain');
   const [rewriteMode, setRewriteMode] = useState<RewriteMode>('standard');
   const [styleCardId, setStyleCardId] = useState('');
-  const [styleOverrides, setStyleOverrides] = useState('');
+
+  // Structured style overrides (seeded from selected card)
+  const [overrideVerbosity, setOverrideVerbosity] = useState<StyleVerbosity | ''>('');
+  const [overridePerspective, setOverridePerspective] = useState<StylePerspective | ''>('');
+  const [overrideReadingLevel, setOverrideReadingLevel] = useState<StyleReadingLevel | ''>('');
+  const [overrideVoice, setOverrideVoice] = useState<StyleVoice | ''>('');
+  const [overrideNotes, setOverrideNotes] = useState('');
+
   const [storeResultAsCommentary, setStoreResultAsCommentary] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +68,7 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
   useEffect(() => {
     if (!open) return;
     api.llmRouteStatuses().then(setRoutes).catch((e) => setError(String(e)));
+    api.cloudLlmProviderDescriptors().then(setDescriptors).catch(() => setDescriptors([]));
     api.listStyleCards().then(setStyleCards).catch(() => setStyleCards([]));
   }, [open]);
 
@@ -47,9 +76,43 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
     () => routes.find((candidate) => candidate.task === task) ?? null,
     [routes, task],
   );
-  const selectedModel = modelOverride ?? (route ? { provider: route.provider, model: route.model } : null);
+
+  const modelOverride: ModelRef | null = useMemo(() => {
+    if (!overrideProvider) return null;
+    return { provider: overrideProvider, model: overrideModel };
+  }, [overrideProvider, overrideModel]);
+
+  const displayModel = modelOverride ?? (route ? { provider: route.provider, model: route.model } : null);
   const supportsSummaryOptions = task === 'summarize';
   const supportsStyleOptions = task === 'rewrite' || task === 'generate_from_summary';
+
+  // Seed structured overrides when the selected card changes
+  useEffect(() => {
+    if (!styleCardId) {
+      setOverrideVerbosity('');
+      setOverridePerspective('');
+      setOverrideReadingLevel('');
+      setOverrideVoice('');
+      return;
+    }
+    const card = styleCards.find((c) => c.id === styleCardId);
+    if (card) {
+      setOverrideVerbosity(card.verbosity);
+      setOverridePerspective(card.perspective);
+      setOverrideReadingLevel(card.reading_level);
+      setOverrideVoice(card.voice);
+    }
+  }, [styleCardId, styleCards]);
+
+  const buildStyleOverrides = (): string | null => {
+    const parts: string[] = [];
+    if (overrideVerbosity) parts.push(`verbosity: ${overrideVerbosity}`);
+    if (overridePerspective) parts.push(`perspective: ${overridePerspective}`);
+    if (overrideReadingLevel) parts.push(`reading_level: ${overrideReadingLevel}`);
+    if (overrideVoice) parts.push(`voice: ${overrideVoice}`);
+    if (overrideNotes.trim()) parts.push(overrideNotes.trim());
+    return parts.length > 0 ? parts.join('\n') : null;
+  };
 
   const enqueue = useCallback(async () => {
     setBusy(true);
@@ -60,7 +123,7 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
         task,
         model_override: modelOverride,
         style_card_id: supportsStyleOptions && styleCardId ? styleCardId : null,
-        style_overrides: supportsStyleOptions && styleOverrides.trim() ? styleOverrides.trim() : null,
+        style_overrides: supportsStyleOptions ? buildStyleOverrides() : null,
         summary_variant: supportsSummaryOptions ? summaryVariant : 'plain',
         rewrite_mode: supportsStyleOptions ? rewriteMode : 'standard',
         store_result_as_commentary: storeResultAsCommentary,
@@ -79,11 +142,16 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
     rewriteMode,
     storeResultAsCommentary,
     styleCardId,
-    styleOverrides,
     summaryVariant,
     supportsStyleOptions,
     supportsSummaryOptions,
     task,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    overrideVerbosity,
+    overridePerspective,
+    overrideReadingLevel,
+    overrideVoice,
+    overrideNotes,
   ]);
 
   return (
@@ -98,8 +166,8 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
           <div className="llm-modal llm-tool-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
             <div className="llm-modal-header">
               <h3>Run tool</h3>
-              {selectedModel && (
-                <span className="llm-modal-model">{selectedModel.provider}/{selectedModel.model}</span>
+              {displayModel && (
+                <span className="llm-modal-model">{displayModel.provider}/{displayModel.model}</span>
               )}
             </div>
             <div className="llm-tool-form">
@@ -117,19 +185,30 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
                   ? `${route.execution_mode} route · ${route.available ? 'available' : 'not ready'}`
                   : 'Route unavailable'}
               </div>
+
               <label className="llm-tool-field">
-                <span>Provider/model override</span>
-                <input
-                  value={modelOverride ? `${modelOverride.provider}/${modelOverride.model}` : ''}
-                  onChange={(event) => {
-                    const value = event.target.value.trim();
-                    if (!value) { setModelOverride(null); return; }
-                    const [provider, ...modelParts] = value.split('/');
-                    setModelOverride({ provider, model: modelParts.join('/') });
-                  }}
-                  placeholder={route ? `${route.provider}/${route.model}` : 'provider/model'}
-                />
+                <span>Provider override</span>
+                <select
+                  value={overrideProvider}
+                  onChange={(e) => { setOverrideProvider(e.target.value); setOverrideModel(''); }}
+                >
+                  <option value="">Use route default</option>
+                  <option value={LOCAL_PROVIDER}>Local (bundled)</option>
+                  {descriptors.map((d) => (
+                    <option key={d.provider} value={d.provider}>{d.display_name}</option>
+                  ))}
+                </select>
               </label>
+              {overrideProvider && overrideProvider !== LOCAL_PROVIDER && (
+                <label className="llm-tool-field">
+                  <span>Model</span>
+                  <input
+                    value={overrideModel}
+                    onChange={(e) => setOverrideModel(e.target.value)}
+                    placeholder="model name"
+                  />
+                </label>
+              )}
 
               {supportsSummaryOptions && (
                 <label className="llm-tool-field">
@@ -160,15 +239,46 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
                       ))}
                     </select>
                   </label>
-                  <label className="llm-tool-field">
-                    <span>Style overrides</span>
+                  <div className="llm-tool-overrides">
+                    <span className="llm-tool-overrides-label">Style overrides</span>
+                    <div className="llm-tool-overrides-grid">
+                      <label className="llm-tool-field">
+                        <span>Verbosity</span>
+                        <select value={overrideVerbosity} onChange={(e) => setOverrideVerbosity(e.target.value as StyleVerbosity | '')}>
+                          <option value="">Card default</option>
+                          {VERBOSITIES.map((v) => <option key={v} value={v}>{humanize(v)}</option>)}
+                        </select>
+                      </label>
+                      <label className="llm-tool-field">
+                        <span>Perspective</span>
+                        <select value={overridePerspective} onChange={(e) => setOverridePerspective(e.target.value as StylePerspective | '')}>
+                          <option value="">Card default</option>
+                          {PERSPECTIVES.map((p) => <option key={p} value={p}>{humanize(p)}</option>)}
+                        </select>
+                      </label>
+                      <label className="llm-tool-field">
+                        <span>Reading level</span>
+                        <select value={overrideReadingLevel} onChange={(e) => setOverrideReadingLevel(e.target.value as StyleReadingLevel | '')}>
+                          <option value="">Card default</option>
+                          {READING_LEVELS.map((r) => <option key={r} value={r}>{humanize(r)}</option>)}
+                        </select>
+                      </label>
+                      <label className="llm-tool-field">
+                        <span>Voice</span>
+                        <select value={overrideVoice} onChange={(e) => setOverrideVoice(e.target.value as StyleVoice | '')}>
+                          <option value="">Card default</option>
+                          {VOICES.map((v) => <option key={v} value={v}>{humanize(v)}</option>)}
+                        </select>
+                      </label>
+                    </div>
                     <textarea
-                      value={styleOverrides}
-                      onChange={(event) => setStyleOverrides(event.target.value)}
-                      rows={3}
-                      placeholder="Optional one-run style instructions"
+                      className="llm-tool-override-notes"
+                      value={overrideNotes}
+                      onChange={(e) => setOverrideNotes(e.target.value)}
+                      rows={2}
+                      placeholder="Additional one-run style notes…"
                     />
-                  </label>
+                  </div>
                 </>
               )}
 

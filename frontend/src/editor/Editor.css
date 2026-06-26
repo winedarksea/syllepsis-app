@@ -326,6 +326,40 @@
   color: var(--color-text-secondary);
 }
 
+.llm-tool-overrides {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.llm-tool-overrides-label {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-tertiary);
+}
+
+.llm-tool-overrides-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+}
+
+.llm-tool-override-notes {
+  width: 100%;
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  resize: vertical;
+}
+
 .llm-route-summary {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
@@ -338,7 +372,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--color-backdrop, rgba(0, 0, 0, 0.28));
 }
 
 .llm-progress {
@@ -398,7 +432,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--color-backdrop, rgba(0, 0, 0, 0.4));
 }
 .llm-modal {
   width: min(640px, 90vw);
@@ -953,7 +987,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--sp-4);
-  background: rgba(0, 0, 0, 0.42);
+  background: var(--color-backdrop, rgba(0, 0, 0, 0.42));
 }
 
 .editor-dialog {

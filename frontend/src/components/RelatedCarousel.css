@@ -15,9 +15,23 @@
 
 .rc-toggle {
   display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
   margin-bottom: var(--sp-2);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--sp-2);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
-.rc-toggle:hover { color: var(--color-text-secondary); }
+.rc-toggle:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-hover);
+}
+
+.rc-chevron {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--color-text-tertiary);
+}
 
 .rc-state {
   padding: var(--sp-3) var(--sp-6);

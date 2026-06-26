@@ -336,9 +336,12 @@
   box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.18));
 }
 
+.llm-job-card { cursor: pointer; }
+.llm-job-card:hover { background: var(--color-surface-raised); }
 .llm-job-card.complete { border-color: var(--color-accent); }
+.llm-job-card.running { border-color: var(--color-secondary); }
 .llm-job-card.failed,
-.llm-job-card.error { border-color: var(--color-error); color: var(--color-error); }
+.llm-job-card.error { border-color: var(--color-error); }
 
 .llm-job-main {
   display: grid;
@@ -353,6 +356,19 @@
   text-transform: capitalize;
 }
 
+.llm-job-status-badge {
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.llm-job-time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
 .llm-job-status,
 .llm-job-error {
   overflow: hidden;
@@ -363,6 +379,67 @@
 }
 
 .llm-job-error { color: var(--color-error); }
+
+.llm-job-apply-btn {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-color: transparent !important;
+  font-weight: 600;
+}
+.llm-job-apply-btn:hover { background: var(--color-accent-hover); }
+
+.llm-job-tray-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--sp-1);
+}
+
+.llm-job-history-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.llm-job-history-btn:hover { color: var(--color-text-secondary); background: var(--color-hover); }
+
+.llm-job-history-panel {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: calc(var(--sp-4) + 24px);
+  z-index: 138;
+  width: min(420px, calc(100vw - var(--sp-8)));
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,0.25));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.llm-job-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-heading);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.llm-job-history-empty {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  padding: var(--sp-2);
+}
 
 .llm-job-actions {
   display: flex;

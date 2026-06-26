@@ -41,6 +41,9 @@
   --color-sidebar-active: #dde4e6;/* Glacial Dust tonal fill */
   --color-sidebar-text: #555e61;
 
+  --color-hover: rgba(0, 0, 0, 0.05);
+  --color-backdrop: rgba(0, 0, 0, 0.35);
+
   /* Graph/contour scaffolding hairline */
   --color-scaffold: #9a9992;
 

@@ -41,6 +41,9 @@
   --color-sidebar-active: #2c3438;/* Lava Stone tonal fill */
   --color-sidebar-text: #b8c0be;
 
+  --color-hover: rgba(255, 255, 255, 0.06);
+  --color-backdrop: rgba(0, 0, 0, 0.55);
+
   /* Graph/contour scaffolding hairline (brighter than default border) */
   --color-scaffold: #6e7779;
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { api } from '../lib/api';
 import { sanitizeHtml } from '../lib/sanitize';
@@ -8,10 +8,12 @@ interface Props {
   className?: string;
   findPattern?: string;
   findMatchIndex?: number;
+  onMatchCount?: (count: number) => void;
 }
 
-export function MarkdownRenderer({ markdown, className, findPattern, findMatchIndex = 0 }: Props) {
+export function MarkdownRenderer({ markdown, className, findPattern, findMatchIndex = 0, onMatchCount }: Props) {
   const [html, setHtml] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -21,24 +23,40 @@ export function MarkdownRenderer({ markdown, className, findPattern, findMatchIn
     return () => { cancelled = true; };
   }, [markdown]);
 
-  const highlightedHtml = useMemo(() => {
+  const { highlightedHtml, matchCount } = useMemo(() => {
     const pattern = findPattern ?? '';
-    if (!pattern.trim()) return html;
+    if (!pattern.trim()) {
+      onMatchCount?.(0);
+      return { highlightedHtml: html, matchCount: 0 };
+    }
     try {
       const regex = new RegExp(pattern, 'g');
       let index = 0;
-      return html.replace(regex, (match) => {
+      const highlighted = html.replace(regex, (match) => {
         const active = index === findMatchIndex;
         index += 1;
         return `<mark class="${active ? 'note-find-hit active' : 'note-find-hit'}">${match}</mark>`;
       });
+      onMatchCount?.(index);
+      return { highlightedHtml: highlighted, matchCount: index };
     } catch {
-      return html;
+      onMatchCount?.(0);
+      return { highlightedHtml: html, matchCount: 0 };
     }
-  }, [findMatchIndex, findPattern, html]);
+    // onMatchCount is excluded intentionally — it's a callback ref, not reactive data
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [html, findPattern, findMatchIndex]);
+
+  // Scroll the active match into view whenever it changes
+  useEffect(() => {
+    if (!matchCount || !containerRef.current) return;
+    const active = containerRef.current.querySelector<HTMLElement>('.note-find-hit.active');
+    active?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [highlightedHtml, matchCount]);
 
   return (
     <div
+      ref={containerRef}
       className={className}
       dangerouslySetInnerHTML={{ __html: highlightedHtml }}
       onClick={(event) => {

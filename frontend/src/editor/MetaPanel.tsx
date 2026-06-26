@@ -8,6 +8,7 @@ import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import type {
   NoteDto, Category, PriorKind, PriorRef, StatementType, Priority, FlexDate, World, NoteStatus,
+  NoteEmbeddingDetails,
 } from '../types';
 
 const STATEMENT_TYPES: StatementType[] = [
@@ -34,14 +35,44 @@ function makeFlexDate(value: string): FlexDate | undefined {
   return value ? { date: value } : undefined;
 }
 
+function VectorPreview({ label, vector }: { label: string; vector: number[] | null }) {
+  if (!vector) return <div>{label}: none</div>;
+  return (
+    <details className="editor-vector-preview">
+      <summary>{label}: {vector.length} values</summary>
+      <code>{vector.map((value) => Number(value).toFixed(4)).join(', ')}</code>
+    </details>
+  );
+}
+
+function AdvancedMetadata({ embeddingDetails }: { embeddingDetails: NoteEmbeddingDetails | null }) {
+  return (
+    <details className="editor-advanced-meta">
+      <summary>Advanced</summary>
+      {!embeddingDetails ? (
+        <div className="editor-advanced-empty">Embedding details unavailable.</div>
+      ) : (
+        <div className="editor-embedding-details">
+          <div>Status: {embeddingDetails.status}</div>
+          <div>Model: {embeddingDetails.model_id ?? 'unknown'}</div>
+          <div>Dimensions: {embeddingDetails.dimensions ?? 'unknown'}</div>
+          <VectorPreview label="Summary vector" vector={embeddingDetails.summary_vector ?? null} />
+          <VectorPreview label="Body vector" vector={embeddingDetails.full_note_vector ?? null} />
+        </div>
+      )}
+    </details>
+  );
+}
+
 interface Props {
   note: NoteDto;
   categories: Category[];
   allNotes: NoteDto[];
+  embeddingDetails: NoteEmbeddingDetails | null;
   onChange: (next: NoteDto) => void;
 }
 
-export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
+export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChange }: Props) {
   const { setActiveCategory, setView } = useStore();
   const [open, setOpen] = useState(false);
   const [newCategory, setNewCategory] = useState('');
@@ -337,6 +368,7 @@ export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
               </p>
             </section>
           )}
+          <AdvancedMetadata embeddingDetails={embeddingDetails} />
         </div>
       )}
     </div>

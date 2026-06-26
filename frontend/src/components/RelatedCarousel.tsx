@@ -45,8 +45,13 @@ export function RelatedCarousel({ noteId }: Props) {
 
   return (
     <div className="rc-root">
-      <button className="rc-label rc-toggle" onClick={() => setCollapsed((value) => !value)}>
-        Related notes {collapsed ? `(${related.length})` : ''}
+      <button
+        className="rc-label rc-toggle"
+        onClick={() => setCollapsed((value) => !value)}
+        title={collapsed ? 'Show related notes' : 'Hide related notes'}
+      >
+        <span className="rc-chevron">{collapsed ? '▸' : '▾'}</span>
+        Related notes ({related.length})
       </button>
       {!collapsed && (
         <div className="rc-track">

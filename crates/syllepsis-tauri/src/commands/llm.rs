@@ -111,6 +111,20 @@ pub fn list_llm_jobs(state: State<AppState>) -> Vec<QueuedLlmJobResult> {
     jobs
 }
 
+/// List all LLM jobs including dismissed ones, for the history panel.
+#[tauri::command]
+pub fn list_all_llm_jobs(state: State<AppState>) -> Vec<QueuedLlmJobResult> {
+    let mut jobs = state
+        .llm_jobs
+        .lock()
+        .unwrap()
+        .values()
+        .map(|record| record.result.clone())
+        .collect::<Vec<_>>();
+    jobs.sort_by(|a, b| b.job_id.cmp(&a.job_id));
+    jobs
+}
+
 #[tauri::command]
 pub fn get_llm_job(
     state: State<AppState>,

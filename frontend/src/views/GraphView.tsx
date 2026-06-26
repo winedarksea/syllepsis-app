@@ -117,7 +117,7 @@ export function GraphView() {
       )}
       <div className="gv-provider-note">
         {result.mode === 'categories' || result.mode === 'timeline'
-          ? `${result.mode === 'categories' ? 'Category' : 'Timeline'} layout · does not require embeddings`
+          ? `${result.mode === 'categories' ? 'Category' : 'Timeline'}`
           : result.provider.semantic
           ? `Semantic layout · ${result.provider.id}`
           : (
