@@ -1,5 +1,6 @@
 /* Light theme — "Pale Daylight": ash paper, bleached wood, stone under northern daylight */
 [data-theme='light'] {
+  --color-scheme: light;
   --color-bg: #e8e5de;            /* Ash White — main writing canvas */
   --color-surface: #f3f0e8;       /* Bone — app bars, sheets, panels */
   --color-surface-raised: #dde4e6;/* Glacial Dust — group regions, elevated */

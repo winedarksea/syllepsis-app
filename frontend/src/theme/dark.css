@@ -1,5 +1,6 @@
 /* Dark theme — "Volcanic": basalt ground with meltwater and lichen glowing against it */
 [data-theme='dark'] {
+  --color-scheme: dark;
   --color-bg: #111416;            /* Obsidian — main canvas */
   --color-surface: #20262a;       /* Basalt — app bars, panels, notes */
   --color-surface-raised: #2c3438;/* Lava Stone — elevated surfaces */

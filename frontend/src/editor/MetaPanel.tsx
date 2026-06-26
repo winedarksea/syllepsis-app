@@ -35,6 +35,13 @@ function makeFlexDate(value: string): FlexDate | undefined {
   return value ? { date: value } : undefined;
 }
 
+function formatTimestamp(iso: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 function VectorPreview({ label, vector }: { label: string; vector: number[] | null }) {
   if (!vector) return <div>{label}: none</div>;
   return (
@@ -350,6 +357,14 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
                   })}
                 />
               </label>
+              <div className="meta-date-readonly">
+                Created
+                <span>{formatTimestamp(note.metadata.dates.created)}</span>
+              </div>
+              <div className="meta-date-readonly">
+                Updated
+                <span>{formatTimestamp(note.metadata.dates.updated)}</span>
+              </div>
             </div>
             {note.type === 'todo' && (
               <p className="meta-hint">
