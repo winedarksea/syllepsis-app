@@ -68,6 +68,11 @@ interface AppStore {
   view: View;
   setView: (v: View) => void;
 
+  // Mobile/narrow-shell sidebar overlay open state. Driven by the in-flow menu button in
+  // PageHeader (and the editor's floating toggle); the persistent desktop sidebar ignores it.
+  sidebarOpen: boolean;
+  setSidebarOpen: (open: boolean) => void;
+
   // Category selected in sidebar
   activeCategory: string | null;
   setActiveCategory: (name: string | null) => void;
@@ -194,6 +199,9 @@ export const useStore = create<AppStore>((set) => ({
 
   view: 'unsorted',
   setView: (view) => set({ view }),
+
+  sidebarOpen: false,
+  setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
 
   activeCategory: null,
   setActiveCategory: (activeCategory) => set({ activeCategory }),

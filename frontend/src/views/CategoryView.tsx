@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
+import { PageHeader } from '../components/PageHeader';
 import type { NoteDto, Category, CategoryEmbeddingStats } from '../types';
 import './CategoryView.css';
 
@@ -135,23 +136,30 @@ export function CategoryView() {
 
   return (
     <div className="cv-root">
-      <div className="cv-header">
-        <div className="cv-title-row">
-          {cat?.icon && <span className="cv-icon">{cat.icon}</span>}
-          <h2 className="cv-title">{cat?.long_name || activeCategory}</h2>
-          <span className="cv-count">{notes.length} note{notes.length !== 1 ? 's' : ''}</span>
-          <button className="cv-edit-toggle" onClick={() => setEditing((v) => !v)} title="Edit category">
-            <Icon name={editing ? 'close' : 'edit'} size={15} />
-          </button>
-        </div>
-        <span className="cv-hashtag">#{activeCategory}</span>
-        {cat?.heading_level && !editing && (
-          <span className="cv-heading-level">H{cat.heading_level}</span>
-        )}
-        {embeddingLabel && (
-          <span className="cv-embedding-stats">{embeddingLabel}</span>
-        )}
-      </div>
+      <PageHeader
+        icon={cat?.icon ? <span className="cv-icon">{cat.icon}</span> : undefined}
+        title={
+          <>
+            {cat?.long_name || activeCategory}
+            <span className="cv-count">{notes.length} note{notes.length !== 1 ? 's' : ''}</span>
+          </>
+        }
+        secondary={
+          <>
+            <span className="cv-hashtag">#{activeCategory}</span>
+            {cat?.heading_level && !editing && (
+              <span className="cv-heading-level">H{cat.heading_level}</span>
+            )}
+            {embeddingLabel && (
+              <span className="cv-embedding-stats">{embeddingLabel}</span>
+            )}
+          </>
+        }
+      >
+        <button className="cv-edit-toggle" onClick={() => setEditing((v) => !v)} title="Edit category">
+          <Icon name={editing ? 'close' : 'edit'} size={15} />
+        </button>
+      </PageHeader>
 
       {editing && cat && (
         <CategoryEditor cat={cat} onSave={handleSave} onCancel={() => setEditing(false)} />

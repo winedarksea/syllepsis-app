@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
+import { PageHeader } from '../components/PageHeader';
 import type { EmbeddingDiagnostics } from '../types';
 import './Diagnostics.css';
 
@@ -55,17 +56,14 @@ export function Diagnostics() {
 
   return (
     <div className="dg-root">
-      <div className="dg-header">
-        <h2 className="dg-title">Diagnostics</h2>
-        <div className="dg-header-actions">
-          <span className="dg-last-run">
-            {lastRun ? `Last run: ${new Date(lastRun).toLocaleString()}` : 'Not run yet'}
-          </span>
-          <button className="dg-run-btn" onClick={run} disabled={running}>
-            {running ? 'Running…' : 'Run checks'}
-          </button>
-        </div>
-      </div>
+      <PageHeader title="Diagnostics">
+        <span className="dg-last-run">
+          {lastRun ? `Last run: ${new Date(lastRun).toLocaleString()}` : 'Not run yet'}
+        </span>
+        <button className="dg-run-btn" onClick={run} disabled={running}>
+          {running ? 'Running…' : 'Run checks'}
+        </button>
+      </PageHeader>
 
       {error && <div className="dg-state dg-error">{error}</div>}
       {!diag && !error && <div className="dg-state">Analysing embeddings…</div>}

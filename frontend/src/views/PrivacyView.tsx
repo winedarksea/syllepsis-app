@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
+import { PageHeader } from '../components/PageHeader';
 import type { PolicyOverview } from '../types';
 import './PrivacyView.css';
 
@@ -68,13 +69,10 @@ export function PrivacyView() {
 
   return (
     <div className="pv-root">
-      <div className="pv-header">
-        <h2 className="pv-title">Privacy &amp; Policy</h2>
-        <div className="pv-actions">
-          <button className="pv-btn" disabled={busy} onClick={publish}>Publish read-only site…</button>
-          <button className="pv-btn" disabled={busy} onClick={refreshGitignore}>Refresh git exclusions</button>
-        </div>
-      </div>
+      <PageHeader title="Privacy & Policy">
+        <button className="pv-btn" disabled={busy} onClick={publish}>Publish read-only site…</button>
+        <button className="pv-btn" disabled={busy} onClick={refreshGitignore}>Refresh git exclusions</button>
+      </PageHeader>
 
       {notice && <div className="pv-notice" onClick={() => setNotice(null)}>{notice}</div>}
       {error && <div className="pv-state pv-error">{error}</div>}

@@ -2,36 +2,25 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
+}
+
+.stats-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--sp-6) var(--sp-8);
   gap: var(--sp-6);
 }
 
-.stats-header {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  flex-shrink: 0;
-}
-
-.stats-header-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-}
-
-.stats-title {
-  font-size: var(--font-size-xl);
-  font-weight: 700;
-  color: var(--color-heading);
-}
-
-/* Tab bar */
+/* Tab bar (rendered as PageHeader's secondary row) */
 .stats-tabs {
   display: flex;
   gap: 0;
   overflow-x: auto;
+  flex: 1;
   border-bottom: 2px solid var(--color-border);
 }
 

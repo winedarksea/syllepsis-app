@@ -5,6 +5,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
+import { PageHeader } from '../components/PageHeader';
 import type { ImportPreview, ImportReport, BookInfo } from '../types';
 import './PacksView.css';
 
@@ -24,13 +25,12 @@ export function PacksView() {
 
   return (
     <div className="pk-root">
-      <div className="pk-header">
-        <h2 className="pk-title">Knowledge Packs</h2>
+      <PageHeader title="Knowledge Packs">
         <div className="pk-tabs">
           <button className={`pk-tab ${tab === 'export' ? 'active' : ''}`} onClick={() => setTab('export')}>Export</button>
           <button className={`pk-tab ${tab === 'import' ? 'active' : ''}`} onClick={() => setTab('import')}>Import</button>
         </div>
-      </div>
+      </PageHeader>
 
       {notice && <div className="pk-notice" onClick={() => setNotice(null)}>{notice}</div>}
       {error && <div className="pk-state pk-error" onClick={() => setError(null)}>{error}</div>}

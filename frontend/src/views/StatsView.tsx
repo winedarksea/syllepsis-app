@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { PageHeader } from '../components/PageHeader';
 import type { BookStats, LocalAiStatus, LocalAiDevicePolicy, OperationalActivitySummary } from '../types';
 import './StatsView.css';
 
@@ -101,24 +102,26 @@ export function StatsView() {
 
   return (
     <div className="stats-root">
-      <div className="stats-header">
-        <div className="stats-header-top">
-          <h2 className="stats-title">Book Statistics</h2>
-          <button className="stats-refresh-btn" onClick={load}>Refresh</button>
-        </div>
-        <div className="stats-tabs">
-          {(Object.keys(TAB_LABELS) as StatsTab[]).map((t) => (
-            <button
-              key={t}
-              className={`stats-tab${tab === t ? ' active' : ''}`}
-              onClick={() => setTab(t)}
-            >
-              {TAB_LABELS[t]}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        title="Book Statistics"
+        secondary={
+          <div className="stats-tabs">
+            {(Object.keys(TAB_LABELS) as StatsTab[]).map((t) => (
+              <button
+                key={t}
+                className={`stats-tab${tab === t ? ' active' : ''}`}
+                onClick={() => setTab(t)}
+              >
+                {TAB_LABELS[t]}
+              </button>
+            ))}
+          </div>
+        }
+      >
+        <button className="stats-refresh-btn" onClick={load}>Refresh</button>
+      </PageHeader>
 
+      <div className="stats-body">
       {tab === 'overview' && (
         <section className="stats-section">
           <h3 className="stats-section-title">Overview</h3>
@@ -283,6 +286,7 @@ export function StatsView() {
           )}
         </>
       )}
+      </div>
     </div>
   );
 }

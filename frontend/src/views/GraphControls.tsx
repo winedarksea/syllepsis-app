@@ -1,4 +1,5 @@
 import { Icon } from '../components/Icon';
+import { SidebarMenuButton } from '../components/PageHeader';
 import { useStore } from '../lib/store';
 import type {
   ClustersPreset,
@@ -74,6 +75,7 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
   return (
     <header className="gv-toolbar">
       <div className="gv-toolbar-primary">
+        <SidebarMenuButton />
         <div className="gv-heading">
           <h2 className="gv-title">Graph</h2>
           <span className="gv-mode-description">

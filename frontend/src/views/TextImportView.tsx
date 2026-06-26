@@ -3,6 +3,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
+import { PageHeader } from '../components/PageHeader';
 import type {
   NoteDto,
   PluginDescriptor,
@@ -195,10 +196,12 @@ export function TextImportView() {
 
   return (
     <div className="ti-root">
-      <div className="ti-header">
-        <h2 className="ti-title">Note Import</h2>
-        <p className="ti-subtitle">Bring in text from a paste, a file, or an import plugin, preview the split, then import as notes.</p>
-      </div>
+      <PageHeader
+        title="Note Import"
+        secondary={
+          <p className="ti-subtitle">Bring in text from a paste, a file, or an import plugin, preview the split, then import as notes.</p>
+        }
+      />
 
       {notice && <div className="ti-notice" onClick={() => setNotice(null)}>{notice}</div>}
       {error && <div className="ti-error" onClick={() => setError(null)}>{error}</div>}

@@ -4,25 +4,6 @@
   padding-bottom: var(--sp-8);
 }
 
-.pv-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  flex-wrap: wrap;
-  padding: var(--sp-5) var(--sp-6);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-}
-
-.pv-title {
-  font-size: var(--font-size-xl);
-  font-weight: 700;
-  color: var(--color-heading);
-}
-
-.pv-actions { display: flex; gap: var(--sp-2); }
-
 .pv-btn {
   font-size: var(--font-size-sm);
   font-weight: 500;

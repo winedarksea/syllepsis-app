@@ -5,29 +5,6 @@
   overflow: hidden;
 }
 
-.uq-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-5) var(--sp-6);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-  flex-shrink: 0;
-}
-
-.uq-title {
-  font-size: var(--font-size-xl);
-  font-weight: 700;
-  color: var(--color-heading);
-}
-
-.uq-header-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-}
-
 .uq-filter-toggle {
   display: flex;
   border: 1px solid var(--color-border);

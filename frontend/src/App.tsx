@@ -376,7 +376,8 @@ function WizardShell({ title, onCancel, children }: { title: string; onCancel: (
 // ──────────────────────────────────────────────
 function Workspace() {
   const { view, editingNoteId, editingMode, setCategories, setUnsortedCount, openEditor, setPluginRenderLanguages, setPluginsLoaded } = useStore();
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const mobileSidebarOpen = useStore((s) => s.sidebarOpen);
+  const setMobileSidebarOpen = useStore((s) => s.setSidebarOpen);
 
   // Refresh sidebar data on view change (i.e. when returning from the editor).
   useEffect(() => {
@@ -432,15 +433,19 @@ function Workspace() {
         isMobileOpen={mobileSidebarOpen}
         onClose={() => setMobileSidebarOpen(false)}
       />
-      <button
-        className="mobile-sidebar-toggle"
-        type="button"
-        onClick={() => setMobileSidebarOpen(true)}
-        aria-label="Open navigation"
-        aria-expanded={mobileSidebarOpen}
-      >
-        <Icon name="menu" size={22} />
-      </button>
+      {/* The editor and the master–detail Style Cards view have no PageHeader, so they keep the
+          floating toggle. Every other view renders an in-flow menu button via PageHeader. */}
+      {(view === 'editor' || view === 'style_cards') && (
+        <button
+          className="mobile-sidebar-toggle"
+          type="button"
+          onClick={() => setMobileSidebarOpen(true)}
+          aria-label="Open navigation"
+          aria-expanded={mobileSidebarOpen}
+        >
+          <Icon name="menu" size={22} />
+        </button>
+      )}
       {mobileSidebarOpen && (
         <button
           className="mobile-sidebar-backdrop"

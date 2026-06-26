@@ -5,14 +5,6 @@
   overflow: hidden;
 }
 
-.wv-header {
-  padding: var(--sp-4) var(--sp-6);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-  flex-shrink: 0;
-}
-
-.wv-heading-row,
 .wv-header-actions,
 .wv-world-tabs,
 .wv-stage-toolbar,
@@ -22,13 +14,11 @@
   align-items: center;
 }
 
-.wv-heading-row,
 .wv-dialog-heading {
   justify-content: space-between;
   gap: var(--sp-4);
 }
 
-.wv-title,
 .wv-dialog h3 {
   margin: 0;
   color: var(--color-heading);
@@ -73,7 +63,6 @@
 
 .wv-world-tabs {
   flex-wrap: wrap;
-  margin-top: var(--sp-3);
 }
 
 .wv-state {

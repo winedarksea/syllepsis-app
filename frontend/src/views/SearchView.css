@@ -5,14 +5,9 @@
   overflow: hidden;
 }
 
-.sv-header {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-5) var(--sp-6);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-  flex-shrink: 0;
+/* The search input is the header, so let its PageHeader tools row fill the bar width. */
+.sv-root .page-header-tools {
+  flex: 1;
 }
 
 .sv-input {

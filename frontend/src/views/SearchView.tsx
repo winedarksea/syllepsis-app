@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
+import { PageHeader } from '../components/PageHeader';
 import type { SearchResults, CrossBookNote, ObjectType, SearchFilter, NoteVisibility } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import './SearchView.css';
@@ -224,7 +225,7 @@ export function SearchView() {
   return (
     <div className="sv-root">
       {/* ── Header ── */}
-      <div className="sv-header">
+      <PageHeader>
         <input
           className="sv-input"
           value={query}
@@ -239,7 +240,7 @@ export function SearchView() {
         >
           Filters{numActive > 0 ? ` (${numActive})` : ''}
         </button>
-      </div>
+      </PageHeader>
 
       {/* ── Collapsible filter panel ── */}
       {panelOpen && (

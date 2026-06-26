@@ -1,14 +1,8 @@
 .ti-root {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
-  padding: var(--sp-6);
   height: 100%;
   overflow: hidden;
-}
-
-.ti-header {
-  flex-shrink: 0;
 }
 
 .ti-preview-header,
@@ -18,11 +12,6 @@
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-}
-
-.ti-title {
-  margin: 0;
-  font-size: var(--font-size-2xl);
 }
 
 .ti-subtitle,
@@ -39,6 +28,7 @@
   display: flex;
   align-items: stretch;
   gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6) var(--sp-6);
 }
 
 .ti-panel {
@@ -181,6 +171,12 @@
   border-radius: var(--radius-md);
   padding: var(--sp-2) var(--sp-3);
   font-size: 0.9rem;
+}
+
+/* Root-level banners need horizontal insets now that the header is flush. */
+.ti-root > .ti-notice,
+.ti-root > .ti-error {
+  margin: var(--sp-3) var(--sp-6) 0;
 }
 
 .ti-notice {

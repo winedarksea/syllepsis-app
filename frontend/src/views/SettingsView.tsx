@@ -25,6 +25,7 @@ import {
 } from '../theme/themes';
 import { getIconSet } from '../theme/icons/sets';
 import { Icon, useThemeStyle } from '../components/Icon';
+import { PageHeader } from '../components/PageHeader';
 import './SettingsView.css';
 
 // Evocative section sub-text, varying by the active theme's flavor language.
@@ -96,10 +97,10 @@ export function SettingsView({ launchMode = false }: Props) {
   return (
     <div className={`sv-root ${launchMode ? 'sv-modal' : ''}`}>
       {!launchMode && (
-        <div className="sv-header">
-          <h2 className="sv-title">Settings</h2>
-          <span className="sv-subtitle">{SUBTITLES.settings[flavorLang]}</span>
-        </div>
+        <PageHeader
+          title="Settings"
+          secondary={<span className="sv-subtitle">{SUBTITLES.settings[flavorLang]}</span>}
+        />
       )}
 
       {notice && <div className="sv-notice" onClick={() => setNotice(null)}>{notice}</div>}

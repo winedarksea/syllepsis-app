@@ -3,6 +3,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
+import { PageHeader } from '../components/PageHeader';
 import type { NoteDto, Overlay, World } from '../types';
 import { WorldStage } from './WorldStage';
 import './WorldView.css';
@@ -92,36 +93,37 @@ export function WorldView() {
 
   return (
     <div className="wv-root">
-      <header className="wv-header">
-        <div className="wv-heading-row">
-          <h2 className="wv-title">Worlds</h2>
-          <div className="wv-header-actions">
-            <button onClick={toggleGrid} className={showGrid ? 'active' : ''}>
-              <Icon name="grid_on" size={17} /> Grid
-            </button>
-            {selectedWorld?.id !== 'earth' && (
-              <button onClick={deleteSelectedWorld} title="Delete selected world">
-                <Icon name="delete" size={17} />
+      <PageHeader
+        title="Worlds"
+        secondary={
+          <div className="wv-world-tabs">
+            {worlds.map((world) => (
+              <button
+                key={world.id}
+                className={`wv-world-tab ${activeWorld === world.id ? 'active' : ''}`}
+                onClick={() => setActiveWorld(world.id)}
+              >
+                <Icon name={world.kind === 'image' ? 'map' : 'public'} size={16} />
+                {world.display_name}
               </button>
-            )}
-            <button className="wv-create-button" onClick={() => setShowCreate(true)}>
-              <Icon name="add" size={17} /> New world
-            </button>
+            ))}
           </div>
-        </div>
-        <div className="wv-world-tabs">
-          {worlds.map((world) => (
-            <button
-              key={world.id}
-              className={`wv-world-tab ${activeWorld === world.id ? 'active' : ''}`}
-              onClick={() => setActiveWorld(world.id)}
-            >
-              <Icon name={world.kind === 'image' ? 'map' : 'public'} size={16} />
-              {world.display_name}
+        }
+      >
+        <div className="wv-header-actions">
+          <button onClick={toggleGrid} className={showGrid ? 'active' : ''}>
+            <Icon name="grid_on" size={17} /> Grid
+          </button>
+          {selectedWorld?.id !== 'earth' && (
+            <button onClick={deleteSelectedWorld} title="Delete selected world">
+              <Icon name="delete" size={17} />
             </button>
-          ))}
+          )}
+          <button className="wv-create-button" onClick={() => setShowCreate(true)}>
+            <Icon name="add" size={17} /> New world
+          </button>
         </div>
-      </header>
+      </PageHeader>
 
       {error && <div className="wv-error-banner" onClick={() => setError(null)}>{error}</div>}
       {overlay ? (

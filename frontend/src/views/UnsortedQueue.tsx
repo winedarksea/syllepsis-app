@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
+import { PageHeader } from '../components/PageHeader';
 import type { NoteDto, ObjectType, TimelineDateField, NoteVisibility } from '../types';
 import './UnsortedQueue.css';
 
@@ -181,9 +182,7 @@ export function UnsortedQueue() {
 
   return (
     <div className="uq-root">
-      <div className="uq-header">
-        <h2 className="uq-title">Notebox</h2>
-        <div className="uq-header-actions">
+      <PageHeader title="Notebox">
           <div className="uq-filter-toggle">
             <button
               className={`uq-filter-btn ${filterMode === 'unsorted' ? 'active' : ''}`}
@@ -261,8 +260,7 @@ export function UnsortedQueue() {
               {showForm ? 'Cancel' : '+ New Note'}
             </button>
           )}
-        </div>
-      </div>
+      </PageHeader>
 
       {showForm && visibility === 'active' && (
         <NewNoteForm onCreate={handleCreate} />
