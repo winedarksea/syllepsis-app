@@ -184,10 +184,10 @@ impl SearchEngine {
             }
         }
         let body_len = note.body.chars().count();
-        if filter.min_body_len.map_or(false, |min| body_len < min) {
+        if filter.min_body_len.is_some_and(|min| body_len < min) {
             return false;
         }
-        if filter.max_body_len.map_or(false, |max| body_len > max) {
+        if filter.max_body_len.is_some_and(|max| body_len > max) {
             return false;
         }
         if !filter.object_types.is_empty() && !filter.object_types.contains(&note.object_type) {

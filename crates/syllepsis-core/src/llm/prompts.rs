@@ -12,31 +12,21 @@ use crate::llm::task::LlmTask;
 use crate::markdown::dialect::strip_comments;
 use crate::model::Note;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SummaryVariant {
+    #[default]
     Plain,
     Mnemonic,
     Acrostic,
 }
 
-impl Default for SummaryVariant {
-    fn default() -> Self {
-        SummaryVariant::Plain
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RewriteMode {
+    #[default]
     Standard,
     Simplify,
-}
-
-impl Default for RewriteMode {
-    fn default() -> Self {
-        RewriteMode::Standard
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -179,7 +179,7 @@ pub(crate) fn generate_cloud_proposal_for_state(
             .map_err(|e| e.to_string())?
     };
     let content = execute_cloud_prompt(&KeyringCredentialStore, &prompt)?;
-    proposal_from_completed_prompt(&state, prompt, content)
+    proposal_from_completed_prompt(state, prompt, content)
 }
 
 fn provider_descriptors() -> Vec<CloudLlmProviderDescriptor> {

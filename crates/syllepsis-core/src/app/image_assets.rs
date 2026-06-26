@@ -22,6 +22,8 @@ struct InspectedImage {
     dimensions: (u32, u32),
 }
 
+type TrackedAssetInspection = (ObjectType, (u32, u32), String);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportedAsset {
     pub uuid: String,
@@ -128,7 +130,7 @@ pub fn asset_file(book: &Book, asset_uuid: &str) -> CoreResult<Option<(PathBuf, 
 pub fn inspect_tracked_asset(
     book: &Book,
     asset_uuid: &str,
-) -> CoreResult<Option<(ObjectType, (u32, u32), String)>> {
+) -> CoreResult<Option<TrackedAssetInspection>> {
     let registry = AssetRegistry::scan(&book.root)?;
     let Some(relative_path) = registry.resolve(asset_uuid) else {
         return Ok(None);

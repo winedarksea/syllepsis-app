@@ -361,7 +361,7 @@ impl Default for LocalAiWorker {
 }
 
 enum NextJob {
-    Llm(LlmJob),
+    Llm(Box<LlmJob>),
     Query(QueryJob),
     Note(NoteJob),
 }
@@ -388,7 +388,7 @@ fn worker_loop(shared: Arc<Shared>) {
                 let power = detect_power_source();
                 if let Some(job) = state.llm_jobs.pop_front() {
                     state.current_job = Some(format!("llm:{}", job.task.as_str()));
-                    break NextJob::Llm(job);
+                    break NextJob::Llm(Box::new(job));
                 }
                 if let Some(job) = state.query_jobs.pop_front() {
                     state.current_job = Some("embedding:search-query".into());
