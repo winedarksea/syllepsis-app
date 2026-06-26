@@ -7,6 +7,7 @@ import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
+import { WorldLocationHelper } from '../components/WorldLocationHelper';
 import type { NoteDto, Category, CategoryEmbeddingStats } from '../types';
 import './CategoryView.css';
 
@@ -58,14 +59,15 @@ function CategoryEditor({ cat, onSave, onCancel }: { cat: Category; onSave: (upd
           {HEADING_LEVELS.map((l) => <option key={l} value={l}>H{l}</option>)}
         </select>
       </label>
-      <label className="cv-edit-field">
+      <div className="cv-edit-field">
         <span>Location token</span>
         <input
           value={location}
           onChange={(e) => setLocation(e.target.value)}
           placeholder="e.g. earth/47.6,-122.3"
         />
-      </label>
+        <WorldLocationHelper onApply={setLocation} />
+      </div>
       <div className="cv-edit-actions">
         <button className="cv-edit-btn" onClick={onCancel} disabled={busy}>Cancel</button>
         <button className="cv-edit-btn cv-edit-btn-primary" onClick={submit} disabled={busy}>
