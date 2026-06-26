@@ -269,6 +269,35 @@
   white-space: inherit;
 }
 
+.bv-repair-callout {
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+}
+
+.bv-repair-callout button {
+  flex-shrink: 0;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+  background: var(--color-surface);
+}
+
+.bv-repair-callout button:hover {
+  border-color: var(--color-accent);
+}
+
 .bv-empty-body {
   color: var(--color-text-tertiary);
   font-style: italic;

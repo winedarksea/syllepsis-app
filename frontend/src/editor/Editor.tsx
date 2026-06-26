@@ -29,6 +29,7 @@ import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
+import { detectAccidentalWholeNoteCodeFence } from '../lib/wholeNoteFence';
 import type { Category, LookupEntry, NoteDto, NoteEmbeddingDetails, NoteNeighbors, NoteScreenMode, NoteSyncActivity } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import { MetaPanel } from './MetaPanel';
@@ -525,10 +526,28 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
     markDirty();
   }, [markDirty]);
 
+  const unwrapWholeNoteFence = useCallback(() => {
+    const detected = detectAccidentalWholeNoteCodeFence(
+      modeRef.current === 'source' ? rawTextRef.current : body,
+    );
+    if (!detected) return;
+    setBody(detected.innerMarkdown);
+    setRawText(detected.innerMarkdown);
+    getCurrentBody.current = () => detected.innerMarkdown;
+    markDirty();
+  }, [body, markDirty]);
+
   const bodyForRead = useMemo(
     () => mode === 'source' ? rawText : mode === 'read' ? body : getCurrentBody.current(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [mode, rawText, revision, body],
+  );
+
+  const accidentalWholeNoteFence = useMemo(
+    () => (mode === 'read' || mode === 'source')
+      ? detectAccidentalWholeNoteCodeFence(bodyForRead)
+      : null,
+    [bodyForRead, mode],
   );
 
   useEffect(() => {
@@ -792,6 +811,15 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
         <span className="editor-body-label">{isTable ? 'Data' : (isImageObject ? 'Description' : 'Body')}</span>
         <BodyStats count={charCount} visible={mode !== 'read' && !isImageObject} />
       </div>
+
+      {accidentalWholeNoteFence && !isTable && !isImageObject && (
+        <div className="editor-repair-banner">
+          <span>This note is stored as one fenced code block, so its markdown is shown as code.</span>
+          <button type="button" onClick={unwrapWholeNoteFence}>
+            Unwrap outer fence
+          </button>
+        </div>
+      )}
 
       {isImageObject ? (
         <div className="editor-image-object">

@@ -494,13 +494,15 @@ fn split_list_block(
 }
 
 fn collect_code_block(lines: &[&str], start: usize) -> (String, usize, bool) {
-    let fence = fence_marker(lines[start]).unwrap_or("```");
+    let Some(fence) = fence_marker(lines[start]) else {
+        return (lines[start].to_string(), start + 1, false);
+    };
     let mut body = Vec::new();
     body.push(lines[start]);
     let mut i = start + 1;
     while i < lines.len() {
         body.push(lines[i]);
-        if lines[i].trim_start().starts_with(fence) {
+        if fence_closes(lines[i], fence) {
             return (body.join("\n"), i + 1, true);
         }
         i += 1;
@@ -630,15 +632,39 @@ fn is_fence_start(line: &str) -> bool {
     fence_marker(line).is_some()
 }
 
-fn fence_marker(line: &str) -> Option<&'static str> {
+#[derive(Debug, Clone, Copy)]
+struct FenceMarker {
+    ch: char,
+    len: usize,
+}
+
+fn fence_marker(line: &str) -> Option<FenceMarker> {
     let trimmed = line.trim_start();
-    if trimmed.starts_with("```") {
-        Some("```")
-    } else if trimmed.starts_with("~~~") {
-        Some("~~~")
+    let ch = trimmed.chars().next()?;
+    if ch != '`' && ch != '~' {
+        return None;
+    }
+    let len = trimmed.chars().take_while(|c| *c == ch).count();
+    if len < 3 {
+        return None;
+    }
+    if ch == '`' || ch == '~' {
+        Some(FenceMarker { ch, len })
     } else {
         None
     }
+}
+
+fn fence_closes(line: &str, opener: FenceMarker) -> bool {
+    let trimmed = line.trim_start();
+    let close_len = trimmed.chars().take_while(|c| *c == opener.ch).count();
+    if close_len < opener.len {
+        return false;
+    }
+    trimmed
+        .chars()
+        .skip(close_len)
+        .all(|ch| ch.is_ascii_whitespace())
 }
 
 fn is_table_start(lines: &[&str], index: usize) -> bool {
@@ -856,6 +882,27 @@ mod tests {
         assert_eq!(preview.items.len(), 3);
         assert_eq!(preview.items[1].block_kind, TextImportBlockKind::Code);
         assert!(preview.items[1].body.contains("fn main"));
+    }
+
+    #[test]
+    fn paragraph_split_respects_long_outer_code_fence() {
+        let input = "Before.\n\n````\n# Notes\n\n```python\nprint('nested')\n```\n````\n\nAfter.";
+        let preview = preview_text_import(input, &defaults(TextImportSplitMode::Paragraph));
+        assert_eq!(preview.items.len(), 3);
+        assert_eq!(preview.items[1].block_kind, TextImportBlockKind::Code);
+        assert!(preview.items[1].body.contains("```python"));
+        assert!(preview.items[1].body.contains("````"));
+        assert_eq!(preview.items[2].body, "After.");
+    }
+
+    #[test]
+    fn paragraph_split_does_not_close_tilde_fence_on_backticks() {
+        let input = "~~~~\n```python\nprint('nested')\n```\n~~~~\n\nAfter.";
+        let preview = preview_text_import(input, &defaults(TextImportSplitMode::Paragraph));
+        assert_eq!(preview.items.len(), 2);
+        assert_eq!(preview.items[0].block_kind, TextImportBlockKind::Code);
+        assert!(preview.items[0].body.contains("```python"));
+        assert_eq!(preview.items[1].body, "After.");
     }
 
     #[test]

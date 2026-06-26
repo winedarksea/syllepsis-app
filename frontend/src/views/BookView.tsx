@@ -6,6 +6,7 @@ import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
+import { detectAccidentalWholeNoteCodeFence } from '../lib/wholeNoteFence';
 import type { RenderItem } from '../types';
 import './BookView.css';
 
@@ -147,6 +148,7 @@ export function BookView() {
             const isListItem = note.list_depth > 0;
             const indent = isListItem ? (note.list_depth - 1) * 24 : note.indented ? 24 : 0;
             const content = note.body || note.summary;
+            const accidentalWholeNoteFence = detectAccidentalWholeNoteCodeFence(content);
 
             return (
               <div
@@ -167,6 +169,20 @@ export function BookView() {
                   <span className="bv-list-marker">{note.numbered ? '1.' : '•'}</span>
                 )}
                 <div className="bv-note-body">
+                  {accidentalWholeNoteFence && (
+                    <div className="bv-repair-callout">
+                      <span>This note is stored as one fenced code block.</span>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openEditor(note.id, 'source');
+                        }}
+                      >
+                        Open source to repair
+                      </button>
+                    </div>
+                  )}
                   {content.trim()
                     ? <MarkdownRenderer markdown={content} className="bv-rendered-note" />
                     : <span className="bv-empty-body">(empty)</span>}
