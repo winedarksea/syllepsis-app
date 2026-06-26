@@ -120,6 +120,70 @@ export interface NoteDto {
   metadata: Metadata;
 }
 
+export type NoteScreenMode = 'read' | 'edit' | 'source';
+
+export interface NoteNeighborSummary {
+  id: string;
+  title: string;
+  summary: string;
+}
+
+export interface NoteNeighbors {
+  previous?: NoteNeighborSummary | null;
+  next?: NoteNeighborSummary | null;
+}
+
+export type NoteTokenCountMethod = 'embedding_tokenizer' | 'shared_tokenizer';
+
+export interface NoteTokenCount {
+  count: number;
+  method: NoteTokenCountMethod;
+  warning: boolean;
+}
+
+export interface NoteEmbeddingDetails {
+  status: string;
+  generated_at_unix_ms?: number | null;
+  model_id?: string | null;
+  dimensions?: number | null;
+  summary_vector?: number[] | null;
+  full_note_vector?: number[] | null;
+}
+
+export interface MergeNotesRequest {
+  target_note_id: string;
+  source_note_ids: string[];
+}
+
+export interface SplitNoteRequest {
+  note_id: string;
+  split_at: number;
+  second_title?: string | null;
+}
+
+export interface SplitNoteResult {
+  first: NoteDto;
+  second: NoteDto;
+}
+
+export interface QueuedLlmJobRequest {
+  target_note_id: string;
+  task: LlmTask;
+  model_override?: ModelRef | null;
+  store_result_as_commentary: boolean;
+}
+
+export type QueuedLlmJobStatus = 'queued' | 'running' | 'complete' | 'failed';
+
+export interface QueuedLlmJobResult {
+  job_id: string;
+  status: QueuedLlmJobStatus;
+  target_note_id: string;
+  task: LlmTask;
+  proposal?: Proposal | null;
+  error?: string | null;
+}
+
 export interface CreateNoteOptions {
   vanishing?: boolean;
   vanish_days?: number;

@@ -16,6 +16,9 @@ export function RelatedCarousel({ noteId }: Props) {
   const { openEditor } = useStore();
   const [related, setRelated] = useState<RelatedNote[]>([]);
   const [loadedForNoteId, setLoadedForNoteId] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches,
+  );
 
   const loading = loadedForNoteId !== noteId;
 
@@ -42,24 +45,28 @@ export function RelatedCarousel({ noteId }: Props) {
 
   return (
     <div className="rc-root">
-      <div className="rc-label">Related notes</div>
-      <div className="rc-track">
-        {related.map((r) => (
-          <button
-            key={r.note_id}
-            className="rc-card"
-            onClick={() => openEditor(r.note_id)}
-            title={`${Math.round(r.similarity * 100)}% similar`}
-          >
-            <div className="rc-card-title">{displayTitle(r.title, r.summary)}</div>
-            {r.summary && <div className="rc-card-summary">{r.summary}</div>}
-            <div className="rc-card-foot">
-              <span className="rc-sim">{Math.round(r.similarity * 100)}%</span>
-              {r.shares_category && <span className="rc-shared" title="Shares a category">#</span>}
-            </div>
-          </button>
-        ))}
-      </div>
+      <button className="rc-label rc-toggle" onClick={() => setCollapsed((value) => !value)}>
+        Related notes {collapsed ? `(${related.length})` : ''}
+      </button>
+      {!collapsed && (
+        <div className="rc-track">
+          {related.map((r) => (
+            <button
+              key={r.note_id}
+              className="rc-card"
+              onClick={() => openEditor(r.note_id)}
+              title={`${Math.round(r.similarity * 100)}% similar`}
+            >
+              <div className="rc-card-title">{displayTitle(r.title, r.summary)}</div>
+              {r.summary && <div className="rc-card-summary">{r.summary}</div>}
+              <div className="rc-card-foot">
+                <span className="rc-sim">{Math.round(r.similarity * 100)}%</span>
+                {r.shares_category && <span className="rc-shared" title="Shares a category">#</span>}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

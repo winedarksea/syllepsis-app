@@ -4,6 +4,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   BookInfo, TrackedBookInfo, Category, NoteDto, ObjectType, PriorEdge, RenderItem,
+  NoteNeighbors, NoteTokenCount, NoteEmbeddingDetails, MergeNotesRequest, SplitNoteRequest, SplitNoteResult,
   SearchResults, RelatedNote, EmbeddingDiagnostics, CategoryEmbeddingStats,
   GraphAnalysisRequest, GraphAnalysisResult,
   LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, CloudLlmPrompt, CloudLlmCompletion,
@@ -66,6 +67,9 @@ export const api = {
   bookView: () => invoke<RenderItem[]>('book_view'),
   unsortedNotes: () => invoke<NoteDto[]>('unsorted_notes'),
   getNote: (id: string) => invoke<NoteDto>('get_note', { id }),
+  renderNoteMarkdown: (request: { noteId?: string | null; markdown?: string | null }) =>
+    invoke<string>('render_note_markdown', { request }),
+  noteNeighbors: (noteId: string) => invoke<NoteNeighbors>('note_neighbors', { noteId }),
   listNotes: (visibility?: NoteVisibility) =>
     invoke<NoteDto[]>('list_notes', { visibility: visibility ?? null }),
   createNote: (objectType: ObjectType, title: string, inheritFrom?: string, options?: CreateNoteOptions) =>
@@ -91,6 +95,12 @@ export const api = {
   readTableData: (noteId: string) => invoke<string[][]>('read_table_data', { noteId }),
   saveTableData: (noteId: string, rows: string[][]) =>
     invoke<void>('save_table_data', { noteId, rows }),
+  noteTokenCount: (request: { noteId?: string | null; text?: string | null }) =>
+    invoke<NoteTokenCount>('note_token_count', { request }),
+  noteEmbeddingDetails: (noteId: string) =>
+    invoke<NoteEmbeddingDetails>('note_embedding_details', { noteId }),
+  mergeNotes: (request: MergeNotesRequest) => invoke<NoteDto>('merge_notes', { request }),
+  splitNote: (request: SplitNoteRequest) => invoke<SplitNoteResult>('split_note', { request }),
 
   allCategories: () => invoke<Category[]>('all_categories'),
   createCategory: (category: Category) => invoke<void>('create_category', { category }),

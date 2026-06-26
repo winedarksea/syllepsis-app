@@ -50,6 +50,8 @@ pub use verify::{verify_manifest, FileIntegrity};
 
 #[cfg(feature = "onnx")]
 pub use http::HttpModelFetcher;
+#[cfg(feature = "onnx")]
+pub use tokenizer::ModelTokenizer;
 
 /// A snapshot of how a local model is set up to run, surfaced in the Diagnostics view so the user
 /// can see which model, precision, and hardware backend are in play — and whether inference fell

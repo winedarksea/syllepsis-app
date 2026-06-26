@@ -13,6 +13,12 @@
   margin-bottom: var(--sp-2);
 }
 
+.rc-toggle {
+  display: inline-flex;
+  margin-bottom: var(--sp-2);
+}
+.rc-toggle:hover { color: var(--color-text-secondary); }
+
 .rc-state {
   padding: var(--sp-3) var(--sp-6);
   font-size: var(--font-size-sm);

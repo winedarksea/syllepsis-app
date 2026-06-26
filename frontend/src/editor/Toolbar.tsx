@@ -70,6 +70,29 @@ export function Toolbar() {
     setSyntaxOpen(false);
   }, [editor]);
 
+  const formatSelectedLinesAsList = useCallback((ordered: boolean) => {
+    let handled = false;
+    editor.update(() => {
+      const selection = $getSelection();
+      if (!$isRangeSelection(selection)) return;
+      const text = selection.getTextContent();
+      if (!text.includes('\n')) return;
+      const lines = text
+        .split(/\r?\n/)
+        .map((line, index) => {
+          const trimmed = line.trim();
+          if (!trimmed) return '';
+          return ordered ? `${index + 1}. ${trimmed}` : `- ${trimmed}`;
+        })
+        .join('\n');
+      selection.insertText(lines);
+      handled = true;
+    });
+    if (!handled) {
+      editor.dispatchCommand(ordered ? INSERT_ORDERED_LIST_COMMAND : INSERT_UNORDERED_LIST_COMMAND, undefined);
+    }
+  }, [editor]);
+
   return (
     <div className="editor-format-toolbar">
       {/* Inline marks */}
@@ -111,14 +134,14 @@ export function Toolbar() {
       <button
         title="Bullet list"
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)}
+        onClick={() => formatSelectedLinesAsList(false)}
       >
         <Icon name="format_list_bulleted" size={18} />
       </button>
       <button
         title="Numbered list"
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)}
+        onClick={() => formatSelectedLinesAsList(true)}
       >
         <Icon name="format_list_numbered" size={18} />
       </button>

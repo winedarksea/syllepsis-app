@@ -374,7 +374,7 @@ function WizardShell({ title, onCancel, children }: { title: string; onCancel: (
 // Main workspace (book is open)
 // ──────────────────────────────────────────────
 function Workspace() {
-  const { view, editingNoteId, setCategories, setUnsortedCount, openEditor, setPluginRenderLanguages, setPluginsLoaded } = useStore();
+  const { view, editingNoteId, editingMode, setCategories, setUnsortedCount, openEditor, setPluginRenderLanguages, setPluginsLoaded } = useStore();
 
   // Refresh sidebar data on view change (i.e. when returning from the editor).
   useEffect(() => {
@@ -399,7 +399,7 @@ function Workspace() {
 
   const handleNewNote = useCallback(async (type: ObjectType = 'note') => {
     const note = await api.createNote(type, '');
-    openEditor(note.id);
+    openEditor(note.id, 'edit');
   }, [openEditor]);
 
   const handleImportImage = useCallback(async () => {
@@ -410,7 +410,7 @@ function Workspace() {
     });
     if (!selected || typeof selected !== 'string') return;
     const note = await api.importImageObject(selected);
-    openEditor(note.id);
+    openEditor(note.id, 'edit');
   }, [openEditor]);
 
   return (
@@ -418,7 +418,7 @@ function Workspace() {
       <Sidebar onNewNote={handleNewNote} onImportImage={handleImportImage} />
       <main className="workspace-main">
         {view === 'editor' && editingNoteId ? (
-          <Editor noteId={editingNoteId} />
+          <Editor noteId={editingNoteId} initialMode={editingMode} />
         ) : view === 'book' ? (
           <BookView />
         ) : view === 'category' ? (

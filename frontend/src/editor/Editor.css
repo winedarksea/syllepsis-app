@@ -35,6 +35,23 @@
 }
 .editor-back:hover { color: var(--color-text); }
 
+.editor-nav-btn,
+.editor-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+.editor-nav-btn:hover:not(:disabled),
+.editor-tool-btn:hover:not(:disabled) { color: var(--color-text); border-color: var(--color-accent); }
+.editor-nav-btn:disabled { opacity: 0.35; cursor: default; }
+
 .editor-toolbar-center {
   flex: 1;
   display: flex;
@@ -42,6 +59,23 @@
   justify-content: center;
   gap: var(--sp-2);
   min-width: 0;
+}
+
+.editor-mode-switcher {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.editor-mode-switcher button {
+  padding: 3px var(--sp-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-transform: capitalize;
+}
+.editor-mode-switcher button.active {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
 }
 
 .editor-type-badge {
@@ -156,6 +190,41 @@
   border: 1px solid var(--color-tag-border);
   border-radius: var(--radius-sm);
   padding: 1px var(--sp-2);
+}
+.editor-category-chip:hover { border-color: var(--color-accent); }
+
+.editor-find-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+  flex-shrink: 0;
+}
+.editor-find-bar input {
+  min-width: 180px;
+  max-width: 320px;
+  flex: 1;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+.editor-find-count,
+.editor-find-error {
+  min-width: 56px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+.editor-find-error { color: var(--color-error); }
+.editor-find-bar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-1);
+  color: var(--color-text-secondary);
 }
 
 /* AI writing tools */
@@ -400,6 +469,11 @@
   border-radius: var(--radius-sm);
   padding: 1px var(--sp-1) 1px var(--sp-2);
 }
+.meta-chip-link {
+  color: inherit;
+  font: inherit;
+}
+.meta-chip-link:hover { color: var(--color-accent); }
 .meta-chip-x {
   color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
@@ -423,6 +497,26 @@
   gap: var(--sp-1);
   padding: 0 var(--sp-6) var(--sp-1);
   flex-shrink: 0;
+}
+
+.editor-autocomplete-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.editor-autocomplete-menu button {
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+.editor-autocomplete-menu button:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
 }
 .editor-format-toolbar button {
   display: inline-flex;
@@ -460,6 +554,12 @@
   letter-spacing: 0.6px;
   color: var(--color-text-tertiary);
 }
+
+.editor-body-stats {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+.editor-body-stats.warning { color: var(--color-error); }
 
 .editor-raw-toggle {
   font-size: var(--font-size-xs);
@@ -499,6 +599,80 @@
 }
 .editor-body-wrap:focus-within {
   border-color: var(--color-accent);
+}
+
+.editor-read-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--sp-6) var(--sp-6);
+}
+.editor-read-body {
+  max-width: 780px;
+  margin: 0 auto;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-loose);
+  color: var(--color-text);
+}
+.editor-read-body p,
+.editor-read-body ul,
+.editor-read-body ol,
+.editor-read-body blockquote,
+.editor-read-body pre {
+  margin: 0 0 var(--sp-4);
+}
+.editor-read-body pre {
+  overflow-x: auto;
+  padding: var(--sp-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+}
+.editor-read-body a { color: var(--color-accent); text-decoration: underline; }
+.syl-cloze {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.4em;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border);
+  font: inherit;
+}
+.syl-cloze.revealed {
+  color: var(--color-text);
+  background: var(--color-tag-bg);
+}
+.note-find-hit {
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  color: inherit;
+}
+.note-find-hit.active {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.editor-advanced-meta {
+  margin-top: var(--sp-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+.editor-advanced-meta summary { cursor: pointer; }
+.editor-embedding-details,
+.editor-advanced-empty {
+  margin-top: var(--sp-2);
+  display: grid;
+  gap: var(--sp-1);
+}
+.editor-vector-preview code {
+  display: block;
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  padding: var(--sp-2);
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
 }
 
 .lexical-content-editable {
@@ -845,4 +1019,37 @@ pre.plugin-block {
   background: var(--color-bg);
   color: var(--color-text);
   font: inherit;
+}
+
+@media (max-width: 760px) {
+  .editor-toolbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .editor-toolbar-center {
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+  .editor-toolbar-actions {
+    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .editor-meta {
+    padding: var(--sp-4);
+  }
+  .editor-body-header {
+    padding: var(--sp-3) var(--sp-4) var(--sp-1);
+  }
+  .editor-body-wrap {
+    margin: 0 var(--sp-3) var(--sp-4);
+  }
+  .editor-read-wrap {
+    padding: 0 var(--sp-3) var(--sp-4);
+  }
+  .editor-tool-btn {
+    max-width: 72px;
+  }
 }

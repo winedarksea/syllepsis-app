@@ -82,6 +82,33 @@ pub struct CloudLlmCompletion {
     pub content: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueuedLlmJobRequest {
+    pub target_note_id: String,
+    pub task: LlmTask,
+    pub model_override: Option<ModelRef>,
+    pub store_result_as_commentary: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueuedLlmJobStatus {
+    Queued,
+    Running,
+    Complete,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueuedLlmJobResult {
+    pub job_id: String,
+    pub status: QueuedLlmJobStatus,
+    pub target_note_id: String,
+    pub task: LlmTask,
+    pub proposal: Option<Proposal>,
+    pub error: Option<String>,
+}
+
 /// Build the LLM service for this book, selecting the configured ONNX local model.
 fn service_for(book: &Book) -> CoreResult<LlmService> {
     let provider = select_llm_provider(book.models_root(), &book.config.llm)?;

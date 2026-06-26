@@ -8,15 +8,21 @@
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use crate::app::dto::NoteDto;
+use crate::embeddings::repository::configured_model_fingerprint;
+use crate::embeddings::{read_sidecar, StoredEmbedding};
 use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::markdown::dialect;
-use crate::model::metadata::LockMode;
+use crate::model::metadata::{LockMode, Metadata};
 use crate::model::{Category, Note, NoteVisibility, ObjectType, PriorEdge};
+use crate::publish;
 use crate::sort::{self, RenderItem};
 use crate::storage::{layout, Book, NoteStore};
+use pulldown_cmark::Options;
+use regex::Regex;
 
 /// Aggregate statistics about a book.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +44,56 @@ pub struct BookStats {
 pub struct CreateNoteOptions {
     pub vanishing: bool,
     pub vanish_days: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NoteNeighborSummary {
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NoteNeighbors {
+    pub previous: Option<NoteNeighborSummary>,
+    pub next: Option<NoteNeighborSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoteTokenCountMethod {
+    EmbeddingTokenizer,
+    SharedTokenizer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteTokenCount {
+    pub count: usize,
+    pub method: NoteTokenCountMethod,
+    pub warning: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NoteEmbeddingDetails {
+    pub status: String,
+    pub generated_at_unix_ms: Option<i64>,
+    pub model_id: Option<String>,
+    pub dimensions: Option<usize>,
+    pub summary_vector: Option<Vec<f32>>,
+    pub full_note_vector: Option<Vec<f32>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeNotesRequest {
+    pub target_note_id: String,
+    pub source_note_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SplitNoteRequest {
+    pub note_id: String,
+    pub split_at: usize,
+    pub second_title: Option<String>,
 }
 
 pub fn note_matches_visibility(note: &Note, visibility: NoteVisibility) -> bool {
@@ -85,6 +141,86 @@ pub fn export_html(
         &cleaned,
         render_code_block,
     ))
+}
+
+pub fn render_note_markdown(
+    book: &Book,
+    note_id: Option<&str>,
+    markdown: Option<&str>,
+    render_code_block: &dyn Fn(&str, &str) -> Option<String>,
+) -> CoreResult<String> {
+    let body = match (note_id, markdown) {
+        (_, Some(markdown)) => markdown.to_string(),
+        (Some(note_id), None) => get_note(book, note_id)?.body,
+        (None, None) => String::new(),
+    };
+    let cleaned = dialect::strip_comments(&body);
+    let with_clozes = renderable_cloze_markup(&cleaned);
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    let mut html = String::new();
+    publish::push_html_with_plugins(&mut html, &with_clozes, options, render_code_block);
+    Ok(html)
+}
+
+static CLOZE_MARKUP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\|\|(.+?)\|\|").unwrap());
+
+fn renderable_cloze_markup(markdown: &str) -> String {
+    CLOZE_MARKUP_RE
+        .replace_all(markdown, |captures: &regex::Captures<'_>| {
+            let cloze = parse_cloze_markup_inner(&captures[1]);
+            let label = cloze
+                .hint
+                .filter(|hint| !hint.trim().is_empty())
+                .unwrap_or_else(|| "show".to_string());
+            format!(
+                "<button type=\"button\" class=\"syl-cloze\" data-hidden=\"{}\">{}</button>",
+                escape_html_attr(&cloze.hidden),
+                escape_html_text(&label)
+            )
+        })
+        .into_owned()
+}
+
+struct ClozeMarkup {
+    hidden: String,
+    hint: Option<String>,
+}
+
+fn parse_cloze_markup_inner(inner: &str) -> ClozeMarkup {
+    let remainder = match inner.split_once("::") {
+        Some((group, rest))
+            if !group.is_empty()
+                && group
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_') =>
+        {
+            rest
+        }
+        _ => inner,
+    };
+    match remainder.split_once('|') {
+        Some((hidden, hint)) => ClozeMarkup {
+            hidden: hidden.to_string(),
+            hint: Some(hint.to_string()),
+        },
+        None => ClozeMarkup {
+            hidden: remainder.to_string(),
+            hint: None,
+        },
+    }
+}
+
+fn escape_html_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn escape_html_attr(value: &str) -> String {
+    escape_html_text(value).replace('"', "&quot;")
 }
 
 /// Aggregate statistics about a book.
@@ -173,6 +309,43 @@ pub fn list_notes_with_visibility(
         .collect();
     notes.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     Ok(notes.iter().map(NoteDto::from_note).collect())
+}
+
+pub fn note_neighbors(book: &Book, id: &str) -> CoreResult<NoteNeighbors> {
+    let target = NoteId::parse(id)?;
+    let items = book_view(book)?;
+    let ordered_ids: Vec<NoteId> = items
+        .into_iter()
+        .filter_map(|item| match item {
+            RenderItem::Note(note) => Some(note.id),
+            RenderItem::Heading { .. } => None,
+        })
+        .collect();
+    let Some(index) = ordered_ids
+        .iter()
+        .position(|candidate| candidate == &target)
+    else {
+        return Ok(NoteNeighbors {
+            previous: None,
+            next: None,
+        });
+    };
+    let previous = index
+        .checked_sub(1)
+        .and_then(|previous_index| neighbor_summary(book, &ordered_ids[previous_index]).ok());
+    let next = ordered_ids
+        .get(index + 1)
+        .and_then(|next_id| neighbor_summary(book, next_id).ok());
+    Ok(NoteNeighbors { previous, next })
+}
+
+fn neighbor_summary(book: &Book, id: &NoteId) -> CoreResult<NoteNeighborSummary> {
+    let note = book.store.read_note(id)?;
+    Ok(NoteNeighborSummary {
+        id: note.id.to_string(),
+        title: note.title,
+        summary: note.summary,
+    })
 }
 
 /// Fetch a single note by id string.
@@ -314,6 +487,146 @@ pub fn fork_note(book: &Book, id: &str) -> CoreResult<NoteDto> {
 /// `lifecycle.marked_for_deletion_at` field already exists to support it.)
 pub fn delete_note(book: &Book, id: &str) -> CoreResult<()> {
     book.delete_note(&NoteId::parse(id)?)
+}
+
+pub fn note_token_count_from_shared_tokenizer(text: &str) -> NoteTokenCount {
+    let count = crate::text::tokenize(text).len();
+    NoteTokenCount {
+        count,
+        method: NoteTokenCountMethod::SharedTokenizer,
+        warning: count > 2_000,
+    }
+}
+
+pub fn note_embedding_details(book: &Book, id: &str) -> CoreResult<NoteEmbeddingDetails> {
+    let note_id = NoteId::parse(id)?;
+    let note = book.store.read_note(&note_id)?;
+    let expected = configured_model_fingerprint(&book.config.embedding)?;
+    let path = layout::embedding_sidecar_path(&book.root, &note.id);
+    let sidecar = match read_sidecar(&path) {
+        Ok(sidecar) => sidecar,
+        Err(CoreError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(NoteEmbeddingDetails {
+                status: "missing".to_string(),
+                generated_at_unix_ms: None,
+                model_id: Some(expected.model_id),
+                dimensions: Some(expected.dimensions),
+                summary_vector: None,
+                full_note_vector: None,
+            });
+        }
+        Err(error) => {
+            return Ok(NoteEmbeddingDetails {
+                status: format!("unreadable: {error}"),
+                generated_at_unix_ms: None,
+                model_id: Some(expected.model_id),
+                dimensions: Some(expected.dimensions),
+                summary_vector: None,
+                full_note_vector: None,
+            });
+        }
+    };
+    let status = if sidecar.note_ulid != note.id.ulid() || !sidecar.is_compatible_with(&expected) {
+        "incompatible"
+    } else if !sidecar.summary_is_fresh(&note) || !sidecar.full_note_is_fresh(&note) {
+        "stale"
+    } else {
+        "fresh"
+    };
+    Ok(NoteEmbeddingDetails {
+        status: status.to_string(),
+        generated_at_unix_ms: Some(sidecar.generated_at_unix_ms),
+        model_id: Some(sidecar.model.model_id),
+        dimensions: Some(sidecar.model.dimensions),
+        summary_vector: sidecar.summary.as_ref().map(stored_vector),
+        full_note_vector: sidecar.full_note.as_ref().map(stored_vector),
+    })
+}
+
+fn stored_vector(stored: &StoredEmbedding) -> Vec<f32> {
+    stored.vector.0.clone()
+}
+
+pub fn merge_notes(book: &Book, request: MergeNotesRequest) -> CoreResult<NoteDto> {
+    let target_id = NoteId::parse(&request.target_note_id)?;
+    let mut target = book.store.read_note(&target_id)?;
+    let mut merged_sections = vec![target.body.trim().to_string()]
+        .into_iter()
+        .filter(|section| !section.is_empty())
+        .collect::<Vec<_>>();
+    for source_id in &request.source_note_ids {
+        if source_id == &request.target_note_id {
+            continue;
+        }
+        let source = book.store.read_note(&NoteId::parse(source_id)?)?;
+        if !source.summary.trim().is_empty() && target.summary.trim().is_empty() {
+            target.summary = source.summary.clone();
+        }
+        merge_string_set(&mut target.categories, &source.categories);
+        if target.location.is_none() {
+            target.location = source.location.clone();
+        }
+        if !source.body.trim().is_empty() {
+            merged_sections.push(source.body.trim().to_string());
+        }
+    }
+    target.body = merged_sections.join("\n\n---\n\n");
+    target.metadata = merge_metadata_for_note_change(target.metadata);
+    merge_inline_categories(&mut target);
+    ensure_categories_declared(book, &target.categories)?;
+    book.save_note(&target)?;
+    Ok(NoteDto::from_note(&target))
+}
+
+fn merge_string_set(target: &mut Vec<String>, source: &[String]) {
+    for item in source {
+        if !target.contains(item) {
+            target.push(item.clone());
+        }
+    }
+}
+
+fn merge_metadata_for_note_change(mut metadata: Metadata) -> Metadata {
+    metadata.dates.updated = Utc::now();
+    metadata
+}
+
+pub fn split_note(book: &Book, request: SplitNoteRequest) -> CoreResult<(NoteDto, NoteDto)> {
+    let note_id = NoteId::parse(&request.note_id)?;
+    let mut first = book.store.read_note(&note_id)?;
+    let split_at = request.split_at.min(first.body.len());
+    if !first.body.is_char_boundary(split_at) {
+        return Err(CoreError::InvalidBook(
+            "split offset must be a UTF-8 character boundary".to_string(),
+        ));
+    }
+    let second_body = first.body[split_at..].trim_start().to_string();
+    first.body = first.body[..split_at].trim_end().to_string();
+    first.metadata.dates.updated = Utc::now();
+    book.save_note(&first)?;
+
+    let mut second = book.new_note(
+        first.object_type,
+        request
+            .second_title
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or_else(|| format!("{} (split)", first.title)),
+    )?;
+    second.summary = first.summary.clone();
+    second.body = second_body;
+    second.categories = first.categories.clone();
+    second.location = first.location.clone();
+    second.prior = Some(PriorEdge {
+        target: crate::model::PriorRef::Note(first.id.clone()),
+        kind: crate::model::PriorKind::NewParagraph,
+    });
+    second.metadata.classification = first.metadata.classification.clone();
+    second.metadata.lifecycle = first.metadata.lifecycle.clone();
+    second.metadata.packs = first.metadata.packs.clone();
+    second.metadata.kanban = first.metadata.kanban.clone();
+    book.save_note(&second)?;
+
+    Ok((NoteDto::from_note(&first), NoteDto::from_note(&second)))
 }
 
 /// Create or overwrite a category.
@@ -543,5 +856,113 @@ mod tests {
         let queue = unsorted_notes(&book).unwrap();
         assert_eq!(queue.len(), 1);
         assert_eq!(queue[0].title, "capture");
+    }
+
+    #[test]
+    fn renders_note_markdown_with_comments_removed_and_clozes_hidden() {
+        let (_dir, book) = book();
+        let html = render_note_markdown(
+            &book,
+            None,
+            Some("Keep %%private%% **public** and ||c1::hidden|hint||."),
+            &|_, _| None,
+        )
+        .unwrap();
+
+        assert!(html.contains("<strong>public</strong>"));
+        assert!(!html.contains("private"));
+        assert!(html.contains("class=\"syl-cloze\""));
+        assert!(html.contains("data-hidden=\"hidden\""));
+        assert!(html.contains(">hint</button>"));
+    }
+
+    #[test]
+    fn note_neighbors_follow_book_order() {
+        let (_dir, book) = book();
+        create_category(&book, Category::new("chapter")).unwrap();
+        let mut first = create_note(&book, ObjectType::Note, "first", None).unwrap();
+        first.prior = Some(PriorEdge::starts_category("chapter"));
+        first = update_note(&book, first).unwrap();
+        let mut second = create_note(&book, ObjectType::Note, "second", None).unwrap();
+        second.prior = Some(PriorEdge::follows(
+            NoteId::parse(&first.id).unwrap(),
+            crate::model::PriorKind::NewParagraph,
+        ));
+        second = update_note(&book, second).unwrap();
+
+        let first_neighbors = note_neighbors(&book, &first.id).unwrap();
+        assert!(first_neighbors.previous.is_none());
+        assert_eq!(first_neighbors.next.unwrap().id, second.id);
+
+        let second_neighbors = note_neighbors(&book, &second.id).unwrap();
+        assert_eq!(second_neighbors.previous.unwrap().id, first.id);
+        assert!(second_neighbors.next.is_none());
+    }
+
+    #[test]
+    fn shared_token_count_warns_above_two_thousand_tokens() {
+        let text = (0..2001)
+            .map(|index| format!("word{index}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let count = note_token_count_from_shared_tokenizer(&text);
+        assert_eq!(count.count, 2001);
+        assert_eq!(count.method, NoteTokenCountMethod::SharedTokenizer);
+        assert!(count.warning);
+    }
+
+    #[test]
+    fn merge_notes_concatenates_body_and_categories() {
+        let (_dir, book) = book();
+        let mut target = create_note(&book, ObjectType::Note, "target", None).unwrap();
+        target.body = "Target body".into();
+        target.categories = vec!["a".into()];
+        target = update_note(&book, target).unwrap();
+        let mut source = create_note(&book, ObjectType::Note, "source", None).unwrap();
+        source.body = "Source body".into();
+        source.categories = vec!["b".into()];
+        source = update_note(&book, source).unwrap();
+
+        let merged = merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: target.id.clone(),
+                source_note_ids: vec![source.id],
+            },
+        )
+        .unwrap();
+
+        assert!(merged.body.contains("Target body"));
+        assert!(merged.body.contains("Source body"));
+        assert!(merged.categories.contains(&"a".into()));
+        assert!(merged.categories.contains(&"b".into()));
+    }
+
+    #[test]
+    fn split_note_creates_second_note_after_first() {
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "whole", None).unwrap();
+        note.body = "first half\n\nsecond half".into();
+        note.categories = vec!["topic".into()];
+        note = update_note(&book, note).unwrap();
+
+        let (first, second) = split_note(
+            &book,
+            SplitNoteRequest {
+                note_id: note.id.clone(),
+                split_at: "first half".len(),
+                second_title: Some("second".into()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(first.body, "first half");
+        assert_eq!(second.title, "second");
+        assert_eq!(second.body, "second half");
+        assert_eq!(second.categories, vec!["topic".to_string()]);
+        assert!(matches!(
+            second.prior.unwrap().target,
+            crate::model::PriorRef::Note(_)
+        ));
     }
 }

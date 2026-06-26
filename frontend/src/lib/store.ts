@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import type {
-  BookInfo, Category, GraphMode, TimelineColorBy, TimelineDateField, TimelineGranularity,
+  BookInfo, Category, GraphMode, NoteScreenMode, TimelineColorBy, TimelineDateField, TimelineGranularity,
 } from '../types';
 
 export type ClustersPreset = 'pillars' | 'communities' | 'density';
@@ -70,7 +70,8 @@ interface AppStore {
 
   // Note open in the editor
   editingNoteId: string | null;
-  openEditor: (id: string) => void;
+  editingMode: NoteScreenMode;
+  openEditor: (id: string, mode?: NoteScreenMode) => void;
   closeEditor: () => void;
 
   // Cached category list (refreshed when categories change)
@@ -170,6 +171,7 @@ export const useStore = create<AppStore>((set) => ({
     book: null,
     view: 'unsorted',
     editingNoteId: null,
+    editingMode: 'read',
     activeCategory: null,
     activeWorld: null,
     categories: [],
@@ -187,8 +189,9 @@ export const useStore = create<AppStore>((set) => ({
   setActiveWorld: (activeWorld) => set({ activeWorld }),
 
   editingNoteId: null,
-  openEditor: (id) => set({ editingNoteId: id, view: 'editor' }),
-  closeEditor: () => set({ editingNoteId: null, view: 'unsorted' }),
+  editingMode: 'read',
+  openEditor: (id, mode = 'read') => set({ editingNoteId: id, editingMode: mode, view: 'editor' }),
+  closeEditor: () => set({ editingNoteId: null, editingMode: 'read', view: 'unsorted' }),
 
   categories: [],
   setCategories: (categories) => set({ categories }),

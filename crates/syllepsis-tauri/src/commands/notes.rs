@@ -1,14 +1,16 @@
 //! Commands for note CRUD, the unsorted queue, and the continuous book view.
 
-use tauri::State;
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager, State};
 
 use syllepsis_core::app::{commands as app, dto::NoteDto, plugin as app_plugin};
 use syllepsis_core::model::{NoteVisibility, ObjectType, PriorEdge};
+use syllepsis_core::onnx::{self, ModelCache};
 use syllepsis_core::sort::RenderItem;
 use syllepsis_core::storage::NoteStore;
 
 use crate::commands::plugins::PluginRuntime;
-use crate::state::AppState;
+use crate::state::{models_root_from_app_data, AppState};
 
 macro_rules! with_book {
     ($state:expr, $book:ident, $body:expr) => {{
@@ -41,6 +43,51 @@ pub fn unsorted_notes(state: State<AppState>) -> Result<Vec<NoteDto>, String> {
 pub fn get_note(state: State<AppState>, id: String) -> Result<NoteDto, String> {
     with_book!(state, book, {
         app::get_note(book, &id).map_err(|e| e.to_string())
+    })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderNoteMarkdownRequest {
+    pub note_id: Option<String>,
+    pub markdown: Option<String>,
+}
+
+#[tauri::command]
+pub fn render_note_markdown(
+    state: State<AppState>,
+    plugins: State<PluginRuntime>,
+    request: RenderNoteMarkdownRequest,
+) -> Result<String, String> {
+    with_book!(state, book, {
+        plugins.host.set_book_root(Some(book.root.clone()));
+        let disabled = plugins.disabled_ids.lock().unwrap().clone();
+        app::render_note_markdown(
+            book,
+            request.note_id.as_deref(),
+            request.markdown.as_deref(),
+            &|lang, code| {
+                app_plugin::run_render_plugin(
+                    &plugins.host,
+                    &plugins.registry,
+                    &disabled,
+                    lang,
+                    code,
+                )
+                .ok()
+            },
+        )
+        .map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
+pub fn note_neighbors(
+    state: State<AppState>,
+    note_id: String,
+) -> Result<app::NoteNeighbors, String> {
+    with_book!(state, book, {
+        app::note_neighbors(book, &note_id).map_err(|e| e.to_string())
     })
 }
 
@@ -204,6 +251,116 @@ pub fn save_table_data(
 ) -> Result<(), String> {
     with_book!(state, book, {
         app::save_table_data(book, &note_id, rows).map_err(|e| e.to_string())
+    })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteTokenCountRequest {
+    pub note_id: Option<String>,
+    pub text: Option<String>,
+}
+
+#[tauri::command]
+pub fn note_token_count(
+    app_handle: AppHandle,
+    state: State<AppState>,
+    request: NoteTokenCountRequest,
+) -> Result<app::NoteTokenCount, String> {
+    let (text, embedding_model_id) = {
+        let guard = state.book.lock().unwrap();
+        let book = guard
+            .as_ref()
+            .ok_or_else(|| "no book is open".to_string())?;
+        let text = match (&request.text, &request.note_id) {
+            (Some(text), _) => text.clone(),
+            (None, Some(note_id)) => {
+                let note = app::get_note(book, note_id).map_err(|e| e.to_string())?;
+                note.body
+            }
+            (None, None) => String::new(),
+        };
+        (text, book.config.embedding.model_id.clone())
+    };
+    if let Ok(exact) = exact_embedding_token_count(&app_handle, &embedding_model_id, &text) {
+        return Ok(exact);
+    }
+    Ok(app::note_token_count_from_shared_tokenizer(&text))
+}
+
+fn exact_embedding_token_count(
+    app_handle: &AppHandle,
+    embedding_model_id: &str,
+    text: &str,
+) -> Result<app::NoteTokenCount, String> {
+    let manifest = onnx::builtin(embedding_model_id)
+        .ok_or_else(|| format!("unknown embedding model {embedding_model_id}"))?;
+    let tokenizer_file = manifest
+        .tokenizer_file()
+        .ok_or_else(|| format!("embedding model {embedding_model_id} has no tokenizer"))?;
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("resolve app data dir: {error}"))?;
+    let cache = ModelCache::new(models_root_from_app_data(&app_data_dir));
+    if !cache.is_cached(&manifest) {
+        return Err(format!(
+            "embedding model {embedding_model_id} is not cached"
+        ));
+    }
+    let tokenizer = onnx::ModelTokenizer::from_file(&cache.file_path(&manifest, tokenizer_file))
+        .map_err(|error| error.to_string())?;
+    let count = tokenizer
+        .encode(text, true)
+        .map_err(|error| error.to_string())?
+        .len();
+    Ok(app::NoteTokenCount {
+        count,
+        method: app::NoteTokenCountMethod::EmbeddingTokenizer,
+        warning: count > 2_000,
+    })
+}
+
+#[tauri::command]
+pub fn note_embedding_details(
+    state: State<AppState>,
+    note_id: String,
+) -> Result<app::NoteEmbeddingDetails, String> {
+    with_book!(state, book, {
+        app::note_embedding_details(book, &note_id).map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
+pub fn merge_notes(
+    state: State<AppState>,
+    request: app::MergeNotesRequest,
+) -> Result<NoteDto, String> {
+    with_book!(state, book, {
+        let updated = app::merge_notes(book, request).map_err(|e| e.to_string())?;
+        let _ = state.local_ai.enqueue_note(book, updated.id.clone(), false);
+        state.invalidate_graph_corpus();
+        Ok(updated)
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SplitNoteResult {
+    pub first: NoteDto,
+    pub second: NoteDto,
+}
+
+#[tauri::command]
+pub fn split_note(
+    state: State<AppState>,
+    request: app::SplitNoteRequest,
+) -> Result<SplitNoteResult, String> {
+    with_book!(state, book, {
+        let (first, second) = app::split_note(book, request).map_err(|e| e.to_string())?;
+        let _ = state.local_ai.enqueue_note(book, first.id.clone(), false);
+        let _ = state.local_ai.enqueue_note(book, second.id.clone(), false);
+        state.invalidate_graph_corpus();
+        Ok(SplitNoteResult { first, second })
     })
 }
 

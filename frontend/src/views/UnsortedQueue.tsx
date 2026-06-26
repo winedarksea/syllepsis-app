@@ -155,7 +155,7 @@ export function UnsortedQueue() {
     setNotes((prev) => [note, ...prev]);
     setUnsortedCount(notes.length + 1);
     setShowForm(false);
-    openEditor(note.id);
+    openEditor(note.id, 'edit');
   }, [openEditor, setUnsortedCount, notes.length]);
 
   const sortedNotes = useMemo(() => {

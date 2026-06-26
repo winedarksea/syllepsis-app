@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
+import { useStore } from '../lib/store';
 import type {
   NoteDto, Category, PriorKind, PriorRef, StatementType, Priority, FlexDate, World, NoteStatus,
 } from '../types';
@@ -41,6 +42,7 @@ interface Props {
 }
 
 export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
+  const { setActiveCategory, setView } = useStore();
   const [open, setOpen] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [worlds, setWorlds] = useState<World[]>([]);
@@ -116,7 +118,12 @@ export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
             <div className="meta-chips">
               {note.categories.map((c) => (
                 <span key={c} className="meta-chip">
-                  #{c}
+                  <button
+                    className="meta-chip-link"
+                    onClick={() => { setActiveCategory(c); setView('category'); }}
+                  >
+                    #{c}
+                  </button>
                   <button className="meta-chip-x" onClick={() => removeCategory(c)} aria-label={`Remove ${c}`}>×</button>
                 </span>
               ))}

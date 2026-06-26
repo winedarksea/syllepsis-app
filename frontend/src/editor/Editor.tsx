@@ -18,6 +18,7 @@ import { HeadingNode, QuoteNode } from '@lexical/rich-text';
 import { ListNode, ListItemNode } from '@lexical/list';
 import { CodeNode, CodeHighlightNode } from '@lexical/code-core';
 import { LinkNode } from '@lexical/link';
+import { $getSelection, $isRangeSelection } from 'lexical';
 import type { EditorState, LexicalEditor } from 'lexical';
 import { CategoryNode } from './nodes/CategoryNode';
 import { ClozeNode } from './nodes/ClozeNode';
@@ -27,7 +28,8 @@ import { Toolbar } from './Toolbar';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
-import type { NoteDto, NoteSyncActivity } from '../types';
+import { MarkdownRenderer } from '../components/MarkdownRenderer';
+import type { Category, LookupEntry, NoteDto, NoteEmbeddingDetails, NoteNeighbors, NoteScreenMode, NoteSyncActivity, NoteTokenCount } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import { MetaPanel } from './MetaPanel';
 import { LlmToolsMenu } from './LlmToolsMenu';
@@ -141,12 +143,117 @@ function SaveShortcutPlugin({ onSave }: { onSave: () => void }) {
   return null;
 }
 
+interface CompletionItem {
+  label: string;
+  insert: string;
+}
+
+function AutocompletePlugin({
+  categories,
+  notes,
+}: {
+  categories: Category[];
+  notes: NoteDto[];
+}) {
+  const [editor] = useLexicalComposerContext();
+  const [token, setToken] = useState('');
+  const [locations, setLocations] = useState<LookupEntry[]>([]);
+
+  useEffect(() => {
+    api.locationLookup().then(setLocations).catch(() => setLocations([]));
+  }, []);
+
+  useEffect(() => editor.registerUpdateListener(({ editorState }) => {
+    editorState.read(() => {
+      const selection = $getSelection();
+      if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
+        setToken('');
+        return;
+      }
+      const anchor = selection.anchor;
+      const text = anchor.getNode().getTextContent().slice(0, anchor.offset);
+      const match = text.match(/(#([\w-]*)|@([\w-]*)|(?:due|start|done|loc|waiting|blocked-by):([\w-]*))$/);
+      setToken(match?.[0] ?? '');
+    });
+  }), [editor]);
+
+  const completions = useMemo<CompletionItem[]>(() => {
+    if (!token) return [];
+    if (token.startsWith('#')) {
+      const prefix = token.slice(1).toLowerCase();
+      return categories
+        .filter((category) => category.name.toLowerCase().startsWith(prefix))
+        .slice(0, 6)
+        .map((category) => ({ label: `#${category.name}`, insert: `#${category.name}` }));
+    }
+    if (token.startsWith('@')) {
+      const prefix = token.slice(1).toLowerCase();
+      return notes
+        .filter((note) => note.id.toLowerCase().includes(prefix) || note.title.toLowerCase().includes(prefix))
+        .slice(0, 6)
+        .map((note) => ({ label: `${note.title || note.id}`, insert: `@${note.id}` }));
+    }
+    const [kind, value = ''] = token.split(':');
+    const prefix = value.toLowerCase();
+    if (kind === 'loc') {
+      return locations
+        .filter((location) => location.name.toLowerCase().startsWith(prefix))
+        .slice(0, 6)
+        .map((location) => ({ label: `loc:${location.name}`, insert: `loc:${location.name}` }));
+    }
+    if (kind === 'waiting' || kind === 'blocked-by') {
+      return notes
+        .filter((note) => note.type === 'todo')
+        .filter((note) => note.id.toLowerCase().includes(prefix) || note.title.toLowerCase().includes(prefix))
+        .slice(0, 6)
+        .map((note) => ({ label: `${kind}:${note.title || note.id}`, insert: `${kind}:${note.id}` }));
+    }
+    if (kind === 'due' || kind === 'start' || kind === 'done') {
+      const today = new Date();
+      const tomorrow = new Date(today.getTime() + 86_400_000);
+      const fmt = (date: Date) => date.toISOString().slice(0, 10);
+      return [
+        { label: `${kind}:${fmt(today)}`, insert: `${kind}:${fmt(today)}` },
+        { label: `${kind}:${fmt(tomorrow)}`, insert: `${kind}:${fmt(tomorrow)}` },
+      ];
+    }
+    return [];
+  }, [categories, locations, notes, token]);
+
+  const applyCompletion = useCallback((completion: CompletionItem) => {
+    editor.update(() => {
+      const selection = $getSelection();
+      if (!$isRangeSelection(selection)) return;
+      selection.insertText(completion.insert.slice(token.length));
+    });
+    setToken('');
+  }, [editor, token]);
+
+  if (completions.length === 0) return null;
+  return (
+    <div className="editor-autocomplete-menu">
+      {completions.map((completion) => (
+        <button
+          key={completion.insert}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => applyCompletion(completion)}
+        >
+          {completion.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Editor ─────────────────────────────────────────────────────────────────────
 
-interface Props { noteId: string; }
+interface Props {
+  noteId: string;
+  initialMode?: NoteScreenMode;
+}
 
-export function Editor({ noteId }: Props) {
-  const { closeEditor, setCategories, categories, pluginRenderLanguages, pluginsLoaded } = useStore();
+export function Editor({ noteId, initialMode = 'read' }: Props) {
+  const { closeEditor, openEditor, setCategories, setActiveCategory, setView, categories, pluginRenderLanguages, pluginsLoaded } = useStore();
 
   // Map plugin-claimed code languages to a rendered PluginBlockNode; all other code fences keep
   // the built-in behavior. Used for both import (init) and export (save) so the markdown round-trips.
@@ -163,19 +270,27 @@ export function Editor({ noteId }: Props) {
   const [rows, setRows] = useState<string[][]>([]);
   const [allNotes, setAllNotes] = useState<NoteDto[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
-  const [rawMode, setRawMode] = useState(false);
+  const [mode, setMode] = useState<NoteScreenMode>(initialMode);
   const [rawText, setRawText] = useState('');
+  const rawTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [dirty, setDirty] = useState(false);
   const [revision, setRevision] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [noteActivity, setNoteActivity] = useState<NoteSyncActivity | null>(null);
   const [imageData, setImageData] = useState<string | null>(null);
+  const [neighbors, setNeighbors] = useState<NoteNeighbors>({});
+  const [tokenCount, setTokenCount] = useState<NoteTokenCount | null>(null);
+  const [embeddingDetails, setEmbeddingDetails] = useState<NoteEmbeddingDetails | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findPattern, setFindPattern] = useState('');
+  const [findIndex, setFindIndex] = useState(0);
 
   useEffect(() => {
     setNote(null);
     setRows([]);
-    setRawMode(false);
+    setMode(initialMode);
+    setRawText('');
     setDirty(false);
     api.getNote(noteId)
       .then(async (n) => {
@@ -183,16 +298,22 @@ export function Editor({ noteId }: Props) {
         setTitle(n.title);
         setSummary(n.summary);
         setBody(n.body);
+        if (initialMode === 'source') setRawText(n.body);
         if (n.type === 'table') {
           const data = await api.readTableData(noteId);
           setRows(data.length > 0 ? data : defaultTableRows());
         }
       })
       .catch((e) => setError(String(e)));
-  }, [noteId]);
+  }, [initialMode, noteId]);
 
   useEffect(() => {
     api.listNotes().then(setAllNotes).catch(() => {});
+  }, [noteId]);
+
+  useEffect(() => {
+    api.noteNeighbors(noteId).then(setNeighbors).catch(() => setNeighbors({}));
+    api.noteEmbeddingDetails(noteId).then(setEmbeddingDetails).catch(() => setEmbeddingDetails(null));
   }, [noteId]);
 
   useEffect(() => {
@@ -233,8 +354,8 @@ export function Editor({ noteId }: Props) {
 
   // Live refs so save/autosave callbacks don't need frequent rebinding.
   const savingRef = useRef(false);
-  const rawModeRef = useRef(false);
-  rawModeRef.current = rawMode;
+  const modeRef = useRef<NoteScreenMode>('read');
+  modeRef.current = mode;
   const rawTextRef = useRef('');
   rawTextRef.current = rawText;
   const rowsRef = useRef<string[][]>([]);
@@ -257,7 +378,7 @@ export function Editor({ noteId }: Props) {
           ...note,
           title,
           summary,
-          body: rawModeRef.current ? rawTextRef.current : getCurrentBody.current(),
+          body: modeRef.current === 'source' ? rawTextRef.current : getCurrentBody.current(),
         });
         setNote(updated);
         api.allCategories().then(setCategories).catch(() => {});
@@ -330,7 +451,7 @@ export function Editor({ noteId }: Props) {
     setTitle(updated.title);
     setSummary(updated.summary);
     setDirty(false);
-    setRawMode(false);
+    setMode('read');
     if (updated.type !== 'table') {
       setBody(updated.body);
       setReloadKey((k) => k + 1);
@@ -338,23 +459,28 @@ export function Editor({ noteId }: Props) {
     api.allCategories().then(setCategories).catch(() => {});
   }, [setCategories]);
 
-  const toggleRaw = useCallback(() => {
-    if (!rawMode) {
+  const switchMode = useCallback((nextMode: NoteScreenMode) => {
+    if (nextMode === mode) return;
+    if (mode === 'source') {
+      if (noteTypeRef.current === 'table') {
+        setRows(csvToRows(rawTextRef.current));
+      } else {
+        const text = rawTextRef.current;
+        setBody(text);
+        getCurrentBody.current = () => text;
+        setReloadKey((k) => k + 1);
+      }
+    } else if (nextMode === 'source') {
       const text = noteTypeRef.current === 'table'
         ? rowsToCsv(rowsRef.current)
         : getCurrentBody.current();
       setRawText(text);
-      setRawMode(true);
-    } else {
-      if (noteTypeRef.current === 'table') {
-        setRows(csvToRows(rawText));
-      } else {
-        setBody(rawText);
-        setReloadKey((k) => k + 1);
-      }
-      setRawMode(false);
+    } else if (mode === 'edit') {
+      const text = getCurrentBody.current();
+      setBody(text);
     }
-  }, [rawMode, rawText]);
+    setMode(nextMode);
+  }, [mode]);
 
   // Table grid callbacks (only used when note.type === 'table')
   const updateCell = useCallback((r: number, c: number, value: string) => {
@@ -409,6 +535,129 @@ export function Editor({ noteId }: Props) {
     markDirty();
   }, [markDirty]);
 
+  const bodyForRead = mode === 'source' ? rawText : getCurrentBody.current();
+
+  useEffect(() => {
+    if (mode === 'read' || isImageObjectType(noteTypeRef.current)) {
+      setTokenCount(null);
+      return;
+    }
+    const text = mode === 'source' ? rawText : getCurrentBody.current();
+    const timer = setTimeout(() => {
+      api.noteTokenCount({ text }).then(setTokenCount).catch(() => setTokenCount(null));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [mode, rawText, revision]);
+
+  const findMatchCount = useMemo(() => {
+    if (!findPattern.trim()) return 0;
+    try {
+      return [...bodyForRead.matchAll(new RegExp(findPattern, 'g'))].length;
+    } catch {
+      return 0;
+    }
+  }, [bodyForRead, findPattern]);
+
+  const findError = useMemo(() => {
+    if (!findPattern.trim()) return null;
+    try {
+      new RegExp(findPattern, 'g');
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }, [findPattern]);
+
+  const moveFind = useCallback((direction: 1 | -1) => {
+    if (findMatchCount === 0) return;
+    setFindIndex((current) => {
+      const next = (current + direction + findMatchCount) % findMatchCount;
+      if (mode === 'source') {
+        const regex = new RegExp(findPattern, 'g');
+        let index = 0;
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(rawTextRef.current)) !== null) {
+          if (index === next) {
+            requestAnimationFrame(() => {
+              rawTextareaRef.current?.focus();
+              rawTextareaRef.current?.setSelectionRange(match!.index, match!.index + match![0].length);
+            });
+            break;
+          }
+          index += 1;
+          if (match[0].length === 0) regex.lastIndex += 1;
+        }
+      }
+      return next;
+    });
+  }, [findMatchCount, findPattern, mode]);
+
+  useEffect(() => {
+    setFindIndex(0);
+  }, [findPattern, noteId]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  const handleMerge = useCallback(async () => {
+    if (!note) return;
+    const sourceId = window.prompt('Note id to merge into this note');
+    if (!sourceId?.trim()) return;
+    if (dirtyRef.current) await saveRef.current();
+    try {
+      const updated = await api.mergeNotes({
+        target_note_id: note.id,
+        source_note_ids: [sourceId.trim()],
+      });
+      setNote(updated);
+      setTitle(updated.title);
+      setSummary(updated.summary);
+      setBody(updated.body);
+      getCurrentBody.current = () => updated.body;
+      setReloadKey((key) => key + 1);
+      setDirty(false);
+      setMode('read');
+      api.allCategories().then(setCategories).catch(() => {});
+    } catch (error) {
+      setError(String(error));
+    }
+  }, [note, setCategories]);
+
+  const handleSplit = useCallback(async () => {
+    if (!note || note.type === 'table' || note.type === 'picture' || note.type === 'drawing') return;
+    const defaultOffset = String(getCurrentBody.current().length);
+    const rawOffset = window.prompt('Split body at character offset', defaultOffset);
+    if (!rawOffset) return;
+    const splitAt = Number.parseInt(rawOffset, 10);
+    if (!Number.isFinite(splitAt) || splitAt < 0) {
+      setError('Split offset must be a non-negative number.');
+      return;
+    }
+    if (dirtyRef.current) await saveRef.current();
+    try {
+      const result = await api.splitNote({ note_id: note.id, split_at: splitAt });
+      setNote(result.first);
+      setTitle(result.first.title);
+      setSummary(result.first.summary);
+      setBody(result.first.body);
+      getCurrentBody.current = () => result.first.body;
+      setReloadKey((key) => key + 1);
+      setDirty(false);
+      setMode('read');
+      api.noteNeighbors(note.id).then(setNeighbors).catch(() => {});
+    } catch (error) {
+      setError(String(error));
+    }
+  }, [note]);
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   if (!note) {
@@ -422,10 +671,6 @@ export function Editor({ noteId }: Props) {
   const isTable = note.type === 'table';
   const isImageObject = note.type === 'picture' || note.type === 'drawing';
   const colCount = rows[0]?.length ?? 0;
-  const rawToggleLabel = rawMode ? 'Rich text' : (isTable ? 'CSV' : 'Raw');
-  const rawToggleTitle = rawMode
-    ? (isTable ? 'Switch to grid view' : 'Switch to rich text')
-    : (isTable ? 'Edit as raw CSV' : 'Edit raw markdown');
 
   const editorConfig: InitialConfigType = {
     namespace: `note-${noteId}`,
@@ -449,7 +694,24 @@ export function Editor({ noteId }: Props) {
           <Icon name="arrow_back" size={16} />
           <span>Back</span>
         </button>
+        <button
+          className="editor-nav-btn"
+          disabled={!neighbors.previous}
+          title={neighbors.previous ? `Previous: ${displayNeighbor(neighbors.previous)}` : 'No previous sorted note'}
+          onClick={() => neighbors.previous && openEditor(neighbors.previous.id, 'read')}
+        >
+          <Icon name="chevron_left" size={18} />
+        </button>
+        <button
+          className="editor-nav-btn"
+          disabled={!neighbors.next}
+          title={neighbors.next ? `Next: ${displayNeighbor(neighbors.next)}` : 'No next sorted note'}
+          onClick={() => neighbors.next && openEditor(neighbors.next.id, 'read')}
+        >
+          <Icon name="chevron_right" size={18} />
+        </button>
         <div className="editor-toolbar-center">
+          <NoteModeSwitcher mode={mode} disabled={isImageObject} onChange={switchMode} />
           <span className="editor-type-badge">{note.type}</span>
           {noteActivity && (
             <span className="editor-activity-chip" title={noteActivity.detail}>
@@ -458,6 +720,15 @@ export function Editor({ noteId }: Props) {
           )}
         </div>
         <div className="editor-toolbar-actions">
+          <button className="editor-tool-btn" onClick={() => setFindOpen((open) => !open)} title="Find in note">
+            <Icon name="search" size={16} />
+          </button>
+          <button className="editor-tool-btn" onClick={() => void handleMerge()} title="Merge another note into this note">
+            Merge
+          </button>
+          <button className="editor-tool-btn" onClick={() => void handleSplit()} title="Split this note at an offset">
+            Split
+          </button>
           <LlmToolsMenu noteId={noteId} onApplied={handleProposalApplied} />
           <button className="editor-delete-btn" onClick={handleDelete} title="Delete note">
             <Icon name="delete" size={16} />
@@ -470,37 +741,57 @@ export function Editor({ noteId }: Props) {
       </div>
 
       {error && <div className="editor-error-banner">{error}</div>}
+      {findOpen && (
+        <FindBar
+          pattern={findPattern}
+          matchCount={findMatchCount}
+          matchIndex={findIndex}
+          error={findError}
+          onPatternChange={setFindPattern}
+          onNext={() => moveFind(1)}
+          onPrevious={() => moveFind(-1)}
+          onClose={() => setFindOpen(false)}
+        />
+      )}
 
       {/* ── Meta panel (shared by all types) ── */}
       <div className="editor-meta">
         <input
           className="editor-title"
           value={title}
+          readOnly={mode === 'read'}
           onChange={(e) => { setTitle(e.target.value); markDirty(); }}
           placeholder="Note title…"
         />
         <input
           className="editor-summary"
           value={summary}
+          readOnly={mode === 'read'}
           onChange={(e) => { setSummary(e.target.value); markDirty(); }}
           placeholder="One-line summary (optional)…"
         />
         <div className="editor-categories">
           {note.categories.map((c) => (
-            <span key={c} className="editor-category-chip">#{c}</span>
+            <button
+              key={c}
+              className="editor-category-chip"
+              onClick={() => {
+                setActiveCategory(c);
+                setView('category');
+              }}
+            >
+              #{c}
+            </button>
           ))}
         </div>
         <MetaPanel note={note} categories={categories} allNotes={allNotes} onChange={handleMetaChange} />
+        <AdvancedMetadata embeddingDetails={embeddingDetails} />
       </div>
 
       {/* ── Body / Data area ── */}
       <div className="editor-body-header">
         <span className="editor-body-label">{isTable ? 'Data' : (isImageObject ? 'Description' : 'Body')}</span>
-        {!isImageObject && (
-          <button className="editor-raw-toggle" onClick={toggleRaw} title={rawToggleTitle}>
-            {rawToggleLabel}
-          </button>
-        )}
+        <BodyStats count={tokenCount} visible={mode !== 'read' && !isImageObject} />
       </div>
 
       {isImageObject ? (
@@ -529,7 +820,16 @@ export function Editor({ noteId }: Props) {
             placeholder="Caption, provenance, or description…"
           />
         </div>
-      ) : isTable && !rawMode ? (
+      ) : mode === 'read' ? (
+        <div className="editor-read-wrap">
+          <MarkdownRenderer
+            markdown={bodyForRead}
+            className="editor-read-body"
+            findPattern={findError ? '' : findPattern}
+            findMatchIndex={findIndex}
+          />
+        </div>
+      ) : isTable && mode !== 'source' ? (
         // Table: spreadsheet grid
         <div className="table-editor-area">
           <div className="table-editor-controls">
@@ -561,10 +861,11 @@ export function Editor({ noteId }: Props) {
             </table>
           </div>
         </div>
-      ) : rawMode ? (
+      ) : mode === 'source' ? (
         // Raw textarea (markdown for text notes, CSV for table notes)
         <div className="editor-body-wrap">
           <textarea
+            ref={rawTextareaRef}
             className="editor-raw-textarea"
             value={rawText}
             onChange={(e) => { setRawText(e.target.value); markDirty(); }}
@@ -578,6 +879,7 @@ export function Editor({ noteId }: Props) {
         // Text note: Lexical rich text editor
         <LexicalComposer key={`${noteId}-${reloadKey}`} initialConfig={editorConfig}>
           <Toolbar />
+          <AutocompletePlugin categories={categories} notes={allNotes} />
           <div className="editor-body-wrap">
             <RichTextPlugin
               contentEditable={<ContentEditable className="lexical-content-editable" />}
@@ -607,6 +909,123 @@ function activityLabel(kind: string) {
   if (kind === 'remote_loro_merge') return 'Remote Loro merge';
   if (kind === 'conflict_detected') return 'Conflict copy';
   return kind.replaceAll('_', ' ');
+}
+
+function isImageObjectType(type: string) {
+  return type === 'picture' || type === 'drawing';
+}
+
+function displayNeighbor(neighbor: { title: string; summary: string }) {
+  return neighbor.title || neighbor.summary || '(untitled)';
+}
+
+function NoteModeSwitcher({
+  mode,
+  disabled,
+  onChange,
+}: {
+  mode: NoteScreenMode;
+  disabled: boolean;
+  onChange: (mode: NoteScreenMode) => void;
+}) {
+  if (disabled) return null;
+  const modes: NoteScreenMode[] = ['read', 'edit', 'source'];
+  return (
+    <div className="editor-mode-switcher" role="tablist" aria-label="Note mode">
+      {modes.map((candidate) => (
+        <button
+          key={candidate}
+          className={candidate === mode ? 'active' : ''}
+          onClick={() => onChange(candidate)}
+          aria-pressed={candidate === mode}
+        >
+          {candidate}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FindBar({
+  pattern,
+  matchCount,
+  matchIndex,
+  error,
+  onPatternChange,
+  onNext,
+  onPrevious,
+  onClose,
+}: {
+  pattern: string;
+  matchCount: number;
+  matchIndex: number;
+  error: string | null;
+  onPatternChange: (pattern: string) => void;
+  onNext: () => void;
+  onPrevious: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="editor-find-bar">
+      <input
+        autoFocus
+        value={pattern}
+        onChange={(event) => onPatternChange(event.target.value)}
+        placeholder="Regex find"
+      />
+      <span className={error ? 'editor-find-error' : 'editor-find-count'}>
+        {error ? 'Invalid regex' : matchCount > 0 ? `${matchIndex + 1}/${matchCount}` : '0/0'}
+      </span>
+      <button onClick={onPrevious} disabled={!!error || matchCount === 0} title="Previous match">
+        <Icon name="keyboard_arrow_up" size={16} />
+      </button>
+      <button onClick={onNext} disabled={!!error || matchCount === 0} title="Next match">
+        <Icon name="keyboard_arrow_down" size={16} />
+      </button>
+      <button onClick={onClose} title="Close find">
+        <Icon name="close" size={16} />
+      </button>
+    </div>
+  );
+}
+
+function BodyStats({ count, visible }: { count: NoteTokenCount | null; visible: boolean }) {
+  if (!visible || !count) return null;
+  return (
+    <span className={`editor-body-stats${count.warning ? ' warning' : ''}`}>
+      {count.count.toLocaleString()} tokens
+      {count.method === 'shared_tokenizer' ? ' approx' : ''}
+    </span>
+  );
+}
+
+function AdvancedMetadata({ embeddingDetails }: { embeddingDetails: NoteEmbeddingDetails | null }) {
+  return (
+    <details className="editor-advanced-meta">
+      <summary>Advanced</summary>
+      {!embeddingDetails ? (
+        <div className="editor-advanced-empty">Embedding details unavailable.</div>
+      ) : (
+        <div className="editor-embedding-details">
+          <div>Status: {embeddingDetails.status}</div>
+          <div>Model: {embeddingDetails.model_id ?? 'unknown'}</div>
+          <div>Dimensions: {embeddingDetails.dimensions ?? 'unknown'}</div>
+          <VectorPreview label="Summary vector" vector={embeddingDetails.summary_vector ?? null} />
+          <VectorPreview label="Body vector" vector={embeddingDetails.full_note_vector ?? null} />
+        </div>
+      )}
+    </details>
+  );
+}
+
+function VectorPreview({ label, vector }: { label: string; vector: number[] | null }) {
+  if (!vector) return <div>{label}: none</div>;
+  return (
+    <details className="editor-vector-preview">
+      <summary>{label}: {vector.length} values</summary>
+      <code>{vector.map((value) => Number(value).toFixed(4)).join(', ')}</code>
+    </details>
+  );
 }
 
 function formatRelativeTime(value: string) {
