@@ -9,7 +9,7 @@ import {
   type GraphCamera, type GraphPoint,
 } from './graphGeometry';
 import {
-  findNearestActivatablePoint, GRAPH_DRAG_THRESHOLD_PX,
+  findNearestActivatablePoint, SvgActivationTracker,
 } from './graphInteraction';
 
 const WEAVE_LIMIT = 140;
@@ -37,8 +37,7 @@ export function GraphCanvas({
   const activePointers = useRef(new Map<number, GraphPoint>());
   const dragState = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const pinchState = useRef<{ distance: number } | null>(null);
-  const activationState = useRef<{ pointerId: number; x: number; y: number } | null>(null);
-  const suppressClick = useRef(false);
+  const activationTracker = useRef(new SvgActivationTracker());
   const [camera, setCamera] = useState(INITIAL_CAMERA);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
@@ -76,20 +75,19 @@ export function GraphCanvas({
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    suppressClick.current = false;
+    activationTracker.current.pointerDown(event);
     if (activePointers.current.size === 1) {
       dragState.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-      activationState.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
     } else if (activePointers.current.size === 2) {
       pinchState.current = { distance: pointerDistance([...activePointers.current.values()]) };
       dragState.current = null;
-      activationState.current = null;
     }
   };
 
   const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (!activePointers.current.has(event.pointerId)) return;
     activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    activationTracker.current.pointerMove(event);
     if (activePointers.current.size === 2) {
       const points = [...activePointers.current.values()];
       const distance = pointerDistance(points);
@@ -99,7 +97,6 @@ export function GraphCanvas({
       setCamera((current) =>
         zoomCameraAtPoint(current, graphMidpoint, current.zoom * distance / previousDistance));
       pinchState.current = { distance };
-      suppressClick.current = true;
       return;
     }
     const drag = dragState.current;
@@ -107,7 +104,6 @@ export function GraphCanvas({
     if (!drag || drag.pointerId !== event.pointerId || !rect) return;
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
-    if (Math.hypot(dx, dy) > GRAPH_DRAG_THRESHOLD_PX) suppressClick.current = true;
     setCamera((current) => ({
       ...current,
       x: current.x - dx / rect.width * (GRAPH_WIDTH / current.zoom),
@@ -117,19 +113,11 @@ export function GraphCanvas({
   };
 
   const handlePointerEnd = (event: ReactPointerEvent<SVGSVGElement>) => {
-    const activation = activationState.current;
-    if (
-      activation
-      && activation.pointerId === event.pointerId
-      && !suppressClick.current
-      && activePointers.current.size === 1
-      && Math.hypot(event.clientX - activation.x, event.clientY - activation.y)
-        <= GRAPH_DRAG_THRESHOLD_PX
-    ) {
+    const activationPoint = activationTracker.current.pointerUp(event);
+    if (activationPoint) {
       const activatedNodeId = findNearestGraphNode(event.clientX, event.clientY);
       if (activatedNodeId) onOpenNote(activatedNodeId);
     }
-    if (activation?.pointerId === event.pointerId) activationState.current = null;
     activePointers.current.delete(event.pointerId);
     if (activePointers.current.size < 2) pinchState.current = null;
     if (activePointers.current.size === 1) {
@@ -141,7 +129,7 @@ export function GraphCanvas({
   };
 
   const handlePointerCancel = (event: ReactPointerEvent<SVGSVGElement>) => {
-    if (activationState.current?.pointerId === event.pointerId) activationState.current = null;
+    activationTracker.current.pointerCancel(event.pointerId);
     handlePointerEnd(event);
   };
 

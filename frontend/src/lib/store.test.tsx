@@ -8,6 +8,8 @@ describe('editor return navigation', () => {
       editingNoteId: null,
       editingMode: 'read',
       editorReturnView: null,
+      graphMode: 'categories',
+      activeWorld: null,
     });
   });
 
@@ -33,6 +35,28 @@ describe('editor return navigation', () => {
     useStore.getState().closeEditor();
 
     expect(useStore.getState().view).toBe('graph');
+  });
+
+  it('returns to the same graph mode after opening a note from graph or timeline', () => {
+    useStore.getState().setGraphMode('timeline');
+    useStore.getState().setView('graph');
+    useStore.getState().openEditor('note-1');
+
+    useStore.getState().closeEditor();
+
+    expect(useStore.getState().view).toBe('graph');
+    expect(useStore.getState().graphMode).toBe('timeline');
+  });
+
+  it('returns to the same world map after opening a note from worlds', () => {
+    useStore.getState().setActiveWorld('map-1');
+    useStore.getState().setView('worlds');
+    useStore.getState().openEditor('note-1');
+
+    useStore.getState().closeEditor();
+
+    expect(useStore.getState().view).toBe('worlds');
+    expect(useStore.getState().activeWorld).toBe('map-1');
   });
 
   it('returns to unsorted when no return view was captured', () => {

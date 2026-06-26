@@ -12,7 +12,7 @@ import {
 } from './timelinePresentation';
 import { useGraphCamera, type Camera2D } from './useGraphCamera';
 import {
-  findNearestActivatablePoint, GRAPH_DRAG_THRESHOLD_PX,
+  findNearestActivatablePoint, SvgActivationTracker,
 } from './graphInteraction';
 
 const MIN_ZOOM = 0.25;
@@ -47,8 +47,7 @@ export function TimelineCanvas({
   onOpenNote,
 }: TimelineCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const activationPointers = useRef(new Map<number, { x: number; y: number }>());
-  const activationState = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const activationTracker = useRef(new SvgActivationTracker());
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const timeline = result.timeline;
 
@@ -61,7 +60,7 @@ export function TimelineCanvas({
     const zoomX = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomFromFocus));
 
     return { x: worldStart, y: 0, zoomX, zoomY: 1 };
-  }, [timeline?.focus_start_x, timeline?.focus_end_x, timeline?.granularity]);
+  }, [timeline?.focus_start_x, timeline?.focus_end_x]);
 
   const cameraController = useGraphCamera(svgRef, {
     width: GRAPH_WIDTH,
@@ -112,49 +111,25 @@ export function TimelineCanvas({
 
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     cameraController.handlers.onPointerDown(event);
-    activationPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (activationPointers.current.size === 1) {
-      activationState.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-    } else {
-      activationState.current = null;
-    }
+    activationTracker.current.pointerDown(event);
   };
 
   const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     cameraController.handlers.onPointerMove(event);
-    if (!activationPointers.current.has(event.pointerId)) return;
-    activationPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    const activation = activationState.current;
-    if (
-      activation?.pointerId === event.pointerId
-      && Math.hypot(event.clientX - activation.x, event.clientY - activation.y)
-        > GRAPH_DRAG_THRESHOLD_PX
-    ) {
-      activationState.current = null;
-    }
+    activationTracker.current.pointerMove(event);
   };
 
   const handlePointerEnd = (event: ReactPointerEvent<SVGSVGElement>) => {
-    const activation = activationState.current;
-    if (
-      activation
-      && activation.pointerId === event.pointerId
-      && !cameraController.suppressClick.current
-      && activationPointers.current.size === 1
-      && Math.hypot(event.clientX - activation.x, event.clientY - activation.y)
-        <= GRAPH_DRAG_THRESHOLD_PX
-    ) {
+    const activationPoint = activationTracker.current.pointerUp(event);
+    if (activationPoint && !cameraController.suppressClick.current) {
       const activatedNodeId = findNearestTimelineNode(event.clientX, event.clientY);
       if (activatedNodeId) onOpenNote(activatedNodeId);
     }
-    if (activation?.pointerId === event.pointerId) activationState.current = null;
-    activationPointers.current.delete(event.pointerId);
     cameraController.handlers.onPointerUp(event);
   };
 
   const handlePointerCancel = (event: ReactPointerEvent<SVGSVGElement>) => {
-    if (activationState.current?.pointerId === event.pointerId) activationState.current = null;
-    activationPointers.current.delete(event.pointerId);
+    activationTracker.current.pointerCancel(event.pointerId);
     cameraController.handlers.onPointerCancel(event);
   };
 
