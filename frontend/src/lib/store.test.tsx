@@ -16,6 +16,7 @@ describe('editor return navigation', () => {
     useStore.getState().openEditor('note-1');
 
     expect(useStore.getState().view).toBe('editor');
+    expect(useStore.getState().editingMode).toBe('edit');
     expect(useStore.getState().editorReturnView).toBe('graph');
 
     useStore.getState().closeEditor();

@@ -17,7 +17,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::markdown::dialect;
 use crate::model::metadata::{LockMode, Metadata};
-use crate::model::{Category, Note, NoteVisibility, ObjectType, PriorEdge};
+use crate::model::{Category, Note, NoteVisibility, ObjectType, PriorEdge, PriorRef};
 use crate::publish;
 use crate::sort::{self, RenderItem};
 use crate::storage::{layout, Book, NoteStore};
@@ -442,6 +442,7 @@ pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
     merge_inline_categories(&mut note);
     ensure_categories_declared(book, &note.categories)?;
     book.save_note(&note)?;
+    cleanup_unused_default_categories(book)?;
     Ok(NoteDto::from_note(&note))
 }
 
@@ -634,6 +635,80 @@ pub fn create_category(book: &Book, category: Category) -> CoreResult<()> {
     book.store.write_category(&category)
 }
 
+/// Delete a category only when no notes or category hierarchy edges still depend on it.
+pub fn delete_category(book: &Book, name: &str) -> CoreResult<()> {
+    book.store.read_category(name)?;
+    let usage = category_usage(book, name)?;
+    if usage.has_any_reference() {
+        return Err(CoreError::InvalidBook(format!(
+            "category '{name}' is still used by notes or category structure"
+        )));
+    }
+    book.store.delete_category(name)
+}
+
+fn cleanup_unused_default_categories(book: &Book) -> CoreResult<()> {
+    for category in book.store.categories()? {
+        if is_auto_deletable_category(book, &category)? {
+            book.store.delete_category(&category.name)?;
+        }
+    }
+    Ok(())
+}
+
+fn is_auto_deletable_category(book: &Book, category: &Category) -> CoreResult<bool> {
+    Ok(!category_has_user_meaningful_fields(category)
+        && !category_usage(book, &category.name)?.has_any_reference())
+}
+
+fn category_has_user_meaningful_fields(category: &Category) -> bool {
+    let display_name = category.long_name.trim();
+    (!display_name.is_empty() && display_name != category.name)
+        || category.icon.is_some()
+        || category.location.is_some()
+        || category.region.is_some()
+        || category.parent.is_some()
+        || category.private
+}
+
+struct CategoryUsage {
+    note_categories: usize,
+    prior_targets: usize,
+    child_categories: usize,
+}
+
+impl CategoryUsage {
+    fn has_any_reference(&self) -> bool {
+        self.note_categories > 0 || self.prior_targets > 0 || self.child_categories > 0
+    }
+}
+
+fn category_usage(book: &Book, name: &str) -> CoreResult<CategoryUsage> {
+    let mut usage = CategoryUsage {
+        note_categories: 0,
+        prior_targets: 0,
+        child_categories: 0,
+    };
+
+    for note in book.store.read_all_notes()? {
+        if note.categories.iter().any(|category| category == name) {
+            usage.note_categories += 1;
+        }
+        if matches!(note.prior.as_ref().map(|prior| &prior.target), Some(PriorRef::Category(category)) if category == name)
+        {
+            usage.prior_targets += 1;
+        }
+    }
+
+    for category in book.store.categories()? {
+        if category.parent.as_deref() == Some(name) {
+            usage.child_categories += 1;
+        }
+    }
+
+    Ok(usage)
+}
+
 /// Validate and import an image into the book's tracked `assets/` directory, returning the
 /// book-relative path for an inline Markdown image reference.
 pub fn import_asset(book: &Book, source_path: &str) -> CoreResult<String> {
@@ -790,6 +865,124 @@ mod tests {
         let stored = book.store.read_category("research").unwrap();
         assert_eq!(stored.long_name, "Deep Research");
         assert_eq!(stored.icon.as_deref(), Some("🔬"));
+    }
+
+    #[test]
+    fn removing_the_last_inline_reference_prunes_default_category() {
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "first", None).unwrap();
+        note.body = "Draft #ca".into();
+        let mut note = update_note(&book, note).unwrap();
+        assert!(book.store.read_category("ca").is_ok());
+
+        note.body = "Draft".into();
+        let note = update_note(&book, note).unwrap();
+
+        assert!(!note.categories.contains(&"ca".to_string()));
+        assert!(book.store.read_category("ca").is_err());
+    }
+
+    #[test]
+    fn cleanup_preserves_custom_empty_categories() {
+        let (_dir, book) = book();
+        let customizations = [
+            {
+                let mut category = Category::new("custom_name");
+                category.long_name = "Custom Name".into();
+                category
+            },
+            {
+                let mut category = Category::new("icon");
+                category.icon = Some("*".into());
+                category
+            },
+            {
+                let mut category = Category::new("location");
+                category.location = Some("earth/47.6,-122.3".into());
+                category
+            },
+            {
+                let mut category = Category::new("region");
+                category.region = Some(crate::model::SpatialRegion::SvgElement {
+                    element_id: "kitchen".into(),
+                });
+                category
+            },
+            {
+                let mut category = Category::new("child");
+                category.parent = Some("parent".into());
+                category
+            },
+            {
+                let mut category = Category::new("private");
+                category.private = true;
+                category
+            },
+        ];
+        for category in customizations {
+            create_category(&book, category).unwrap();
+        }
+
+        let mut note = create_note(&book, ObjectType::Note, "first", None).unwrap();
+        note.body = "Trigger cleanup".into();
+        update_note(&book, note).unwrap();
+
+        for name in [
+            "custom_name",
+            "icon",
+            "location",
+            "region",
+            "child",
+            "private",
+        ] {
+            assert!(book.store.read_category(name).is_ok(), "{name} was pruned");
+        }
+    }
+
+    #[test]
+    fn delete_category_rejects_note_and_structure_references() {
+        let (_dir, book) = book();
+        create_category(&book, Category::new("used")).unwrap();
+        let mut tagged = create_note(&book, ObjectType::Note, "tagged", None).unwrap();
+        tagged.categories = vec!["used".into()];
+        update_note(&book, tagged).unwrap();
+
+        assert!(matches!(
+            delete_category(&book, "used").unwrap_err(),
+            CoreError::InvalidBook(_)
+        ));
+
+        create_category(&book, Category::new("chapter")).unwrap();
+        let mut sorted = create_note(&book, ObjectType::Note, "sorted", None).unwrap();
+        sorted.prior = Some(PriorEdge::starts_category("chapter"));
+        update_note(&book, sorted).unwrap();
+
+        assert!(matches!(
+            delete_category(&book, "chapter").unwrap_err(),
+            CoreError::InvalidBook(_)
+        ));
+
+        create_category(&book, Category::new("parent")).unwrap();
+        let mut child = Category::new("child");
+        child.parent = Some("parent".into());
+        create_category(&book, child).unwrap();
+
+        assert!(matches!(
+            delete_category(&book, "parent").unwrap_err(),
+            CoreError::InvalidBook(_)
+        ));
+    }
+
+    #[test]
+    fn delete_category_allows_protected_empty_category() {
+        let (_dir, book) = book();
+        let mut category = Category::new("intentional");
+        category.private = true;
+        create_category(&book, category).unwrap();
+
+        delete_category(&book, "intentional").unwrap();
+
+        assert!(book.store.read_category("intentional").is_err());
     }
 
     #[test]

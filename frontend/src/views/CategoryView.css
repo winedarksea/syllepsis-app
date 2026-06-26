@@ -137,6 +137,23 @@
 }
 .cv-edit-toggle:hover { color: var(--color-accent); background: var(--color-surface-raised); }
 
+.cv-delete-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sp-1);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  transition: color var(--transition-fast), background var(--transition-fast), opacity var(--transition-fast);
+}
+.cv-delete-toggle:hover:not(:disabled) {
+  color: var(--color-error);
+  background: var(--color-surface-raised);
+}
+.cv-delete-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* Inline category editor */
 .cv-edit-panel {
   padding: var(--sp-4) var(--sp-6);

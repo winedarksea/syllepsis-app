@@ -253,7 +253,7 @@ interface Props {
   initialMode?: NoteScreenMode;
 }
 
-export function Editor({ noteId, initialMode = 'read' }: Props) {
+export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const { closeEditor, openEditor, setCategories, setActiveCategory, setView, categories, pluginRenderLanguages, pluginsLoaded, noteReloadSignal } = useStore();
 
   // Map plugin-claimed code languages to a rendered PluginBlockNode; all other code fences keep

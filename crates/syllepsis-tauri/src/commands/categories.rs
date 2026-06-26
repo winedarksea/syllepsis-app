@@ -34,6 +34,14 @@ pub fn create_category(state: State<AppState>, category: Category) -> Result<(),
     })
 }
 
+/// Delete an unused category.
+#[tauri::command]
+pub fn delete_category(state: State<AppState>, name: String) -> Result<(), String> {
+    with_book!(state, book, {
+        app::delete_category(book, &name).map_err(|e| e.to_string())
+    })
+}
+
 /// Embedding coverage stats for a single category.
 #[tauri::command]
 pub fn category_embedding_stats(

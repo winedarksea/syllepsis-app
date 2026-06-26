@@ -103,6 +103,7 @@ export const api = {
 
   allCategories: () => invoke<Category[]>('all_categories'),
   createCategory: (category: Category) => invoke<void>('create_category', { category }),
+  deleteCategory: (name: string) => invoke<void>('delete_category', { name }),
   categoryEmbeddingStats: (name: string) => invoke<CategoryEmbeddingStats>('category_embedding_stats', { name }),
 
   // Search & embeddings

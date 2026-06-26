@@ -77,11 +77,12 @@ function CategoryEditor({ cat, onSave, onCancel }: { cat: Category; onSave: (upd
 }
 
 export function CategoryView() {
-  const { activeCategory, openEditor, categories, setCategories } = useStore();
+  const { activeCategory, openEditor, categories, setCategories, setActiveCategory, setView } = useStore();
   const [notes, setNotes] = useState<NoteDto[]>([]);
   const [loadedForCategory, setLoadedForCategory] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [embeddingStats, setEmbeddingStats] = useState<CategoryEmbeddingStats | null>(null);
 
   const cat = categories.find((c) => c.name === activeCategory) ?? null;
@@ -121,6 +122,26 @@ export function CategoryView() {
     setEditing(false);
   }, [setCategories]);
 
+  const handleDelete = useCallback(async () => {
+    if (!activeCategory || notes.length > 0 || deleting) return;
+    if (!window.confirm(`Delete the empty category #${activeCategory}? This cannot be undone.`)) {
+      return;
+    }
+    setDeleting(true);
+    setError(null);
+    try {
+      await api.deleteCategory(activeCategory);
+      const cats = await api.allCategories();
+      setCategories(cats);
+      setActiveCategory(null);
+      setView('unsorted');
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setDeleting(false);
+    }
+  }, [activeCategory, deleting, notes.length, setActiveCategory, setCategories, setView]);
+
   if (!activeCategory) {
     return <div className="cv-state">Select a category from the sidebar.</div>;
   }
@@ -158,6 +179,14 @@ export function CategoryView() {
       >
         <button className="cv-edit-toggle" onClick={() => setEditing((v) => !v)} title="Edit category">
           <Icon name={editing ? 'close' : 'edit'} size={15} />
+        </button>
+        <button
+          className="cv-delete-toggle"
+          onClick={handleDelete}
+          disabled={!cat || notes.length > 0 || deleting}
+          title={notes.length > 0 ? 'Only empty categories can be deleted' : 'Delete empty category'}
+        >
+          <Icon name="delete" size={15} />
         </button>
       </PageHeader>
 

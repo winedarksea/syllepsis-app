@@ -212,7 +212,7 @@ export const useStore = create<AppStore>((set) => ({
   editingNoteId: null,
   editingMode: 'read',
   editorReturnView: null,
-  openEditor: (id, mode = 'read') =>
+  openEditor: (id, mode = 'edit') =>
     set((state) => ({
       editingNoteId: id,
       editingMode: mode,
