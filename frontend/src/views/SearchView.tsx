@@ -7,8 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
-import type { SearchResults, CrossBookNote, ObjectType, SearchFilter } from '../types';
-import { emptyFilter } from '../types';
+import type { SearchResults, CrossBookNote, ObjectType, SearchFilter, NoteVisibility } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import './SearchView.css';
 
@@ -38,6 +37,7 @@ function activeFilterCount(
   objectTypes: ObjectType[],
   starredOnly: boolean,
   allBooks: boolean,
+  visibility: NoteVisibility,
 ): number {
   return (
     (categories.length > 0 ? 1 : 0) +
@@ -45,7 +45,8 @@ function activeFilterCount(
     (lengthIndex > 0 ? 1 : 0) +
     (objectTypes.length > 0 ? 1 : 0) +
     (starredOnly ? 1 : 0) +
-    (allBooks ? 1 : 0)
+    (allBooks ? 1 : 0) +
+    (visibility !== 'active' ? 1 : 0)
   );
 }
 
@@ -55,10 +56,12 @@ function buildFilter(
   lengthIndex: number,
   objectTypes: ObjectType[],
   starredOnly: boolean,
+  visibility: NoteVisibility,
 ): SearchFilter {
   const preset = FRESHNESS_PRESETS[freshnessIndex];
   const lenPreset = LENGTH_PRESETS[lengthIndex];
   return {
+    visibility,
     categories,
     updated_after: preset.days
       ? new Date(Date.now() - preset.days * 24 * 3600 * 1000).toISOString()
@@ -96,6 +99,7 @@ export function SearchView() {
   const [lengthIndex, setLengthIndex] = useState(0);
   const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
   const [starredOnly, setStarredOnly] = useState(false);
+  const [visibility, setVisibility] = useState<NoteVisibility>('active');
   const [showAllFacets, setShowAllFacets] = useState(false);
 
   // Results
@@ -112,7 +116,7 @@ export function SearchView() {
 
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const numActive = activeFilterCount(categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks);
+  const numActive = activeFilterCount(categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks, visibility);
 
   const run = useCallback((
     q: string,
@@ -122,6 +126,7 @@ export function SearchView() {
     types: ObjectType[],
     starred: boolean,
     crossBook: boolean,
+    lifecycleVisibility: NoteVisibility,
   ) => {
     if (!q.trim()) {
       setResults(null);
@@ -137,7 +142,7 @@ export function SearchView() {
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
     } else {
-      const filter = buildFilter(cats, freshIdx, lenIdx, types, starred);
+      const filter = buildFilter(cats, freshIdx, lenIdx, types, starred, lifecycleVisibility);
       api.search(q, filter)
         .then((r) => { setResults(r); setCrossBookResults(null); setError(null); })
         .catch((e) => setError(String(e)))
@@ -149,11 +154,11 @@ export function SearchView() {
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
     debounce.current = setTimeout(
-      () => run(query, categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks),
+      () => run(query, categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks, visibility),
       300,
     );
     return () => { if (debounce.current) clearTimeout(debounce.current); };
-  }, [query, categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks, run]);
+  }, [query, categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks, visibility, run]);
 
   // IntersectionObserver for windowed reveal
   useEffect(() => {
@@ -190,6 +195,7 @@ export function SearchView() {
     setLengthIndex(0);
     setObjectTypes([]);
     setStarredOnly(false);
+    setVisibility('active');
     setAllBooks(false);
   }, []);
 
@@ -238,6 +244,20 @@ export function SearchView() {
       {/* ── Collapsible filter panel ── */}
       {panelOpen && (
         <div className="sv-filter-panel">
+          <div className="sv-filter-row">
+            <label className="sv-filter-label">Visibility</label>
+            <select
+              className="sv-filter-select"
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value as NoteVisibility)}
+              disabled={allBooks}
+            >
+              <option value="active">Active</option>
+              <option value="archived">Archived</option>
+              <option value="trash">Trash</option>
+            </select>
+          </div>
+
           <div className="sv-filter-row">
             <label className="sv-filter-label">Updated</label>
             <select
@@ -396,6 +416,9 @@ export function SearchView() {
                   <span className="sv-hit-title">{displayTitle(hit.title, hit.summary)}</span>
                   <div className="sv-hit-meta">
                     {hit.starred && <span className="sv-hit-star" title="Starred">★</span>}
+                    {hit.archived && <span className="sv-hit-type">archived</span>}
+                    {hit.marked_for_deletion_at && <span className="sv-hit-type">trash</span>}
+                    {hit.status && <span className="sv-hit-type">{hit.status.replace(/_/g, ' ')}</span>}
                     <span className="sv-hit-type">{hit.object_type}</span>
                     <span className="sv-hit-date">{relativeDate(hit.updated)}</span>
                     <span

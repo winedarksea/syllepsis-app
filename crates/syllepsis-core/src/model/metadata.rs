@@ -154,11 +154,64 @@ pub struct Kanban {
     pub magnitude: Option<u32>,
 }
 
+/// Shared note/task status vocabulary. Todo checkbox markers are parsed into this same enum so
+/// whole-note status and line-level task status cannot drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoteStatus {
+    Open,
+    Active,
+    NeedsClarification,
+    Deferred,
+    Cancelled,
+    Done,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NoteVisibility {
+    #[default]
+    Active,
+    Archived,
+    Trash,
+}
+
+impl NoteStatus {
+    pub fn checkbox_marker(self) -> &'static str {
+        match self {
+            NoteStatus::Open => " ",
+            NoteStatus::Active => "/",
+            NoteStatus::NeedsClarification => "?",
+            NoteStatus::Deferred => ">",
+            NoteStatus::Cancelled => "-",
+            NoteStatus::Done => "x",
+        }
+    }
+}
+
+pub fn status_from_checkbox_marker(marker: &str) -> Option<NoteStatus> {
+    match marker {
+        " " => Some(NoteStatus::Open),
+        "/" => Some(NoteStatus::Active),
+        "?" => Some(NoteStatus::NeedsClarification),
+        ">" => Some(NoteStatus::Deferred),
+        "-" => Some(NoteStatus::Cancelled),
+        "x" | "X" => Some(NoteStatus::Done),
+        _ => None,
+    }
+}
+
+pub fn checkbox_marker_for_status(status: NoteStatus) -> &'static str {
+    status.checkbox_marker()
+}
+
 /// The complete metadata bundle embedded in a [`super::Note`]. Default sections are skipped
 /// on serialize so a plain note's frontmatter stays minimal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Metadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<NoteStatus>,
     pub classification: Classification,
     pub dates: DateMetadata,
     #[serde(skip_serializing_if = "is_default")]
@@ -225,5 +278,43 @@ mod tests {
         let back: Metadata = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(meta, back);
         assert!(back.is_hidden_from_default_views());
+    }
+
+    #[test]
+    fn status_is_optional_and_round_trips_when_present() {
+        let mut meta = Metadata::now();
+        let yaml = serde_yaml::to_string(&meta).unwrap();
+        assert!(!yaml.contains("status:"));
+
+        for status in [
+            NoteStatus::Open,
+            NoteStatus::Active,
+            NoteStatus::NeedsClarification,
+            NoteStatus::Deferred,
+            NoteStatus::Cancelled,
+            NoteStatus::Done,
+        ] {
+            meta.status = Some(status);
+            let yaml = serde_yaml::to_string(&meta).unwrap();
+            let back: Metadata = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(back.status, Some(status));
+        }
+    }
+
+    #[test]
+    fn todo_checkbox_markers_share_note_status_enum() {
+        let cases = [
+            (" ", NoteStatus::Open),
+            ("/", NoteStatus::Active),
+            ("?", NoteStatus::NeedsClarification),
+            (">", NoteStatus::Deferred),
+            ("-", NoteStatus::Cancelled),
+            ("x", NoteStatus::Done),
+        ];
+        for (marker, status) in cases {
+            assert_eq!(status_from_checkbox_marker(marker), Some(status));
+            assert_eq!(checkbox_marker_for_status(status), marker);
+        }
+        assert_eq!(status_from_checkbox_marker("!"), None);
     }
 }

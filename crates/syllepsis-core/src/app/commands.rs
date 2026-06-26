@@ -5,7 +5,7 @@
 //! is unit-testable without a running app and shared across delivery targets (platform-infra.md
 //! "share as much code as possible").
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -14,7 +14,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::markdown::dialect;
 use crate::model::metadata::LockMode;
-use crate::model::{Category, Note, ObjectType, PriorEdge};
+use crate::model::{Category, Note, NoteVisibility, ObjectType, PriorEdge};
 use crate::sort::{self, RenderItem};
 use crate::storage::{layout, Book, NoteStore};
 
@@ -33,9 +33,36 @@ pub struct BookStats {
     pub notes_with_location: usize,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CreateNoteOptions {
+    pub vanishing: bool,
+    pub vanish_days: Option<u32>,
+}
+
+pub fn note_matches_visibility(note: &Note, visibility: NoteVisibility) -> bool {
+    match visibility {
+        NoteVisibility::Active => note.metadata.is_visible_in_default_views(),
+        NoteVisibility::Archived => {
+            note.metadata.lifecycle.archived
+                && !note.metadata.lifecycle.private
+                && note.metadata.lifecycle.marked_for_deletion_at.is_none()
+        }
+        NoteVisibility::Trash => {
+            !note.metadata.lifecycle.private
+                && note.metadata.lifecycle.marked_for_deletion_at.is_some()
+        }
+    }
+}
+
 /// Render all sorted notes as the continuous book view.
 pub fn book_view(book: &Book) -> CoreResult<Vec<RenderItem>> {
-    let notes = book.store.read_all_notes()?;
+    let notes = book
+        .store
+        .read_all_notes()?
+        .into_iter()
+        .filter(|n| note_matches_visibility(n, NoteVisibility::Active))
+        .collect();
     let categories = book.store.categories()?;
     Ok(sort::render(notes, categories))
 }
@@ -131,11 +158,18 @@ pub fn all_categories(book: &Book) -> CoreResult<Vec<Category>> {
 /// Every visible note (hidden / pending-deletion excluded), title-sorted. Backs views that
 /// need the whole corpus at once — e.g. the graph view's nodes and edges.
 pub fn list_notes(book: &Book) -> CoreResult<Vec<NoteDto>> {
+    list_notes_with_visibility(book, NoteVisibility::Active)
+}
+
+pub fn list_notes_with_visibility(
+    book: &Book,
+    visibility: NoteVisibility,
+) -> CoreResult<Vec<NoteDto>> {
     let mut notes: Vec<Note> = book
         .store
         .read_all_notes()?
         .into_iter()
-        .filter(|n| n.metadata.is_visible_in_default_views())
+        .filter(|n| note_matches_visibility(n, visibility))
         .collect();
     notes.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     Ok(notes.iter().map(NoteDto::from_note).collect())
@@ -155,7 +189,30 @@ pub fn create_note(
     title: &str,
     inherit_from: Option<&str>,
 ) -> CoreResult<NoteDto> {
+    create_note_with_options(
+        book,
+        object_type,
+        title,
+        inherit_from,
+        CreateNoteOptions::default(),
+    )
+}
+
+pub fn create_note_with_options(
+    book: &Book,
+    object_type: ObjectType,
+    title: &str,
+    inherit_from: Option<&str>,
+    options: CreateNoteOptions,
+) -> CoreResult<NoteDto> {
     let mut note = book.new_note(object_type, title)?;
+    if options.vanishing {
+        let days = options
+            .vanish_days
+            .unwrap_or(book.config.cleanup.default_vanish_days);
+        note.metadata.lifecycle.vanish_at = Some(Utc::now() + Duration::days(days as i64));
+        book.save_note(&note)?;
+    }
     if let Some(source_id) = inherit_from {
         let source = book.store.read_note(&NoteId::parse(source_id)?)?;
         if !source.categories.is_empty() {
@@ -180,6 +237,13 @@ pub fn create_note(
 /// re-import will not overwrite the user's change (core-concepts.md).
 pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
     let mut note = dto.into_note(book.config.markdown.dialect_version.clone())?;
+    if matches!(note.object_type, ObjectType::Picture | ObjectType::Drawing)
+        && note.metadata.lifecycle.archived
+    {
+        return Err(CoreError::InvalidBook(
+            "pictures and drawings cannot be archived; delete them instead".to_string(),
+        ));
+    }
     // Refresh the cosmetic slug so the filename tracks the current title.
     note.id = note.id.with_regenerated_slug(&note.title);
     if let Ok(stored) = book.store.read_note(&note.id) {
@@ -427,6 +491,23 @@ mod tests {
             child.categories,
             vec!["energy".to_string(), "design".into()]
         );
+    }
+
+    #[test]
+    fn create_note_options_can_make_note_vanish() {
+        let (_dir, book) = book();
+        let note = create_note_with_options(
+            &book,
+            ObjectType::Note,
+            "temporary",
+            None,
+            CreateNoteOptions {
+                vanishing: true,
+                vanish_days: Some(7),
+            },
+        )
+        .unwrap();
+        assert!(note.metadata.lifecycle.vanish_at.is_some());
     }
 
     #[test]

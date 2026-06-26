@@ -8,9 +8,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::embeddings::{category_vector, load_embedding_corpus, try_select_embedder, Embedding, EmbeddingCoverage, NoteVectors};
+use crate::app::commands::note_matches_visibility;
+use crate::embeddings::{
+    category_vector, load_embedding_corpus, try_select_embedder, Embedding, EmbeddingCoverage,
+    NoteVectors,
+};
 use crate::error::CoreResult;
 use crate::model::Note;
+use crate::model::NoteVisibility;
 use crate::search::{
     EmbeddingDiagnostics, RelatedNote, SearchEngine, SearchFilter, SearchResults, SqliteSearchIndex,
 };
@@ -20,12 +25,15 @@ use crate::storage::{Book, NoteStore};
 /// Build a search engine over the book's *visible* notes (hidden — archived/private — and
 /// pending-deletion notes are excluded so they never surface in RAG results), using the
 /// configured embedding provider.
-fn engine_for(book: &Book) -> CoreResult<(SearchEngine, EmbeddingCoverage)> {
+fn engine_for(
+    book: &Book,
+    visibility: NoteVisibility,
+) -> CoreResult<(SearchEngine, EmbeddingCoverage)> {
     let mut notes: Vec<Note> = book
         .store
         .read_all_notes()?
         .into_iter()
-        .filter(|n| n.metadata.is_visible_in_default_views())
+        .filter(|n| note_matches_visibility(n, visibility))
         .collect();
     notes.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
     let loaded = load_embedding_corpus(book, &notes)?;
@@ -50,7 +58,7 @@ pub fn search_with_query_embedding(
     query_embedding: Option<&Embedding>,
 ) -> CoreResult<SearchResults> {
     let started = std::time::Instant::now();
-    let (engine, _) = engine_for(book)?;
+    let (engine, _) = engine_for(book, filter.visibility)?;
     let mut index = SqliteSearchIndex::open(&layout::derived_dir(&book.root))?;
     index.rebuild_from_engine(&engine)?;
     let results = index.search(&engine, query, filter, query_embedding)?;
@@ -65,16 +73,16 @@ pub fn search_with_query_embedding(
 
 /// Notes related to `id` for the related carousel (vector neighbors, category-upweighted).
 pub fn related_notes(book: &Book, id: &str) -> CoreResult<Vec<RelatedNote>> {
-    Ok(engine_for(book)?.0.related(id))
+    Ok(engine_for(book, NoteVisibility::Active)?.0.related(id))
 }
 
 /// Embedding health report: near-duplicates and blind-spot (weakly connected) notes.
 pub fn embedding_diagnostics(book: &Book) -> CoreResult<EmbeddingDiagnostics> {
-    Ok(engine_for(book)?.0.diagnostics())
+    Ok(engine_for(book, NoteVisibility::Active)?.0.diagnostics())
 }
 
 pub fn embedding_coverage(book: &Book) -> CoreResult<EmbeddingCoverage> {
-    Ok(engine_for(book)?.1)
+    Ok(engine_for(book, NoteVisibility::Active)?.1)
 }
 
 /// Embedding coverage for a single category.
@@ -90,7 +98,9 @@ pub fn category_embedding_stats(book: &Book, name: &str) -> CoreResult<CategoryE
         .store
         .read_all_notes()?
         .into_iter()
-        .filter(|n| n.metadata.is_visible_in_default_views() && n.categories.iter().any(|c| c == name))
+        .filter(|n| {
+            n.metadata.is_visible_in_default_views() && n.categories.iter().any(|c| c == name)
+        })
         .collect();
 
     let corpus = load_embedding_corpus(book, &notes)?;
@@ -101,10 +111,13 @@ pub fn category_embedding_stats(book: &Book, name: &str) -> CoreResult<CategoryE
         .filter(|v| v.centroid.magnitude() > f32::EPSILON)
         .count();
 
-    let cat = book.store.categories()?.into_iter().find(|c| c.name == name);
+    let cat = book
+        .store
+        .categories()?
+        .into_iter()
+        .find(|c| c.name == name);
     let has_vector = if let Some(cat) = cat {
-        let pairs: Vec<(&Note, &NoteVectors)> =
-            notes.iter().zip(corpus.vectors.iter()).collect();
+        let pairs: Vec<(&Note, &NoteVectors)> = notes.iter().zip(corpus.vectors.iter()).collect();
         category_vector(&cat, &pairs).is_some()
     } else {
         false
@@ -121,6 +134,8 @@ pub fn category_embedding_stats(book: &Book, name: &str) -> CoreResult<CategoryE
 mod tests {
     use super::*;
     use crate::app::commands::{create_note, update_note};
+    use crate::app::lifecycle::request_deletion;
+    use crate::model::NoteVisibility;
     use crate::model::ObjectType;
     use crate::search::SearchFilter;
     use crate::storage::Book;
@@ -165,7 +180,51 @@ mod tests {
         n.metadata.lifecycle.archived = true;
         update_note(&book, n).unwrap();
 
-        assert!(search(&book, "breaker panel", &SearchFilter::default()).unwrap().hits.is_empty());
+        assert!(search(&book, "breaker panel", &SearchFilter::default())
+            .unwrap()
+            .hits
+            .is_empty());
+    }
+
+    #[test]
+    fn archived_and_trash_visibility_are_explicit_search_modes() {
+        let (_d, book) = book();
+        let mut archived = create_note(&book, ObjectType::Note, "Archived", None).unwrap();
+        archived.body = "breaker panel archived".into();
+        archived.metadata.lifecycle.archived = true;
+        update_note(&book, archived).unwrap();
+
+        let mut trashed = create_note(&book, ObjectType::Note, "Trashed", None).unwrap();
+        trashed.body = "breaker panel trashed".into();
+        let trashed = update_note(&book, trashed).unwrap();
+        request_deletion(&book, &trashed.id).unwrap();
+
+        let active = search(&book, "breaker panel", &SearchFilter::default()).unwrap();
+        assert!(active.hits.is_empty());
+
+        let archived = search(
+            &book,
+            "breaker panel",
+            &SearchFilter {
+                visibility: NoteVisibility::Archived,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(archived.hits.len(), 1);
+        assert!(archived.hits[0].archived);
+
+        let trash = search(
+            &book,
+            "breaker panel",
+            &SearchFilter {
+                visibility: NoteVisibility::Trash,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(trash.hits.len(), 1);
+        assert!(trash.hits[0].marked_for_deletion_at.is_some());
     }
 
     #[test]

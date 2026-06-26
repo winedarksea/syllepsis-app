@@ -37,6 +37,8 @@ export type Checkability =
 export type Stability = 'settled' | 'evolving' | 'tentative';
 export type Priority = 'standard' | 'important' | 'core';
 export type LockMode = 'none' | 'unlock_delay' | 'fact_check_gate';
+export type NoteStatus = 'open' | 'active' | 'needs_clarification' | 'deferred' | 'cancelled' | 'done';
+export type NoteVisibility = 'active' | 'archived' | 'trash';
 
 export interface Classification {
   statement_type: StatementType;
@@ -94,6 +96,7 @@ export interface Kanban {
 }
 
 export interface Metadata {
+  status?: NoteStatus;
   classification: Classification;
   dates: DateMetadata;
   authorship: Authorship;
@@ -115,6 +118,11 @@ export interface NoteDto {
   asset?: AssetMetadata;
   sorted: boolean;
   metadata: Metadata;
+}
+
+export interface CreateNoteOptions {
+  vanishing?: boolean;
+  vanish_days?: number;
 }
 
 export interface AssetMetadata {
@@ -247,6 +255,7 @@ export interface CrossBookNote {
 // ── Search & embeddings (mirrors syllepsis_core::search::results + filter) ──
 
 export interface SearchFilter {
+  visibility: NoteVisibility;
   categories: string[];
   updated_after: string | null;
   min_body_len: number | null;
@@ -258,6 +267,7 @@ export interface SearchFilter {
 export function emptyFilter(): SearchFilter {
   return {
     categories: [],
+    visibility: 'active',
     updated_after: null,
     min_body_len: null,
     max_body_len: null,
@@ -280,6 +290,9 @@ export interface SearchHit {
   starred: boolean;
   /** Body length in Unicode characters. */
   body_len: number;
+  status?: NoteStatus;
+  archived: boolean;
+  marked_for_deletion_at?: string;
 }
 
 export interface SearchRankingSignals {

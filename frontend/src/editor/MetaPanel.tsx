@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import type {
-  NoteDto, Category, PriorKind, PriorRef, StatementType, Priority, FlexDate, World,
+  NoteDto, Category, PriorKind, PriorRef, StatementType, Priority, FlexDate, World, NoteStatus,
 } from '../types';
 
 const STATEMENT_TYPES: StatementType[] = [
@@ -14,6 +14,9 @@ const STATEMENT_TYPES: StatementType[] = [
   'procedure', 'context', 'analysis_or_interpretation', 'narrative', 'idea',
 ];
 const PRIORITIES: Priority[] = ['standard', 'important', 'core'];
+const NOTE_STATUSES: NoteStatus[] = [
+  'open', 'active', 'needs_clarification', 'deferred', 'cancelled', 'done',
+];
 const PRIOR_KINDS: PriorKind[] = [
   'new_paragraph', 'same_paragraph', 'indented_new_paragraph', 'bullet_point', 'numbered_list',
 ];
@@ -259,6 +262,29 @@ export function MetaPanel({ note, categories, allNotes, onChange }: Props) {
                 />
                 Private
               </label>
+              {!['picture', 'drawing'].includes(note.type) && (
+                <label className="meta-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={note.metadata.lifecycle?.archived ?? false}
+                    onChange={(e) => patchMeta({
+                      lifecycle: { ...note.metadata.lifecycle, archived: e.target.checked },
+                    })}
+                  />
+                  Archived
+                </label>
+              )}
+              <select
+                value={note.metadata.status ?? ''}
+                onChange={(e) => patchMeta({
+                  status: e.target.value ? e.target.value as NoteStatus : undefined,
+                })}
+              >
+                <option value="">No status</option>
+                {NOTE_STATUSES.map((status) => (
+                  <option key={status} value={status}>{humanize(status)}</option>
+                ))}
+              </select>
             </div>
           </section>
 

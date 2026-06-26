@@ -171,7 +171,10 @@ impl SearchEngine {
         let note = &self.notes[idx];
 
         if !filter.categories.is_empty()
-            && !note.categories.iter().any(|c| filter.categories.contains(c))
+            && !note
+                .categories
+                .iter()
+                .any(|c| filter.categories.contains(c))
         {
             return false;
         }
@@ -187,9 +190,7 @@ impl SearchEngine {
         if filter.max_body_len.map_or(false, |max| body_len > max) {
             return false;
         }
-        if !filter.object_types.is_empty()
-            && !filter.object_types.contains(&note.object_type)
-        {
+        if !filter.object_types.is_empty() && !filter.object_types.contains(&note.object_type) {
             return false;
         }
         if filter.starred_only && !note.metadata.classification.starred {
@@ -381,6 +382,9 @@ impl SearchEngine {
             updated: note.metadata.dates.updated,
             starred: note.metadata.classification.starred,
             body_len: note.body.chars().count(),
+            status: note.metadata.status,
+            archived: note.metadata.lifecycle.archived,
+            marked_for_deletion_at: note.metadata.lifecycle.marked_for_deletion_at,
         }
     }
 }
@@ -615,11 +619,17 @@ mod tests {
             starred_only: true,
             ..Default::default()
         };
-        assert!(corpus().iter().enumerate().all(|(idx, _)| !e.passes_filter(idx, &filter)));
+        assert!(corpus()
+            .iter()
+            .enumerate()
+            .all(|(idx, _)| !e.passes_filter(idx, &filter)));
 
         // Empty filter passes everything
         let empty = SearchFilter::default();
-        assert!(corpus().iter().enumerate().all(|(idx, _)| e.passes_filter(idx, &empty)));
+        assert!(corpus()
+            .iter()
+            .enumerate()
+            .all(|(idx, _)| e.passes_filter(idx, &empty)));
 
         // Category filter: only idx 0 and 2 are electrical
         let cat_filter = SearchFilter {

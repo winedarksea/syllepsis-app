@@ -43,13 +43,8 @@ pub async fn search(
         let state = app_handle.state::<AppState>();
         with_book!(state, book, {
             let query_embedding = state.local_ai.submit_query(book, query.clone()).ok();
-            app::search_with_query_embedding(
-                book,
-                &query,
-                &filter,
-                query_embedding.as_ref(),
-            )
-            .map_err(|e| e.to_string())
+            app::search_with_query_embedding(book, &query, &filter, query_embedding.as_ref())
+                .map_err(|e| e.to_string())
         })
     })
     .await

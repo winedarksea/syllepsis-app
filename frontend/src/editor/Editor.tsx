@@ -307,14 +307,23 @@ export function Editor({ noteId }: Props) {
   }, [closeEditor, noteId]);
 
   const handleDelete = useCallback(async () => {
-    if (!window.confirm('Delete this note? This cannot be undone.')) return;
+    if (!note) return;
+    const isImageObject = note.type === 'picture' || note.type === 'drawing';
+    const message = isImageObject
+      ? 'Delete this image object and its tracked asset now? This cannot be undone.'
+      : 'Move this note to trash? It will be permanently removed after the configured deletion delay.';
+    if (!window.confirm(message)) return;
     try {
-      await api.deleteNote(noteId);
+      if (isImageObject) {
+        await api.deleteImageObjectNow(noteId);
+      } else {
+        await api.requestDeletion(noteId);
+      }
       closeEditor();
     } catch (e) {
       setError(String(e));
     }
-  }, [noteId, closeEditor]);
+  }, [note, noteId, closeEditor]);
 
   const handleProposalApplied = useCallback((updated: NoteDto) => {
     setNote(updated);

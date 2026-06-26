@@ -5,7 +5,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::model::ObjectType;
+use crate::model::{NoteStatus, ObjectType};
 
 /// Per-retriever contribution to a hit's final reciprocal-rank-fusion score.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -44,6 +44,11 @@ pub struct SearchHit {
     pub starred: bool,
     /// Body length in Unicode scalar values (characters), for the length filter feedback badge.
     pub body_len: usize,
+    /// Optional user-managed note status.
+    pub status: Option<NoteStatus>,
+    /// Lifecycle badges for explicit archived/trash search modes.
+    pub archived: bool,
+    pub marked_for_deletion_at: Option<DateTime<Utc>>,
 }
 
 /// How many results fall under a category — the facet sidebar of [`SearchResults`].

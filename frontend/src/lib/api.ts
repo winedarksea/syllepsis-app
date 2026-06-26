@@ -18,7 +18,7 @@ import type {
   LockMode, PolicyOverview,
   ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
   PublishReport, GitignoreReport,
-  BookStats, StyleCard, CrossBookNote, SearchFilter,
+  BookStats, StyleCard, CrossBookNote, SearchFilter, CreateNoteOptions, NoteVisibility,
   TextImportOptions, TextImportPreview, TextImportCommitRequest, TextImportReport,
   PluginDescriptor,
 } from '../types';
@@ -66,9 +66,15 @@ export const api = {
   bookView: () => invoke<RenderItem[]>('book_view'),
   unsortedNotes: () => invoke<NoteDto[]>('unsorted_notes'),
   getNote: (id: string) => invoke<NoteDto>('get_note', { id }),
-  listNotes: () => invoke<NoteDto[]>('list_notes'),
-  createNote: (objectType: ObjectType, title: string, inheritFrom?: string) =>
-    invoke<NoteDto>('create_note', { objectType, title, inheritFrom: inheritFrom ?? null }),
+  listNotes: (visibility?: NoteVisibility) =>
+    invoke<NoteDto[]>('list_notes', { visibility: visibility ?? null }),
+  createNote: (objectType: ObjectType, title: string, inheritFrom?: string, options?: CreateNoteOptions) =>
+    invoke<NoteDto>('create_note', {
+      objectType,
+      title,
+      inheritFrom: inheritFrom ?? null,
+      options: options ?? null,
+    }),
   updateNote: (note: NoteDto) => invoke<NoteDto>('update_note', { note }),
   setPrior: (id: string, prior: PriorEdge | null) =>
     invoke<NoteDto>('set_prior', { id, prior }),
@@ -172,6 +178,7 @@ export const api = {
   requestDeletion: (id: string) => invoke<NoteDto>('request_deletion', { id }),
   restoreNote: (id: string) => invoke<NoteDto>('restore_note', { id }),
   purgeExpired: () => invoke<string[]>('purge_expired'),
+  deleteImageObjectNow: (id: string) => invoke<void>('delete_image_object_now', { id }),
 
   // Knowledge packs (Phase 6)
   exportPack: (spec: ExportSpec, path: string) =>

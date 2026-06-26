@@ -3,7 +3,7 @@
 use tauri::State;
 
 use syllepsis_core::app::{commands as app, dto::NoteDto, plugin as app_plugin};
-use syllepsis_core::model::{ObjectType, PriorEdge};
+use syllepsis_core::model::{NoteVisibility, ObjectType, PriorEdge};
 use syllepsis_core::sort::RenderItem;
 use syllepsis_core::storage::NoteStore;
 
@@ -46,9 +46,13 @@ pub fn get_note(state: State<AppState>, id: String) -> Result<NoteDto, String> {
 
 /// Every visible note, title-sorted (backs the graph view).
 #[tauri::command]
-pub fn list_notes(state: State<AppState>) -> Result<Vec<NoteDto>, String> {
+pub fn list_notes(
+    state: State<AppState>,
+    visibility: Option<NoteVisibility>,
+) -> Result<Vec<NoteDto>, String> {
     with_book!(state, book, {
-        app::list_notes(book).map_err(|e| e.to_string())
+        app::list_notes_with_visibility(book, visibility.unwrap_or_default())
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -59,10 +63,17 @@ pub fn create_note(
     object_type: ObjectType,
     title: String,
     inherit_from: Option<String>,
+    options: Option<app::CreateNoteOptions>,
 ) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        let created = app::create_note(book, object_type, &title, inherit_from.as_deref())
-            .map_err(|e| e.to_string())?;
+        let created = app::create_note_with_options(
+            book,
+            object_type,
+            &title,
+            inherit_from.as_deref(),
+            options.unwrap_or_default(),
+        )
+        .map_err(|e| e.to_string())?;
         let _ = state.local_ai.enqueue_note(book, created.id.clone(), false);
         Ok(created)
     })

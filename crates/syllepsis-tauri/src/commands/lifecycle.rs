@@ -35,7 +35,9 @@ pub fn set_note_private(
     private: bool,
 ) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        app::set_note_private(book, &id, private).map_err(|e| e.to_string())
+        let updated = app::set_note_private(book, &id, private).map_err(|e| e.to_string())?;
+        state.invalidate_graph_corpus();
+        Ok(updated)
     })
 }
 
@@ -47,7 +49,9 @@ pub fn set_note_archived(
     archived: bool,
 ) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        app::set_note_archived(book, &id, archived).map_err(|e| e.to_string())
+        let updated = app::set_note_archived(book, &id, archived).map_err(|e| e.to_string())?;
+        state.invalidate_graph_corpus();
+        Ok(updated)
     })
 }
 
@@ -79,7 +83,9 @@ pub fn set_category_private(
 #[tauri::command]
 pub fn request_deletion(state: State<AppState>, id: String) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        app::request_deletion(book, &id).map_err(|e| e.to_string())
+        let updated = app::request_deletion(book, &id).map_err(|e| e.to_string())?;
+        state.invalidate_graph_corpus();
+        Ok(updated)
     })
 }
 
@@ -87,7 +93,9 @@ pub fn request_deletion(state: State<AppState>, id: String) -> Result<NoteDto, S
 #[tauri::command]
 pub fn restore_note(state: State<AppState>, id: String) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        app::restore_note(book, &id).map_err(|e| e.to_string())
+        let updated = app::restore_note(book, &id).map_err(|e| e.to_string())?;
+        state.invalidate_graph_corpus();
+        Ok(updated)
     })
 }
 
@@ -96,6 +104,20 @@ pub fn restore_note(state: State<AppState>, id: String) -> Result<NoteDto, Strin
 #[tauri::command]
 pub fn purge_expired(state: State<AppState>) -> Result<Vec<String>, String> {
     with_book!(state, book, {
-        app::purge_expired_now(book).map_err(|e| e.to_string())
+        let purged = app::purge_expired_now(book).map_err(|e| e.to_string())?;
+        if !purged.is_empty() {
+            state.invalidate_graph_corpus();
+        }
+        Ok(purged)
+    })
+}
+
+/// Permanently delete a Picture/Drawing note and its tracked asset immediately.
+#[tauri::command]
+pub fn delete_image_object_now(state: State<AppState>, id: String) -> Result<(), String> {
+    with_book!(state, book, {
+        app::delete_image_object_now(book, &id).map_err(|e| e.to_string())?;
+        state.invalidate_graph_corpus();
+        Ok(())
     })
 }

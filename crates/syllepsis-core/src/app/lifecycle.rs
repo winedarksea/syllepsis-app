@@ -12,11 +12,12 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::app::dto::NoteDto;
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::model::metadata::LockMode;
-use crate::model::Note;
+use crate::model::{Note, ObjectType};
 use crate::storage::{Book, NoteStore};
+use crate::sync::AssetRegistry;
 
 /// One note awaiting permanent removal, with the moment its delay elapses so the UI can show a
 /// countdown ("purges in 3 days") and offer restore.
@@ -82,6 +83,12 @@ pub fn set_note_private(book: &Book, id: &str, private: bool) -> CoreResult<Note
 
 /// Toggle a note's `archived` flag (hidden from default views but kept and reversible).
 pub fn set_note_archived(book: &Book, id: &str, archived: bool) -> CoreResult<NoteDto> {
+    let note = book.store.read_note(&NoteId::parse(id)?)?;
+    if archived && matches!(note.object_type, ObjectType::Picture | ObjectType::Drawing) {
+        return Err(CoreError::InvalidBook(
+            "pictures and drawings cannot be archived; delete them instead".to_string(),
+        ));
+    }
     edit_note(book, id, |note| note.metadata.lifecycle.archived = archived)
 }
 
@@ -101,9 +108,41 @@ pub fn set_category_private(book: &Book, name: &str, private: bool) -> CoreResul
 /// (privacy-security.md "Deletion Delay"). The note stays on disk but drops out of default views
 /// until [`purge_expired`] removes it once the configured delay elapses; [`restore_note`] cancels.
 pub fn request_deletion(book: &Book, id: &str) -> CoreResult<NoteDto> {
+    let note = book.store.read_note(&NoteId::parse(id)?)?;
+    if matches!(note.object_type, ObjectType::Picture | ObjectType::Drawing) {
+        return Err(CoreError::InvalidBook(
+            "pictures and drawings are deleted immediately after confirmation".to_string(),
+        ));
+    }
     edit_note(book, id, |note| {
         note.metadata.lifecycle.marked_for_deletion_at = Some(Utc::now())
     })
+}
+
+/// Permanently delete a first-class Picture/Drawing note and its tracked asset immediately.
+pub fn delete_image_object_now(book: &Book, id: &str) -> CoreResult<()> {
+    let id = NoteId::parse(id)?;
+    let note = book.store.read_note(&id)?;
+    if !matches!(note.object_type, ObjectType::Picture | ObjectType::Drawing) {
+        return Err(CoreError::InvalidBook(
+            "immediate asset deletion is only for picture and drawing notes".to_string(),
+        ));
+    }
+    if let Some(asset) = &note.asset {
+        if let Some(relative_path) = AssetRegistry::scan(&book.root)?.resolve(&asset.uuid) {
+            let asset_path = book.root.join(relative_path);
+            let sidecar_path = asset_path.with_file_name(format!(
+                "{}.uuid",
+                asset_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("asset")
+            ));
+            let _ = std::fs::remove_file(&asset_path);
+            let _ = std::fs::remove_file(&sidecar_path);
+        }
+    }
+    book.delete_note(&id)
 }
 
 /// Cancel a pending deletion, returning the note to active use.
@@ -354,6 +393,40 @@ mod tests {
         assert!(purge_expired(&book, Utc::now()).unwrap().is_empty());
         let after = Utc::now() + Duration::hours(3);
         assert_eq!(purge_expired(&book, after).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn picture_delete_removes_note_asset_and_uuid_sidecar_immediately() {
+        let (directory, book) = book();
+        let source = directory.path().join("photo.png");
+        image::DynamicImage::new_rgb8(3, 2)
+            .save_with_format(&source, image::ImageFormat::Png)
+            .unwrap();
+        let imported =
+            crate::app::image_assets::import_image_object(&book, source.to_str().unwrap(), None)
+                .unwrap();
+        let asset = imported.asset.as_ref().unwrap();
+        let relative_path = AssetRegistry::scan(&book.root)
+            .unwrap()
+            .resolve(&asset.uuid)
+            .unwrap()
+            .to_string();
+        let asset_path = book.root.join(&relative_path);
+        let sidecar_path = asset_path.with_file_name(format!(
+            "{}.uuid",
+            asset_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap()
+        ));
+        assert!(asset_path.exists());
+        assert!(sidecar_path.exists());
+
+        delete_image_object_now(&book, &imported.id).unwrap();
+
+        assert!(crate::app::commands::get_note(&book, &imported.id).is_err());
+        assert!(!asset_path.exists());
+        assert!(!sidecar_path.exists());
     }
 
     #[test]

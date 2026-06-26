@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::model::ObjectType;
+use crate::model::{NoteVisibility, ObjectType};
 
 /// Structured search filter. All fields are optional/defaulted so an empty `SearchFilter` (i.e.
 /// `SearchFilter::default()`) reproduces the existing unfiltered behavior — zero categories means
@@ -11,6 +11,8 @@ use crate::model::ObjectType;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SearchFilter {
+    /// Which lifecycle bucket to search. Active is the default/RAG-safe corpus.
+    pub visibility: NoteVisibility,
     /// Keep only notes in at least one of these categories (empty = any category).
     pub categories: Vec<String>,
     /// Keep only notes updated at or after this timestamp.

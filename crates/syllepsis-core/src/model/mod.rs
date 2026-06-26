@@ -16,7 +16,7 @@ pub use category::Category;
 pub use classification::{Basis, Checkability, Classification, Priority, Stability, StatementType};
 pub use metadata::{
     Authorship, DateMetadata, FlexDate, ForkInfo, Kanban, Lifecycle, LockMode, Metadata,
-    PackMembership,
+    NoteStatus, NoteVisibility, PackMembership,
 };
 pub use note::{AssetMetadata, Note, SummaryWarning};
 pub use object_type::ObjectType;

@@ -36,7 +36,10 @@ pub fn create_category(state: State<AppState>, category: Category) -> Result<(),
 
 /// Embedding coverage stats for a single category.
 #[tauri::command]
-pub fn category_embedding_stats(state: State<AppState>, name: String) -> Result<CategoryEmbeddingStats, String> {
+pub fn category_embedding_stats(
+    state: State<AppState>,
+    name: String,
+) -> Result<CategoryEmbeddingStats, String> {
     with_book!(state, book, {
         search::category_embedding_stats(book, &name).map_err(|e| e.to_string())
     })

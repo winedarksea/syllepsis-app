@@ -130,14 +130,12 @@ impl SqliteSearchIndex {
         // Tiebreaker: among equal RRF scores, longer-body notes rank first (penalizes title-only
         // notes — body length 0 — without touching the zero-centroid path).
         fused.sort_by(|(a_idx, a_score), (b_idx, b_score)| {
-            b_score
-                .total_cmp(a_score)
-                .then_with(|| {
-                    engine.notes()[*b_idx]
-                        .body
-                        .len()
-                        .cmp(&engine.notes()[*a_idx].body.len())
-                })
+            b_score.total_cmp(a_score).then_with(|| {
+                engine.notes()[*b_idx]
+                    .body
+                    .len()
+                    .cmp(&engine.notes()[*a_idx].body.len())
+            })
         });
 
         let facets = self.facet_counts(fused.iter().map(|(idx, _)| *idx))?;
@@ -455,7 +453,12 @@ mod tests {
         assert_eq!(index.vector_backend().unwrap(), "sqlite-blob-f32");
         let query_emb = eng.query_embedding("breaker panel");
         let results = index
-            .search(&eng, "breaker panel", &SearchFilter::default(), Some(&query_emb))
+            .search(
+                &eng,
+                "breaker panel",
+                &SearchFilter::default(),
+                Some(&query_emb),
+            )
             .unwrap();
         assert_eq!(results.hits[0].title, "Kitchen wiring");
         assert!(results.facets.iter().any(|f| f.category == "electrical"));
@@ -468,7 +471,12 @@ mod tests {
         let (_dir, index) = open_index(&mut eng);
         let query_emb = eng.query_embedding("breaker panel");
         let results = index
-            .search(&eng, "breaker panel", &SearchFilter::default(), Some(&query_emb))
+            .search(
+                &eng,
+                "breaker panel",
+                &SearchFilter::default(),
+                Some(&query_emb),
+            )
             .unwrap();
         assert!(!results.hits.is_empty());
         // The top hit should have a non-zero vector_similarity when a matching embedding exists.
@@ -483,7 +491,11 @@ mod tests {
         // The tiebreaker only applies when RRF scores are equal; a title-only note can still
         // legitimately outscore a full note on exact/BM25 for a query matching its title exactly.
         // The correct user-facing lever is the length filter.
-        let full = note("Breaker panel wiring", "Install the breaker panel and run the outlets to each room. Use 20-amp breakers.", &["electrical"]);
+        let full = note(
+            "Breaker panel wiring",
+            "Install the breaker panel and run the outlets to each room. Use 20-amp breakers.",
+            &["electrical"],
+        );
         let title_only = note("Breaker panel", "", &["electrical"]);
         let mut eng = engine_from(vec![full, title_only]);
         let (_dir, index) = open_index(&mut eng);
@@ -491,7 +503,12 @@ mod tests {
 
         // Without a length filter both appear.
         let all = index
-            .search(&eng, "breaker panel", &SearchFilter::default(), Some(&query_emb))
+            .search(
+                &eng,
+                "breaker panel",
+                &SearchFilter::default(),
+                Some(&query_emb),
+            )
             .unwrap();
         assert_eq!(all.hits.len(), 2);
 
@@ -538,7 +555,11 @@ mod tests {
     fn starred_only_filter_narrows_hits() {
         let mut notes = vec![
             note("Regular note", "content about breaker", &["electrical"]),
-            note("Starred note", "more content about breaker", &["electrical"]),
+            note(
+                "Starred note",
+                "more content about breaker",
+                &["electrical"],
+            ),
         ];
         notes[1].metadata.classification.starred = true;
 
@@ -560,9 +581,7 @@ mod tests {
 
     #[test]
     fn object_type_filter_narrows_hits() {
-        let mut notes = vec![
-            note("A note", "content about breaker", &["electrical"]),
-        ];
+        let mut notes = vec![note("A note", "content about breaker", &["electrical"])];
         let mut todo = Note::new(ObjectType::Todo, "A todo", "syllepsis_001");
         todo.body = "todo content about breaker".into();
         todo.categories = vec!["electrical".into()];
@@ -587,7 +606,11 @@ mod tests {
     fn length_filter_narrows_hits() {
         let notes = vec![
             note("Short note", "breaker", &["electrical"]),
-            note("Long note", &"breaker panel wiring outlet ".repeat(20), &["electrical"]),
+            note(
+                "Long note",
+                &"breaker panel wiring outlet ".repeat(20),
+                &["electrical"],
+            ),
         ];
         let mut eng = engine_from(notes);
         let (_dir, index) = open_index(&mut eng);
@@ -609,8 +632,16 @@ mod tests {
         // Both notes must match the query so they both appear in the fused (unfiltered) set.
         // A category filter then narrows hits but facets should still include the filtered category.
         let notes = vec![
-            note("Electrical note", "the breaker panel has outlets", &["electrical"]),
-            note("Garden note", "the garden has compost and roses", &["garden"]),
+            note(
+                "Electrical note",
+                "the breaker panel has outlets",
+                &["electrical"],
+            ),
+            note(
+                "Garden note",
+                "the garden has compost and roses",
+                &["garden"],
+            ),
         ];
         let mut eng = engine_from(notes);
         let (_dir, index) = open_index(&mut eng);
@@ -620,11 +651,12 @@ mod tests {
             categories: vec!["electrical".into()],
             ..Default::default()
         };
-        let results = index
-            .search(&eng, "the", &filter, None)
-            .unwrap();
+        let results = index.search(&eng, "the", &filter, None).unwrap();
         // Filtered hits contain only electrical.
-        assert!(results.hits.iter().all(|h| h.categories.contains(&"electrical".into())));
+        assert!(results
+            .hits
+            .iter()
+            .all(|h| h.categories.contains(&"electrical".into())));
         // But facets are from the unfiltered set, so both categories appear.
         assert!(
             results.facets.iter().any(|f| f.category == "garden"),

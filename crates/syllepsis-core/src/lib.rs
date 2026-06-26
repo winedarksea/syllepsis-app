@@ -49,7 +49,9 @@ pub use embeddings::{Embedding, EmbeddingProvider, HashingEmbedder};
 pub use error::{CoreError, CoreResult};
 pub use id::NoteId;
 pub use llm::{LlmProvider, LlmService, LlmTask, Proposal, ProposalStatus};
-pub use model::{Category, Metadata, Note, ObjectType, PriorEdge, PriorKind};
+pub use model::{
+    Category, Metadata, Note, NoteStatus, NoteVisibility, ObjectType, PriorEdge, PriorKind,
+};
 pub use model::{SpatialRegion, World, WorldKind};
 pub use onnx::{ModelCache, ModelKind, ModelManifest, RuntimeDiagnostics};
 pub use plugin::{InstalledPlugin, PluginKind, PluginManifest, PluginRegistry, PluginSource};

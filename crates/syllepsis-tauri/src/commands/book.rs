@@ -59,6 +59,7 @@ pub fn open_book(app: AppHandle, state: State<AppState>, path: String) -> Result
     state.invalidate_llm_service();
     state.invalidate_graph_corpus();
     if let Some(book) = state.book.lock().unwrap().as_ref() {
+        let _ = syllepsis_core::app::lifecycle::purge_expired_now(book);
         let _ = state.local_ai.enqueue_all_stale(book, true);
     }
     Ok(info)

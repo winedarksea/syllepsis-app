@@ -6,7 +6,7 @@ import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
-import type { NoteDto, ObjectType, TimelineDateField } from '../types';
+import type { NoteDto, ObjectType, TimelineDateField, NoteVisibility } from '../types';
 import './UnsortedQueue.css';
 
 const SORT_FIELDS: { id: TimelineDateField; label: string }[] = [
@@ -51,13 +51,24 @@ interface NewNoteFormProps {
 function NewNoteForm({ onCreate }: NewNoteFormProps) {
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
+  const [vanishing, setVanishing] = useState(false);
+  const [vanishDays, setVanishDays] = useState(180);
+
+  useEffect(() => {
+    api.getBookConfig()
+      .then((config) => setVanishDays(config.cleanup.default_vanish_days))
+      .catch(() => {});
+  }, []);
 
   const submit = async () => {
     const t = title.trim();
     if (!t) return;
     setBusy(true);
     try {
-      const note = await api.createNote('note', t);
+      const note = await api.createNote('note', t, undefined, {
+        vanishing,
+        vanish_days: vanishing ? vanishDays : undefined,
+      });
       setTitle('');
       onCreate(note);
     } finally {
@@ -79,6 +90,28 @@ function NewNoteForm({ onCreate }: NewNoteFormProps) {
       <button className="uq-new-btn" onClick={submit} disabled={busy || !title.trim()}>
         Add
       </button>
+      <label className="uq-sort">
+        <input
+          type="checkbox"
+          checked={vanishing}
+          onChange={(e) => setVanishing(e.target.checked)}
+          disabled={busy}
+        />
+        Vanishing
+      </label>
+      {vanishing && (
+        <label className="uq-sort">
+          <span className="uq-sort-label">Days</span>
+          <input
+            className="uq-sort-select"
+            type="number"
+            min={1}
+            value={vanishDays}
+            onChange={(e) => setVanishDays(Math.max(1, Number(e.target.value) || 1))}
+            disabled={busy}
+          />
+        </label>
+      )}
     </div>
   );
 }
@@ -90,17 +123,20 @@ export function UnsortedQueue() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [filterMode, setFilterMode] = useState<FilterMode>('unsorted');
+  const [visibility, setVisibility] = useState<NoteVisibility>('active');
   const [sortField, setSortField] = useState<TimelineDateField>('updated');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [typeFilter, setTypeFilter] = useState<ObjectType | 'all'>('all');
 
   const refresh = useCallback(() => {
     setLoading(true);
-    const fetch = filterMode === 'unsorted' ? api.unsortedNotes() : api.listNotes();
+    const fetch = visibility === 'active'
+      ? (filterMode === 'unsorted' ? api.unsortedNotes() : api.listNotes('active'))
+      : api.listNotes(visibility);
     fetch
       .then((ns) => {
         setNotes(ns);
-        if (filterMode !== 'unsorted') {
+        if (filterMode !== 'unsorted' || visibility !== 'active') {
           api.unsortedNotes().then((us) => setUnsortedCount(us.length)).catch(console.error);
         } else {
           setUnsortedCount(ns.length);
@@ -108,9 +144,12 @@ export function UnsortedQueue() {
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [filterMode, setUnsortedCount]);
+  }, [filterMode, visibility, setUnsortedCount]);
 
   useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    if (visibility !== 'active') setShowForm(false);
+  }, [visibility]);
 
   const handleCreate = useCallback((note: NoteDto) => {
     setNotes((prev) => [note, ...prev]);
@@ -121,7 +160,9 @@ export function UnsortedQueue() {
 
   const sortedNotes = useMemo(() => {
     const direction = sortDir === 'asc' ? 1 : -1;
-    const modeFiltered = filterMode === 'uncategorized'
+    const modeFiltered = visibility !== 'active'
+      ? notes
+      : filterMode === 'uncategorized'
       ? notes.filter((n) => n.categories.length === 0)
       : notes;
     const sorted = [...modeFiltered].sort((a, b) => {
@@ -133,7 +174,7 @@ export function UnsortedQueue() {
       return (ka - kb) * direction;
     });
     return typeFilter === 'all' ? sorted : sorted.filter((n) => n.type === typeFilter);
-  }, [notes, filterMode, sortField, sortDir, typeFilter]);
+  }, [notes, filterMode, visibility, sortField, sortDir, typeFilter]);
 
   if (loading) return <div className="uq-state">Loading…</div>;
   if (error) return <div className="uq-state uq-error">{error}</div>;
@@ -159,8 +200,29 @@ export function UnsortedQueue() {
             <button
               className={`uq-filter-btn ${filterMode === 'uncategorized' ? 'active' : ''}`}
               onClick={() => setFilterMode('uncategorized')}
+              disabled={visibility !== 'active'}
             >
               Uncategorized
+            </button>
+          </div>
+          <div className="uq-filter-toggle">
+            <button
+              className={`uq-filter-btn ${visibility === 'active' ? 'active' : ''}`}
+              onClick={() => setVisibility('active')}
+            >
+              Active
+            </button>
+            <button
+              className={`uq-filter-btn ${visibility === 'archived' ? 'active' : ''}`}
+              onClick={() => setVisibility('archived')}
+            >
+              Archived
+            </button>
+            <button
+              className={`uq-filter-btn ${visibility === 'trash' ? 'active' : ''}`}
+              onClick={() => setVisibility('trash')}
+            >
+              Trash
             </button>
           </div>
           <label className="uq-sort">
@@ -194,22 +256,28 @@ export function UnsortedQueue() {
               ))}
             </select>
           </label>
-          <button className="uq-add-btn" onClick={() => setShowForm((s) => !s)}>
-            {showForm ? 'Cancel' : '+ New Note'}
-          </button>
+          {visibility === 'active' && (
+            <button className="uq-add-btn" onClick={() => setShowForm((s) => !s)}>
+              {showForm ? 'Cancel' : '+ New Note'}
+            </button>
+          )}
         </div>
       </div>
 
-      {showForm && (
+      {showForm && visibility === 'active' && (
         <NewNoteForm onCreate={handleCreate} />
       )}
 
       {sortedNotes.length === 0 && !showForm ? (
         <div className="uq-empty">
-          {filterMode === 'unsorted' && <p>All caught up! Every note has been organised.</p>}
-          {filterMode === 'all' && <p>No notes yet. Capture your first thought below.</p>}
-          {filterMode === 'uncategorized' && <p>No uncategorized notes — all notes have at least one category.</p>}
-          <button className="uq-add-btn" onClick={() => setShowForm(true)}>+ Capture a thought</button>
+          {visibility === 'archived' && <p>No archived notes.</p>}
+          {visibility === 'trash' && <p>Trash is empty.</p>}
+          {visibility === 'active' && filterMode === 'unsorted' && <p>All caught up! Every note has been organised.</p>}
+          {visibility === 'active' && filterMode === 'all' && <p>No notes yet. Capture your first thought below.</p>}
+          {visibility === 'active' && filterMode === 'uncategorized' && <p>No uncategorized notes — all notes have at least one category.</p>}
+          {visibility === 'active' && (
+            <button className="uq-add-btn" onClick={() => setShowForm(true)}>+ Capture a thought</button>
+          )}
         </div>
       ) : (
         <div className="uq-list">
