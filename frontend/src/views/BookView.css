@@ -182,6 +182,8 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--transition-fast);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .bv-note:hover {
@@ -204,6 +206,7 @@
 }
 
 .bv-note-body {
+  flex: 1 1 0;
   font-family: var(--font-serif);
   font-size: var(--font-size-lg);
   color: var(--color-text);
@@ -213,7 +216,57 @@
 }
 
 .bv-rendered-note {
+  width: 100%;
   max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.bv-rendered-note p,
+.bv-rendered-note ul,
+.bv-rendered-note ol,
+.bv-rendered-note blockquote,
+.bv-rendered-note table,
+.bv-rendered-note pre,
+.bv-rendered-note .syl-plugin-render--code-block {
+  margin: 0 0 var(--sp-3);
+}
+
+.bv-rendered-note > :last-child {
+  margin-bottom: 0;
+}
+
+.bv-rendered-note table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.bv-rendered-note img {
+  max-width: 100%;
+  height: auto;
+}
+
+.bv-rendered-note pre {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--color-text);
+  cursor: default;
+}
+
+.bv-rendered-note pre code {
+  font: inherit;
+  white-space: inherit;
 }
 
 .bv-empty-body {
@@ -243,20 +296,10 @@
   max-width: 100%;
 }
 .bv-rendered-note .syl-plugin-render--code-block {
-  margin: var(--sp-3) 0;
   overflow-x: auto;
   cursor: default;
 }
 .bv-rendered-note .syl-plugin-render--code-block pre.plugin-codeblock,
 .bv-rendered-note > pre.plugin-codeblock {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-sm);
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: var(--sp-3) var(--sp-4);
   margin: 0;
-  overflow-x: auto;
-  white-space: pre;
-  color: var(--color-text);
 }
