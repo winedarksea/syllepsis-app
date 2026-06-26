@@ -21,7 +21,7 @@ import type {
   PublishReport, GitignoreReport,
   BookStats, StyleCard, CrossBookNote, SearchFilter, CreateNoteOptions, NoteVisibility,
   TextImportOptions, TextImportPreview, TextImportCommitRequest, TextImportReport,
-  PluginDescriptor,
+  PluginDescriptor, CommentaryKind, CommentarySummary, ApplyCommentaryOptions,
 } from '../types';
 
 export const api = {
@@ -100,6 +100,20 @@ export const api = {
     invoke<NoteEmbeddingDetails>('note_embedding_details', { noteId }),
   mergeNotes: (request: MergeNotesRequest) => invoke<NoteDto>('merge_notes', { request }),
   splitNote: (request: SplitNoteRequest) => invoke<SplitNoteResult>('split_note', { request }),
+  listCommentary: (parentNoteId: string, includeResolved = false) =>
+    invoke<CommentarySummary[]>('list_commentary', { parentNoteId, includeResolved }),
+  getCommentary: (commentaryId: string) =>
+    invoke<NoteDto>('get_commentary', { commentaryId }),
+  createCommentary: (parentNoteId: string, kind: CommentaryKind, body: string) =>
+    invoke<NoteDto>('create_commentary', { parentNoteId, kind, body }),
+  updateCommentary: (commentary: NoteDto) =>
+    invoke<NoteDto>('update_commentary', { commentary }),
+  applyCommentary: (commentaryId: string, options?: ApplyCommentaryOptions) =>
+    invoke<NoteDto>('apply_commentary', { commentaryId, options: options ?? null }),
+  dismissCommentary: (commentaryId: string) =>
+    invoke<NoteDto>('dismiss_commentary', { commentaryId }),
+  pinCommentary: (commentaryId: string) =>
+    invoke<NoteDto>('pin_commentary', { commentaryId }),
 
   allCategories: () => invoke<Category[]>('all_categories'),
   createCategory: (category: Category) => invoke<void>('create_category', { category }),

@@ -605,6 +605,7 @@ fn snapshot_path(book_id: &str, ulid: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "loro")]
     use crate::model::ObjectType;
 
     fn book_at(path: PathBuf) -> Book {
@@ -741,6 +742,7 @@ mod tests {
     }
 
     impl<'a> ManagedCloudSyncEngine<'a, MemoryManagedObjectStore> {
+        #[cfg(feature = "loro")]
         fn into_store_after_sync(mut self) -> CoreResult<MemoryManagedObjectStore> {
             self.sync()?;
             Ok(self.into_store())

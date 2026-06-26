@@ -99,7 +99,10 @@ pub fn set_note_lock(book: &Book, id: &str, mode: LockMode) -> CoreResult<NoteDt
 
 /// Toggle a category's `private` flag (excluded from publish; its notes drop from default views).
 pub fn set_category_private(book: &Book, name: &str, private: bool) -> CoreResult<()> {
-    let mut category = book.store.read_category(name)?;
+    let mut category = book
+        .store
+        .read_category(name)
+        .unwrap_or_else(|_| crate::model::Category::new(name.to_string()));
     category.private = private;
     book.store.write_category(&category)
 }
@@ -114,9 +117,11 @@ pub fn request_deletion(book: &Book, id: &str) -> CoreResult<NoteDto> {
             "pictures and drawings are deleted immediately after confirmation".to_string(),
         ));
     }
-    edit_note(book, id, |note| {
+    let updated = edit_note(book, id, |note| {
         note.metadata.lifecycle.marked_for_deletion_at = Some(Utc::now())
-    })
+    })?;
+    crate::app::commentary::mark_parent_commentary_for_deletion(book, id)?;
+    Ok(updated)
 }
 
 /// Permanently delete a first-class Picture/Drawing note and its tracked asset immediately.
@@ -164,6 +169,12 @@ pub fn purge_expired(book: &Book, now: DateTime<Utc>) -> CoreResult<Vec<String>>
             purged.push(note.id.to_string());
         }
     }
+    for note in book.read_all_commentary_notes()? {
+        if is_due_for_purge(&note, delay, now) {
+            book.delete_commentary_note(&note.id)?;
+            purged.push(note.id.to_string());
+        }
+    }
     Ok(purged)
 }
 
@@ -200,7 +211,12 @@ pub fn policy_overview(book: &Book) -> CoreResult<PolicyOverview> {
         private_categories: Vec::new(),
     };
 
-    for note in book.store.read_all_notes()? {
+    for note in book
+        .store
+        .read_all_notes()?
+        .into_iter()
+        .chain(book.read_all_commentary_notes()?.into_iter())
+    {
         let life = &note.metadata.lifecycle;
         if life.private {
             overview.private_notes.push(NoteRef::of(&note));

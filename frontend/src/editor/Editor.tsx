@@ -34,6 +34,7 @@ import type { Category, LookupEntry, NoteDto, NoteEmbeddingDetails, NoteNeighbor
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import { MetaPanel } from './MetaPanel';
 import { LlmToolsMenu } from './LlmToolsMenu';
+import { CommentaryPanel } from './CommentaryPanel';
 import './Editor.css';
 
 // ── CSV helpers for table raw mode ────────────────────────────────────────────
@@ -254,7 +255,10 @@ interface Props {
 }
 
 export function Editor({ noteId, initialMode = 'edit' }: Props) {
-  const { closeEditor, openEditor, setCategories, setActiveCategory, setView, categories, pluginRenderLanguages, pluginsLoaded, noteReloadSignal } = useStore();
+  const {
+    closeEditor, openEditor, setCategories, setActiveCategory, setView, categories,
+    pluginRenderLanguages, pluginsLoaded, noteReloadSignal, commentaryFocusId, clearCommentaryFocus,
+  } = useStore();
 
   // Map plugin-claimed code languages to a rendered PluginBlockNode; all other code fences keep
   // the built-in behavior. Used for both import (init) and export (save) so the markdown round-trips.
@@ -289,6 +293,8 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const [readModeMatchCount, setReadModeMatchCount] = useState(0);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
+  const [commentaryOpen, setCommentaryOpen] = useState(false);
+  const [commentaryCount, setCommentaryCount] = useState(0);
 
   useEffect(() => {
     setNote(null);
@@ -318,7 +324,13 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   useEffect(() => {
     api.noteNeighbors(noteId).then(setNeighbors).catch(() => setNeighbors({}));
     api.noteEmbeddingDetails(noteId).then(setEmbeddingDetails).catch(() => setEmbeddingDetails(null));
+    api.listCommentary(noteId).then((items) => setCommentaryCount(items.length)).catch(() => setCommentaryCount(0));
   }, [noteId]);
+
+  useEffect(() => {
+    if (!commentaryFocusId) return;
+    setCommentaryOpen(true);
+  }, [commentaryFocusId]);
 
   useEffect(() => {
     setNoteActivity(null);
@@ -378,13 +390,23 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         const updated = await api.updateNote({ ...note, title, summary, body: '' });
         setNote(updated);
       } else {
+        const nextBody = modeRef.current === 'source' ? rawTextRef.current : getCurrentBody.current();
         const updated = await api.updateNote({
           ...note,
           title,
           summary,
-          body: modeRef.current === 'source' ? rawTextRef.current : getCurrentBody.current(),
+          body: nextBody,
         });
         setNote(updated);
+        if (updated.body !== nextBody) {
+          setBody(updated.body);
+          setRawText(updated.body);
+          getCurrentBody.current = () => updated.body;
+          setReloadKey((key) => key + 1);
+          setMode('read');
+          setCommentaryOpen(true);
+          api.listCommentary(noteId).then((items) => setCommentaryCount(items.length)).catch(() => {});
+        }
         api.allCategories().then(setCategories).catch(() => {});
       }
       setDirty(false);
@@ -672,6 +694,18 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     }
   }, [note]);
 
+  const handleCommentaryApplied = useCallback((updated: NoteDto) => {
+    setNote(updated);
+    setTitle(updated.title);
+    setSummary(updated.summary);
+    setBody(updated.body);
+    getCurrentBody.current = () => updated.body;
+    setReloadKey((key) => key + 1);
+    setDirty(false);
+    setMode('read');
+    api.listCommentary(updated.id).then((items) => setCommentaryCount(items.length)).catch(() => {});
+  }, []);
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   if (!note) {
@@ -730,6 +764,17 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           <div className="editor-toolbar-actions">
             <button className="editor-tool-btn" onClick={() => setFindOpen((open) => !open)} title="Find in note">
               <Icon name="search" size={16} />
+            </button>
+            <button
+              className="editor-tool-btn editor-commentary-btn"
+              onClick={() => {
+                setCommentaryOpen((open) => !open);
+                clearCommentaryFocus();
+              }}
+              title="Open commentary"
+            >
+              <Icon name="forum" size={16} />
+              {commentaryCount > 0 && <span className="editor-commentary-count">{commentaryCount}</span>}
             </button>
             <button className="editor-tool-btn" onClick={() => setMergeDialogOpen(true)} title="Merge another note into this note">
               Merge
@@ -931,7 +976,20 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         </LexicalComposer>
       )}
 
-      <RelatedCarousel noteId={noteId} />
+      {commentaryOpen && (
+        <CommentaryPanel
+          note={note}
+          currentBody={bodyForRead}
+          focusId={commentaryFocusId}
+          onClose={() => {
+            setCommentaryOpen(false);
+            clearCommentaryFocus();
+          }}
+          onApplied={handleCommentaryApplied}
+          onCountChange={setCommentaryCount}
+        />
+      )}
+      {!commentaryOpen && <RelatedCarousel noteId={noteId} />}
       {mergeDialogOpen && (
         <MergeDialog
           target={note}

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::CoreResult;
 use crate::id::NoteId;
 use crate::model::metadata::Metadata;
-use crate::model::{Category, Note};
+use crate::model::{Category, Note, ObjectType};
 use crate::pack::{ExportKind, Pack, PackManifest, PackNote};
 use crate::storage::{Book, NoteStore};
 
@@ -41,7 +41,12 @@ pub struct ExportSpec {
 /// When `spec.export_all` is true all non-deleted notes are included and `export_kind` is set to
 /// `Book`; otherwise the category/id filter applies and `export_kind` is `Pack`.
 pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
-    let all_notes = book.store.read_all_notes()?;
+    let all_notes: Vec<Note> = book
+        .store
+        .read_all_notes()?
+        .into_iter()
+        .filter(|note| note.object_type != ObjectType::Commentary)
+        .collect();
 
     let selected: Vec<Note> = if spec.export_all {
         all_notes
@@ -278,6 +283,7 @@ fn new_pack_note(book: &Book, id: NoteId, pack_note: &PackNote) -> Note {
         prior: None,
         location: None,
         asset: None,
+        commentary: None,
         metadata: Metadata::now(),
     }
 }

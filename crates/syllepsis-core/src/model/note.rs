@@ -12,6 +12,7 @@ use crate::id::NoteId;
 use crate::model::metadata::Metadata;
 use crate::model::object_type::ObjectType;
 use crate::model::prior::PriorEdge;
+use crate::model::CommentaryMetadata;
 use serde::{Deserialize, Serialize};
 
 /// Stable reference and display metadata for a Picture or Drawing payload.
@@ -54,6 +55,9 @@ pub struct Note {
     /// Present for first-class Picture and Drawing objects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<AssetMetadata>,
+    /// Present only for commentary child objects stored under `_commentary/`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commentary: Option<CommentaryMetadata>,
     pub metadata: Metadata,
 }
 
@@ -90,6 +94,7 @@ impl Note {
             prior: None,
             location: None,
             asset: None,
+            commentary: None,
             metadata: Metadata::now(),
         }
     }

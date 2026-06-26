@@ -285,10 +285,11 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
               <label className="llm-tool-checkbox">
                 <input
                   type="checkbox"
-                  checked={storeResultAsCommentary}
+                  checked
+                  disabled
                   onChange={(event) => setStoreResultAsCommentary(event.target.checked)}
                 />
-                Save completed result as linked commentary
+                Review completed result as linked commentary
               </label>
             </div>
             <div className="llm-modal-actions">

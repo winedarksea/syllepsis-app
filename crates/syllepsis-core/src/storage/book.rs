@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
-use crate::markdown::frontmatter::split_frontmatter;
+use crate::markdown::frontmatter::{self, split_frontmatter};
 use crate::model::metadata::ForkInfo;
-use crate::model::{Note, ObjectType};
+use crate::model::{CommentaryMetadata, Note, ObjectType};
 use crate::storage::layout;
 use crate::storage::registry::IdRegistry;
 use crate::storage::store::{FsNoteStore, NoteStore};
@@ -178,7 +178,12 @@ impl Book {
             write_config(&root, &config)?;
         }
         let store = FsNoteStore::open(&root)?;
-        let registry = IdRegistry::from_ids(store.note_ids()?.iter());
+        let note_ids = store.note_ids()?;
+        let commentary_ids = read_commentary_notes_from_root(&root)?
+            .into_iter()
+            .map(|note| note.id)
+            .collect::<Vec<_>>();
+        let registry = IdRegistry::from_ids(note_ids.iter().chain(commentary_ids.iter()));
         Ok(Book {
             root,
             metadata,
@@ -219,6 +224,63 @@ impl Book {
         note.id = id;
         self.store.write_note(&note)?;
         Ok(note)
+    }
+
+    /// Create, persist, and return a fresh commentary child object under `_commentary/`.
+    pub fn new_commentary_note(
+        &self,
+        title: impl Into<String>,
+        commentary: CommentaryMetadata,
+    ) -> CoreResult<Note> {
+        let title = title.into();
+        let id = self
+            .registry
+            .lock()
+            .expect("registry poisoned")
+            .mint(ObjectType::Commentary.id_prefix(), &title);
+        let mut note = Note::new(
+            ObjectType::Commentary,
+            title,
+            self.config.markdown.dialect_version.clone(),
+        );
+        note.id = id;
+        note.commentary = Some(commentary);
+        write_commentary_note_at(&self.root, &note)?;
+        Ok(note)
+    }
+
+    /// Persist an edited commentary object in `_commentary/`.
+    pub fn save_commentary_note(&self, note: &Note) -> CoreResult<()> {
+        if note.object_type != ObjectType::Commentary {
+            return Err(CoreError::InvalidBook(
+                "only commentary notes can be saved through save_commentary_note".to_string(),
+            ));
+        }
+        self.registry
+            .lock()
+            .expect("registry poisoned")
+            .register(&note.id);
+        write_commentary_note_at(&self.root, note)
+    }
+
+    pub fn read_commentary_note(&self, id: &NoteId) -> CoreResult<Note> {
+        let path = layout::commentary_dir(&self.root).join(layout::note_filename(id));
+        let content =
+            std::fs::read_to_string(&path).map_err(|_| CoreError::NotFound(id.to_string()))?;
+        frontmatter::parse_note(&content)
+    }
+
+    pub fn read_all_commentary_notes(&self) -> CoreResult<Vec<Note>> {
+        read_commentary_notes_from_root(&self.root)
+    }
+
+    pub fn delete_commentary_note(&self, id: &NoteId) -> CoreResult<()> {
+        let path = layout::commentary_dir(&self.root).join(layout::note_filename(id));
+        std::fs::remove_file(&path)?;
+        let _ = std::fs::remove_file(layout::crdt_sidecar_path(&self.root, id));
+        let _ = std::fs::remove_file(layout::embedding_sidecar_path(&self.root, id));
+        self.registry.lock().expect("registry poisoned").remove(id);
+        Ok(())
     }
 
     /// Persist an edited note (registering its id if new, e.g. after an import).
@@ -274,6 +336,32 @@ fn default_book_name(root: &Path) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or("Untitled Book")
         .to_string()
+}
+
+fn write_commentary_note_at(root: &Path, note: &Note) -> CoreResult<()> {
+    let dir = layout::commentary_dir(root);
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(layout::note_filename(&note.id));
+    std::fs::write(path, frontmatter::serialize_note(note)?)?;
+    Ok(())
+}
+
+fn read_commentary_notes_from_root(root: &Path) -> CoreResult<Vec<Note>> {
+    let dir = layout::commentary_dir(root);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut notes = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            let note = frontmatter::parse_note(&std::fs::read_to_string(path)?)?;
+            if note.object_type == ObjectType::Commentary {
+                notes.push(note);
+            }
+        }
+    }
+    Ok(notes)
 }
 
 fn ensure_new_book_root_available(root: &Path) -> CoreResult<()> {

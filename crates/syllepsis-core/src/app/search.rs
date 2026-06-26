@@ -99,7 +99,9 @@ pub fn category_embedding_stats(book: &Book, name: &str) -> CoreResult<CategoryE
         .read_all_notes()?
         .into_iter()
         .filter(|n| {
-            n.metadata.is_visible_in_default_views() && n.categories.iter().any(|c| c == name)
+            n.object_type != crate::model::ObjectType::Commentary
+                && n.metadata.is_visible_in_default_views()
+                && n.categories.iter().any(|c| c == name)
         })
         .collect();
 

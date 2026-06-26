@@ -5,6 +5,7 @@
 
 pub mod category;
 pub mod classification;
+pub mod commentary;
 pub mod metadata;
 pub mod note;
 pub mod object_type;
@@ -14,6 +15,9 @@ pub mod world;
 
 pub use category::Category;
 pub use classification::{Basis, Checkability, Classification, Priority, Stability, StatementType};
+pub use commentary::{
+    CommentaryKind, CommentaryMetadata, CommentarySource, CommentaryStatus, CommentaryTargetField,
+};
 pub use metadata::{
     Authorship, DateMetadata, FlexDate, ForkInfo, Kanban, Lifecycle, LockMode, Metadata,
     NoteStatus, NoteVisibility, PackMembership,

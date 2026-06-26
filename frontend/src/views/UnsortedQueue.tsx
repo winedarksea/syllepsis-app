@@ -27,7 +27,7 @@ const OBJECT_TYPE_LABELS: Record<ObjectType | 'all', string> = {
 
 const ALL_OBJECT_TYPES: Array<ObjectType | 'all'> = [
   'all', 'note', 'quote', 'reference', 'todo', 'qa',
-  'commentary', 'table', 'picture', 'drawing', 'code',
+  'table', 'picture', 'drawing', 'code',
 ];
 
 // Sort key (epoch ms) for a note on the chosen date field; null when the date is absent.

@@ -247,7 +247,9 @@ mod tests {
             &|lang, code| {
                 assert_eq!(lang, "python");
                 assert_eq!(code, "print('hello')");
-                Some("<pre class=\"plugin-codeblock\"><code>print('hello')</code></pre>".to_string())
+                Some(
+                    "<pre class=\"plugin-codeblock\"><code>print('hello')</code></pre>".to_string(),
+                )
             },
         );
 
@@ -271,7 +273,9 @@ mod tests {
         push_html_with_plugins(&mut html, &markdown, Options::empty(), &|lang, code| {
             assert_eq!(lang, "python");
             assert_eq!(code, long_line);
-            Some(format!("<pre class=\"plugin-codeblock\"><code>{code}</code></pre>"))
+            Some(format!(
+                "<pre class=\"plugin-codeblock\"><code>{code}</code></pre>"
+            ))
         });
 
         assert!(html.contains("syl-plugin-render--code-block"));

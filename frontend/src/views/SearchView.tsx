@@ -13,7 +13,7 @@ import { RelatedCarousel } from '../components/RelatedCarousel';
 import './SearchView.css';
 
 const ALL_OBJECT_TYPES: ObjectType[] = [
-  'note', 'quote', 'reference', 'todo', 'qa', 'commentary', 'table', 'picture', 'drawing', 'code',
+  'note', 'quote', 'reference', 'todo', 'qa', 'table', 'picture', 'drawing', 'code',
 ];
 
 const FRESHNESS_PRESETS: { label: string; days: number | null }[] = [

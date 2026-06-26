@@ -39,6 +39,10 @@ export type Priority = 'standard' | 'important' | 'core';
 export type LockMode = 'none' | 'unlock_delay' | 'fact_check_gate';
 export type NoteStatus = 'open' | 'active' | 'needs_clarification' | 'deferred' | 'cancelled' | 'done';
 export type NoteVisibility = 'active' | 'archived' | 'trash';
+export type CommentaryKind = 'proposal' | 'fact_check' | 'critique' | 'comment' | 'footnote';
+export type CommentaryStatus = 'locked' | 'open' | 'merged' | 'dismissed' | 'pinned';
+export type CommentarySource = 'ai' | 'user';
+export type CommentaryTargetField = 'body' | 'summary' | 'categories';
 
 export interface Classification {
   statement_type: StatementType;
@@ -106,6 +110,24 @@ export interface Metadata {
   kanban: Kanban;
 }
 
+export interface CommentaryMetadata {
+  parent_note_id: string;
+  kind: CommentaryKind;
+  status: CommentaryStatus;
+  source: CommentarySource;
+  target_field?: CommentaryTargetField | null;
+  job_id?: string | null;
+  task?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  base_body_sha256?: string | null;
+  base_body?: string | null;
+  crdt_backend?: string | null;
+  base_crdt_snapshot_b64?: string | null;
+  fact_check_passed?: boolean | null;
+  approves_commentary_id?: string | null;
+}
+
 export interface NoteDto {
   id: string;
   type: ObjectType;
@@ -116,8 +138,23 @@ export interface NoteDto {
   prior?: PriorEdge;
   location?: string;
   asset?: AssetMetadata;
+  commentary?: CommentaryMetadata | null;
   sorted: boolean;
   metadata: Metadata;
+}
+
+export interface CommentarySummary {
+  id: string;
+  title: string;
+  body: string;
+  metadata: CommentaryMetadata;
+  created: string;
+  updated: string;
+}
+
+export interface ApplyCommentaryOptions {
+  force_replace?: boolean;
+  fact_check_passed?: boolean;
 }
 
 export type NoteScreenMode = 'read' | 'edit' | 'source';
@@ -185,6 +222,7 @@ export interface QueuedLlmJobResult {
   target_note_id: string;
   task: LlmTask;
   proposal?: Proposal | null;
+  commentary_id?: string | null;
   error?: string | null;
 }
 

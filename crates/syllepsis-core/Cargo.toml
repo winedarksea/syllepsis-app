@@ -16,6 +16,7 @@ regex = { workspace = true }
 pulldown-cmark = { workspace = true }
 # sha2 powers the always-on model-file integrity check (onnx::verify). Pure Rust, tiny.
 sha2 = { workspace = true }
+base64 = { workspace = true }
 rusqlite = { workspace = true }
 tracing = { workspace = true }
 ndarray = { workspace = true }

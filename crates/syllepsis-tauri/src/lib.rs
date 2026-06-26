@@ -6,9 +6,9 @@ mod model_bootstrap;
 pub mod state;
 
 use commands::{
-    book::*, categories::*, cloud_llm::*, config::*, lifecycle::*, llm::*, local_ai::*, notes::*,
-    pack::*, plugins::*, publish::*, search::*, spatial::*, style_cards::*, sync::*,
-    text_import::*,
+    book::*, categories::*, cloud_llm::*, commentary::*, config::*, lifecycle::*, llm::*,
+    local_ai::*, notes::*, pack::*, plugins::*, publish::*, search::*, spatial::*, style_cards::*,
+    sync::*, text_import::*,
 };
 use state::AppState;
 use tauri::Manager;
@@ -104,6 +104,13 @@ pub fn run() {
             note_embedding_details,
             merge_notes,
             split_note,
+            list_commentary,
+            get_commentary,
+            create_commentary,
+            update_commentary,
+            apply_commentary,
+            dismiss_commentary,
+            pin_commentary,
             // categories
             all_categories,
             create_category,

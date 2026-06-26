@@ -86,7 +86,10 @@ interface AppStore {
   editingMode: NoteScreenMode;
   editorReturnView: View | null;
   openEditor: (id: string, mode?: NoteScreenMode) => void;
+  openCommentary: (noteId: string, commentaryId?: string | null) => void;
   closeEditor: () => void;
+  commentaryFocusId: string | null;
+  clearCommentaryFocus: () => void;
   // Bumped to force a reload of the currently-open note (e.g. after Apply from job tray)
   noteReloadSignal: number;
   bumpNoteReload: () => void;
@@ -188,6 +191,7 @@ export const useStore = create<AppStore>((set) => ({
     book: null,
     view: 'unsorted',
     editingNoteId: null,
+    commentaryFocusId: null,
     editingMode: 'read',
     editorReturnView: null,
     activeCategory: null,
@@ -215,17 +219,29 @@ export const useStore = create<AppStore>((set) => ({
   openEditor: (id, mode = 'edit') =>
     set((state) => ({
       editingNoteId: id,
+      commentaryFocusId: null,
       editingMode: mode,
+      editorReturnView: state.view === 'editor' ? state.editorReturnView : state.view,
+      view: 'editor',
+    })),
+  openCommentary: (noteId, commentaryId = null) =>
+    set((state) => ({
+      editingNoteId: noteId,
+      commentaryFocusId: commentaryId,
+      editingMode: 'read',
       editorReturnView: state.view === 'editor' ? state.editorReturnView : state.view,
       view: 'editor',
     })),
   closeEditor: () =>
     set((state) => ({
       editingNoteId: null,
+      commentaryFocusId: null,
       editingMode: 'read',
       editorReturnView: null,
       view: state.editorReturnView ?? 'unsorted',
     })),
+  commentaryFocusId: null,
+  clearCommentaryFocus: () => set({ commentaryFocusId: null }),
   noteReloadSignal: 0,
   bumpNoteReload: () => set((s) => ({ noteReloadSignal: s.noteReloadSignal + 1 })),
 

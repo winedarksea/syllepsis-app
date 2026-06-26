@@ -19,7 +19,6 @@ use crate::llm::prompts::LlmTaskOptions;
 use crate::llm::selection::select_llm_provider;
 use crate::llm::service::parse_category_list;
 use crate::llm::{LlmService, LlmTask, Proposal};
-use crate::model::{Note, ObjectType};
 use crate::onnx::{manifest, ModelCache};
 use crate::storage::{Book, NoteStore};
 
@@ -129,6 +128,8 @@ pub struct QueuedLlmJobResult {
     pub target_note_id: String,
     pub task: LlmTask,
     pub proposal: Option<Proposal>,
+    #[serde(default)]
+    pub commentary_id: Option<String>,
     pub error: Option<String>,
 }
 
@@ -393,8 +394,11 @@ pub fn accept_proposal(
                 Utc::now(),
             )?;
             if store_old_as_commentary && !note.body.trim().is_empty() {
-                let title = format!("Previous version of {}", note.title);
-                create_commentary(book, &note, &title, &note.body.clone())?;
+                crate::app::commentary::create_previous_version_commentary(
+                    book,
+                    &note,
+                    &note.body.clone(),
+                )?;
             }
             note.body = proposal.content.clone();
             note.metadata.authorship.ai_generated = true;
@@ -407,8 +411,7 @@ pub fn accept_proposal(
             }
         }
         LlmTask::FactCheck | LlmTask::DevilsAdvocate => {
-            let title = format!("{} on {}", proposal.task.as_str(), note.title);
-            create_commentary(book, &note, &title, &proposal.content)?;
+            crate::app::commentary::create_proposal_commentary(book, proposal, None)?;
         }
     }
 
@@ -421,36 +424,9 @@ pub fn create_proposal_commentary(
     book: &Book,
     proposal: &Proposal,
     job_id: &str,
-    options: &LlmTaskOptions,
+    _options: &LlmTaskOptions,
 ) -> CoreResult<NoteDto> {
-    let target = book.store.read_note(&proposal.target)?;
-    let title = format!("{} proposal for {}", proposal.task.as_str(), target.title);
-    let metadata = serde_json::json!({
-        "kind": "queued_llm_result",
-        "job_id": job_id,
-        "proposal": proposal,
-        "options": options,
-    });
-    let body = format!(
-        "@{}\n\n<!-- syllepsis-llm-job:{} -->\n\n```json\n{}\n```\n\n{}",
-        target.id.ulid(),
-        job_id,
-        serde_json::to_string_pretty(&metadata).map_err(crate::error::CoreError::Json)?,
-        proposal.content
-    );
-    let commentary = create_commentary(book, &target, &title, &body)?;
-    Ok(NoteDto::from_note(&commentary))
-}
-
-/// Create a commentary note linked to `target` by an `@ulid` reference, inheriting its
-/// categories so it surfaces nearby. Marked AI-generated.
-fn create_commentary(book: &Book, target: &Note, title: &str, body: &str) -> CoreResult<Note> {
-    let mut commentary = book.new_note(ObjectType::Commentary, title)?;
-    commentary.body = format!("@{}\n\n{}", target.id.ulid(), body);
-    commentary.categories = target.categories.clone();
-    commentary.metadata.authorship.ai_generated = true;
-    book.save_note(&commentary)?;
-    Ok(commentary)
+    crate::app::commentary::create_proposal_commentary(book, proposal, Some(job_id))
 }
 
 #[cfg(test)]
@@ -458,6 +434,7 @@ mod tests {
     use super::*;
     use crate::app::commands::{create_note, update_note};
     use crate::config::ModelRef;
+    use crate::model::ObjectType;
     use crate::storage::Book;
 
     fn book() -> (tempfile::TempDir, Book) {
@@ -579,20 +556,22 @@ mod tests {
         );
         accept_proposal(&book, &proposal, false, false).unwrap();
 
-        let notes = book.store.read_all_notes().unwrap();
-        assert_eq!(
-            notes.len(),
-            before + 1,
-            "a commentary note should be created"
-        );
+        let notes = book.read_all_commentary_notes().unwrap();
+        assert_eq!(notes.len(), 1, "a commentary note should be created");
         let commentary = notes
             .iter()
             .find(|n| n.object_type == ObjectType::Commentary)
             .unwrap();
-        // Links back to the target by ulid reference.
-        assert!(commentary
-            .body
-            .contains(note.id.split('-').next_back().unwrap()));
+        assert_eq!(book.store.read_all_notes().unwrap().len(), before);
+        assert_eq!(
+            commentary
+                .commentary
+                .as_ref()
+                .unwrap()
+                .parent_note_id
+                .to_string(),
+            note.id
+        );
         assert!(commentary.metadata.authorship.ai_generated);
     }
 
@@ -605,8 +584,7 @@ mod tests {
 
         assert_eq!(updated.body, "a cleaner rewritten body");
         let archived = book
-            .store
-            .read_all_notes()
+            .read_all_commentary_notes()
             .unwrap()
             .into_iter()
             .any(|n| n.body.contains("original body kept as history"));
@@ -723,9 +701,10 @@ mod tests {
         let commentary = create_proposal_commentary(&book, &proposal, "job-123", &options).unwrap();
 
         assert_eq!(commentary.object_type, ObjectType::Commentary);
-        assert!(commentary.body.contains("syllepsis-llm-job:job-123"));
-        assert!(commentary.body.contains("\"kind\": \"queued_llm_result\""));
         assert!(commentary.body.contains("Turn off the breaker first."));
+        let meta = commentary.commentary.unwrap();
+        assert_eq!(meta.job_id.as_deref(), Some("job-123"));
+        assert_eq!(meta.parent_note_id.to_string(), note.id);
         assert!(commentary.metadata.authorship.ai_generated);
     }
 

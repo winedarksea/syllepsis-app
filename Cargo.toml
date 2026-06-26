@@ -20,6 +20,7 @@ chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
 sha2 = "0.10"
+base64 = "0.22"
 rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
 tracing = "0.1"
 ndarray = "0.17"

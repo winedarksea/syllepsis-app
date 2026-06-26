@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::embeddings::{configured_model_fingerprint, load_embedding_corpus, Embedding};
 use crate::error::CoreResult;
-use crate::model::{Category, Note};
+use crate::model::{Category, Note, ObjectType};
 use crate::storage::{Book, NoteStore};
 
 use algorithms::{
@@ -45,7 +45,10 @@ impl SemanticGraphCorpus {
             .store
             .read_all_notes()?
             .into_iter()
-            .filter(|note| note.metadata.is_visible_in_default_views())
+            .filter(|note| {
+                note.object_type != ObjectType::Commentary
+                    && note.metadata.is_visible_in_default_views()
+            })
             .collect();
         notes.sort_by(|left, right| left.id.to_string().cmp(&right.id.to_string()));
         let provider_id = configured_model_fingerprint(&book.config.embedding)?.model_id;
@@ -562,7 +565,10 @@ pub fn current_corpus_fingerprint(book: &Book) -> CoreResult<String> {
         .store
         .read_all_notes()?
         .into_iter()
-        .filter(|note| note.metadata.is_visible_in_default_views())
+        .filter(|note| {
+            note.object_type != ObjectType::Commentary
+                && note.metadata.is_visible_in_default_views()
+        })
         .collect();
     notes.sort_by(|left, right| left.id.to_string().cmp(&right.id.to_string()));
     corpus_fingerprint(book, &notes, &embedding_source_cache_key(book))

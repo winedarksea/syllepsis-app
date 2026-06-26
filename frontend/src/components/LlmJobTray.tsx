@@ -25,22 +25,20 @@ function relativeTime(jobId: string): string {
 
 function JobCard({
   job,
-  onAccept,
   onDismiss,
   onOpen,
 }: {
   job: QueuedLlmJobResult;
-  onAccept?: (job: QueuedLlmJobResult) => void;
   onDismiss?: (jobId: string) => void;
-  onOpen: (noteId: string) => void;
+  onOpen: (job: QueuedLlmJobResult) => void;
 }) {
   return (
     <div
       className={`llm-job-card ${job.status}`}
-      onClick={() => onOpen(job.target_note_id)}
+      onClick={() => onOpen(job)}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(job.target_note_id); }}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(job); }}
     >
       <div className="llm-job-main">
         <span className="llm-job-title">{taskLabel(job.task)}</span>
@@ -49,11 +47,11 @@ function JobCard({
         {job.error && <span className="llm-job-error">{job.error}</span>}
       </div>
       <div className="llm-job-actions" onClick={(e) => e.stopPropagation()}>
-        <button title="Open target note" onClick={() => onOpen(job.target_note_id)}>
+        <button title="Open result" onClick={() => onOpen(job)}>
           <Icon name="open_in_new" size={14} />
         </button>
-        {job.status === 'complete' && job.proposal && onAccept && (
-          <button className="llm-job-apply-btn" onClick={() => onAccept(job)}>Apply</button>
+        {job.status === 'complete' && job.commentary_id && (
+          <button className="llm-job-apply-btn" onClick={() => onOpen(job)}>Review</button>
         )}
         {(job.status === 'complete' || job.status === 'failed') && onDismiss && (
           <button title="Dismiss" onClick={() => onDismiss(job.job_id)}>
@@ -66,7 +64,7 @@ function JobCard({
 }
 
 function LlmJobHistory({ onClose }: { onClose: () => void }) {
-  const { openEditor } = useStore();
+  const { openEditor, openCommentary } = useStore();
   const [jobs, setJobs] = useState<QueuedLlmJobResult[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,16 +76,6 @@ function LlmJobHistory({ onClose }: { onClose: () => void }) {
     return () => window.clearInterval(timer);
   }, []);
 
-  const accept = useCallback(async (job: QueuedLlmJobResult) => {
-    try {
-      await api.acceptLlmJobResult(job.job_id);
-      openEditor(job.target_note_id, 'read');
-      api.listAllLlmJobs().then(setJobs).catch(() => {});
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [openEditor]);
-
   const dismiss = useCallback(async (jobId: string) => {
     try {
       await api.dismissLlmJobResult(jobId);
@@ -96,6 +84,11 @@ function LlmJobHistory({ onClose }: { onClose: () => void }) {
       setError(String(e));
     }
   }, []);
+
+  const openJob = useCallback((job: QueuedLlmJobResult) => {
+    if (job.commentary_id) openCommentary(job.target_note_id, job.commentary_id);
+    else openEditor(job.target_note_id, 'read');
+  }, [openCommentary, openEditor]);
 
   return (
     <div className="llm-job-history-panel">
@@ -109,9 +102,8 @@ function LlmJobHistory({ onClose }: { onClose: () => void }) {
         <JobCard
           key={job.job_id}
           job={job}
-          onAccept={job.status === 'complete' && job.proposal ? accept : undefined}
           onDismiss={job.status !== 'running' && job.status !== 'queued' ? dismiss : undefined}
-          onOpen={(id) => openEditor(id, 'read')}
+          onOpen={openJob}
         />
       ))}
     </div>
@@ -119,7 +111,7 @@ function LlmJobHistory({ onClose }: { onClose: () => void }) {
 }
 
 export function LlmJobTray() {
-  const { openEditor, bumpNoteReload } = useStore();
+  const { openEditor, openCommentary } = useStore();
   const [jobs, setJobs] = useState<QueuedLlmJobResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -134,18 +126,6 @@ export function LlmJobTray() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const accept = useCallback(async (job: QueuedLlmJobResult) => {
-    try {
-      const updated = await api.acceptLlmJobResult(job.job_id);
-      await api.dismissLlmJobResult(job.job_id);
-      openEditor(updated.id, 'read');
-      bumpNoteReload();
-      refresh();
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [bumpNoteReload, openEditor, refresh]);
-
   const dismiss = useCallback(async (jobId: string) => {
     try {
       await api.dismissLlmJobResult(jobId);
@@ -155,7 +135,12 @@ export function LlmJobTray() {
     }
   }, [refresh]);
 
-  const visibleJobs = jobs.filter((job) => job.status !== 'complete' || job.proposal);
+  const openJob = useCallback((job: QueuedLlmJobResult) => {
+    if (job.commentary_id) openCommentary(job.target_note_id, job.commentary_id);
+    else openEditor(job.target_note_id, 'read');
+  }, [openCommentary, openEditor]);
+
+  const visibleJobs = jobs.filter((job) => job.status !== 'complete' || job.commentary_id);
   if (visibleJobs.length === 0 && !error && !historyOpen) return null;
 
   return (
@@ -169,9 +154,8 @@ export function LlmJobTray() {
           <JobCard
             key={job.job_id}
             job={job}
-            onAccept={accept}
             onDismiss={dismiss}
-            onOpen={(id) => openEditor(id, 'read')}
+            onOpen={openJob}
           />
         ))}
         <div className="llm-job-tray-footer">

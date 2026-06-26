@@ -4,7 +4,6 @@
 // through the normal updateNote save path.
 
 import { useMemo, useState } from 'react';
-import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { WorldLocationHelper } from '../components/WorldLocationHelper';
 import type {

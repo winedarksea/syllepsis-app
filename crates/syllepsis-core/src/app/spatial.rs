@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{Note, World, WorldKind, DEFAULT_WORLD_ID};
+use crate::model::{Note, ObjectType, World, WorldKind, DEFAULT_WORLD_ID};
 use crate::spatial::{
     build_overlay, resolve_token, LookupEntry, Overlay, ResolvedLocation, WorldRegistry,
 };
@@ -129,7 +129,12 @@ pub fn world_deletion_impact(book: &Book, id: &str) -> CoreResult<WorldDeletionI
     }
     // Deletion protection must include archived and pending-deletion notes even though the normal
     // visual overlay hides them. A hidden reference is still user data that would be orphaned.
-    let notes = book.store.read_all_notes()?;
+    let notes: Vec<Note> = book
+        .store
+        .read_all_notes()?
+        .into_iter()
+        .filter(|note| note.object_type != ObjectType::Commentary)
+        .collect();
     let categories = book.store.categories()?;
     let registry = registry_for(book)?;
     let lookup = book.store.read_location_lookup()?;
@@ -205,7 +210,9 @@ pub fn world_overlay(book: &Book, world_id: &str) -> CoreResult<Overlay> {
         .store
         .read_all_notes()?
         .into_iter()
-        .filter(|n| n.metadata.is_visible_in_default_views())
+        .filter(|n| {
+            n.object_type != ObjectType::Commentary && n.metadata.is_visible_in_default_views()
+        })
         .collect();
     let categories = book.store.categories()?;
     let registry = registry_for(book)?;

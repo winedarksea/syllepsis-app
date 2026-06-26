@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
-use crate::model::Note;
+use crate::model::{Note, ObjectType};
 use crate::sort;
 use crate::storage::{layout, Book, NoteStore};
 
@@ -52,7 +52,9 @@ pub fn publish_site(
         .read_all_notes()?
         .into_iter()
         .filter(|n| {
-            !n.metadata.lifecycle.archived && n.metadata.lifecycle.marked_for_deletion_at.is_none()
+            n.object_type != ObjectType::Commentary
+                && !n.metadata.lifecycle.archived
+                && n.metadata.lifecycle.marked_for_deletion_at.is_none()
         })
         .collect();
     let active_count = active.len();
@@ -94,7 +96,9 @@ pub fn refresh_private_gitignore(book: &Book) -> CoreResult<GitignoreReport> {
 
     let mut excluded: Vec<String> = Vec::new();
     for note in book.store.read_all_notes()? {
-        if note.metadata.lifecycle.private || in_private_category(&note, &private_categories) {
+        if note.object_type != ObjectType::Commentary
+            && (note.metadata.lifecycle.private || in_private_category(&note, &private_categories))
+        {
             // Phase-1 flat layout: a note's file is `{id}.md` at the book root.
             excluded.push(layout::note_filename(&note.id));
         }
@@ -133,7 +137,9 @@ fn private_category_names(book: &Book) -> CoreResult<BTreeSet<String>> {
 /// A note is publishable if it is visible by default (not private/archived/pending-deletion) and
 /// none of its categories are private.
 fn is_publishable(note: &Note, private_categories: &BTreeSet<String>) -> bool {
-    note.metadata.is_visible_in_default_views() && !in_private_category(note, private_categories)
+    note.metadata.is_visible_in_default_views()
+        && !in_private_category(note, private_categories)
+        && note.object_type != ObjectType::Commentary
 }
 
 fn in_private_category(note: &Note, private_categories: &BTreeSet<String>) -> bool {

@@ -97,6 +97,9 @@ pub struct SplitNoteRequest {
 }
 
 pub fn note_matches_visibility(note: &Note, visibility: NoteVisibility) -> bool {
+    if note.object_type == ObjectType::Commentary {
+        return false;
+    }
     match visibility {
         NoteVisibility::Active => note.metadata.is_visible_in_default_views(),
         NoteVisibility::Archived => {
@@ -242,6 +245,9 @@ pub fn book_stats(book: &Book) -> CoreResult<BookStats> {
     };
 
     for note in &all_notes {
+        if note.object_type == ObjectType::Commentary {
+            continue;
+        }
         if note.metadata.lifecycle.marked_for_deletion_at.is_some() {
             continue;
         }
@@ -421,10 +427,13 @@ pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
     note.id = note.id.with_regenerated_slug(&note.title);
     if let Ok(stored) = book.store.read_note(&note.id) {
         if stored.metadata.lifecycle.lock != LockMode::None && stored.body != note.body {
-            return Err(CoreError::Locked(format!(
-                "'{}' is locked; unlock it or accept a proposed rewrite to change its body",
-                note.title
-            )));
+            crate::app::commentary::create_commentary(
+                book,
+                stored.id.as_str(),
+                crate::model::CommentaryKind::Proposal,
+                &note.body,
+            )?;
+            note.body = stored.body.clone();
         }
         if !note.metadata.packs.packs.is_empty() && content_changed(&stored, &note) {
             note.metadata.packs.locally_modified = true;
@@ -487,6 +496,7 @@ pub fn fork_note(book: &Book, id: &str) -> CoreResult<NoteDto> {
 /// Permanently delete a note. (The "mark for deletion" delay and purge are Phase 6; the
 /// `lifecycle.marked_for_deletion_at` field already exists to support it.)
 pub fn delete_note(book: &Book, id: &str) -> CoreResult<()> {
+    crate::app::commentary::delete_parent_commentary_now(book, id)?;
     book.delete_note(&NoteId::parse(id)?)
 }
 
@@ -1017,17 +1027,25 @@ mod tests {
     }
 
     #[test]
-    fn locked_note_rejects_a_direct_body_edit() {
+    fn locked_note_direct_body_edit_becomes_commentary_proposal() {
         let (_dir, book) = book();
         let note = create_note(&book, ObjectType::Note, "protected", None).unwrap();
         crate::app::lifecycle::set_note_lock(&book, &note.id, LockMode::UnlockDelay).unwrap();
 
         let mut edit = get_note(&book, &note.id).unwrap();
         edit.body = "a direct overwrite that should be refused".into();
-        assert!(matches!(
-            update_note(&book, edit).unwrap_err(),
-            CoreError::Locked(_)
-        ));
+        let updated = update_note(&book, edit).unwrap();
+        assert_eq!(updated.body, "");
+        let commentary = book.read_all_commentary_notes().unwrap();
+        assert_eq!(commentary.len(), 1);
+        assert_eq!(
+            commentary[0].body,
+            "a direct overwrite that should be refused"
+        );
+        assert_eq!(
+            commentary[0].commentary.as_ref().unwrap().status,
+            crate::model::CommentaryStatus::Locked
+        );
 
         // Unlocking first, then editing, is the supported path.
         crate::app::lifecycle::set_note_lock(&book, &note.id, LockMode::None).unwrap();

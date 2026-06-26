@@ -41,10 +41,11 @@ pub const CRDT_EXTENSION: &str = "crdt";
 /// frontmatter) so it is spreadsheet-editable; lives beside the per-world `{id}.md` files.
 pub const LOCATION_LOOKUP_FILE: &str = "locations.csv";
 
-/// Directories that never contain plain notes and are skipped when scanning for them.
-/// `_commentary` is intentionally absent: commentary entries *are* notes.
+/// Directories that never contain first-class notes and are skipped when scanning for them.
+/// Commentary has explicit child-object APIs instead of participating in the normal note corpus.
 pub const RESERVED_DIRS: &[&str] = &[
     CATEGORIES_DIR,
+    COMMENTARY_DIR,
     WORLDS_DIR,
     DERIVED_DIR,
     EMBEDDINGS_DIR,
@@ -159,9 +160,9 @@ mod tests {
     }
 
     #[test]
-    fn reserved_dirs_exclude_commentary() {
+    fn reserved_dirs_include_commentary() {
         assert!(is_reserved_dir(CATEGORIES_DIR));
         assert!(is_reserved_dir(DERIVED_DIR));
-        assert!(!is_reserved_dir(COMMENTARY_DIR));
+        assert!(is_reserved_dir(COMMENTARY_DIR));
     }
 }

@@ -2,6 +2,7 @@
 //! wraps these as commands; a PWA worker can call them directly.
 
 pub mod commands;
+pub mod commentary;
 pub mod dto;
 pub mod git;
 pub mod image_assets;

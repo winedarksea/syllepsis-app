@@ -76,6 +76,7 @@ pub fn enqueue_llm_job(
         target_note_id: request.target_note_id.clone(),
         task: request.task,
         proposal: None,
+        commentary_id: None,
         error: None,
     };
     state.llm_jobs.lock().unwrap().insert(
@@ -141,7 +142,7 @@ pub fn accept_llm_job_result(
     store_old_as_commentary: bool,
     fact_check_passed: bool,
 ) -> Result<NoteDto, String> {
-    let proposal = {
+    let (proposal, commentary_id) = {
         let jobs = state.llm_jobs.lock().unwrap();
         let record = jobs
             .get(&job_id)
@@ -149,17 +150,29 @@ pub fn accept_llm_job_result(
         if record.result.status != QueuedLlmJobStatus::Complete {
             return Err(format!("LLM job {job_id} is not complete"));
         }
-        record
+        let proposal = record
             .result
             .proposal
             .clone()
-            .ok_or_else(|| format!("LLM job {job_id} has no proposal"))?
+            .ok_or_else(|| format!("LLM job {job_id} has no proposal"))?;
+        (proposal, record.result.commentary_id.clone())
     };
 
     with_book!(state, book, {
-        let updated =
+        let updated = if let Some(commentary_id) = commentary_id {
+            syllepsis_core::app::commentary::apply_commentary(
+                book,
+                &commentary_id,
+                syllepsis_core::app::commentary::ApplyCommentaryOptions {
+                    force_replace: false,
+                    fact_check_passed,
+                },
+            )
+            .map_err(|e| e.to_string())?
+        } else {
             app::accept_proposal(book, &proposal, store_old_as_commentary, fact_check_passed)
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?
+        };
         let _ = state.local_ai.enqueue_note(book, updated.id.clone(), false);
         state.invalidate_graph_corpus();
         if let Some(record) = state.llm_jobs.lock().unwrap().get_mut(&job_id) {
@@ -224,30 +237,36 @@ async fn run_queued_llm_job(
 ) {
     let result = tauri::async_runtime::spawn_blocking(move || {
         let state = app_handle.state::<AppState>();
-        update_job_status(&state, &job_id, QueuedLlmJobStatus::Running, None, None);
+        update_job_status(
+            &state,
+            &job_id,
+            QueuedLlmJobStatus::Running,
+            None,
+            None,
+            None,
+        );
         let proposal_result = run_queued_llm_job_inner(&state, &request, &options);
         match proposal_result {
             Ok(proposal) => {
-                let commentary_error = if options.store_result_as_commentary {
+                let commentary_result = {
                     let guard = state.book.lock().unwrap();
                     match guard.as_ref() {
                         Some(book) => {
                             app::create_proposal_commentary(book, &proposal, &job_id, &options)
-                                .map(|_| ())
+                                .map(|commentary| commentary.id)
                                 .map_err(|error| error.to_string())
                         }
                         None => Err("no book is open".to_string()),
                     }
-                } else {
-                    Ok(())
                 };
-                match commentary_error {
-                    Ok(()) => {
+                match commentary_result {
+                    Ok(commentary_id) => {
                         update_job_status(
                             &state,
                             &job_id,
                             QueuedLlmJobStatus::Complete,
                             Some(proposal),
+                            Some(commentary_id),
                             None,
                         );
                     }
@@ -257,6 +276,7 @@ async fn run_queued_llm_job(
                             &job_id,
                             QueuedLlmJobStatus::Failed,
                             Some(proposal),
+                            None,
                             Some(error),
                         );
                     }
@@ -266,6 +286,7 @@ async fn run_queued_llm_job(
                 &state,
                 &job_id,
                 QueuedLlmJobStatus::Failed,
+                None,
                 None,
                 Some(error),
             ),
@@ -341,12 +362,16 @@ fn update_job_status(
     job_id: &str,
     status: QueuedLlmJobStatus,
     proposal: Option<Proposal>,
+    commentary_id: Option<String>,
     error: Option<String>,
 ) {
     if let Some(record) = state.llm_jobs.lock().unwrap().get_mut(job_id) {
         record.result.status = status;
         if proposal.is_some() {
             record.result.proposal = proposal;
+        }
+        if commentary_id.is_some() {
+            record.result.commentary_id = commentary_id;
         }
         record.result.error = error;
     }
