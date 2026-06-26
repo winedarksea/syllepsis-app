@@ -70,7 +70,7 @@ fn system_prompt(task: LlmTask) -> &'static str {
         }
         LlmTask::Grammar => {
             "You are a copy editor. Return the note's text with grammar, spelling, and clarity \
-             fixed, preserving meaning, voice, and any #tags or @refs. Output only the revised text."
+             fixed, preserving meaning, voice, markdown formatting, and any #tags or @refs. Output only the revised text."
         }
         LlmTask::CategorySuggest => {
             "You suggest topical categories for a note. Output a comma-separated list of 1-5 \
@@ -78,11 +78,11 @@ fn system_prompt(task: LlmTask) -> &'static str {
         }
         LlmTask::Rewrite => {
             "You are a skilled writer. Rewrite the note's body to read clearly and well while \
-             preserving its substance and any #tags or @refs. Output only the rewritten text."
+             preserving its substance and any #tags or @refs. Output only the rewritten text in valid markdown text."
         }
         LlmTask::GenerateFromSummary => {
             "You are a skilled writer. Generate a complete note body from the note's title and \
-             summary. Preserve any #tags or @refs already present. Output only the generated body."
+             summary. Preserve any #tags or @refs already present. Output only the generated body in valid markdown text."
         }
     }
 }
