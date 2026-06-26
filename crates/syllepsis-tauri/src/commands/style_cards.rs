@@ -102,6 +102,8 @@ pub(crate) fn builtin_style_cards() -> Vec<StyleCardEntry> {
             exemplars: vec![
                 StyleExemplar { text: "Two households, both alike in dignity, In fair Verona, where we lay our scene, From ancient grudge break to new mutiny\u{2026}".into() },
                 StyleExemplar { text: "Piece out our imperfections with your thoughts; Into a thousand parts divide one man, And make imaginary puissance.".into() },
+                StyleExemplar { text: "O for a Muse of fire, that would ascend the brightest heaven of invention, a kingdom for a stage, princes to act and monarchs to behold the swelling scene!".into() },
+                StyleExemplar { text: "Thus with imagined wing our swift scene flies in motion of no less celerity than that of thought.".into() },
             ],
             source_urls: vec![],
         },
@@ -123,6 +125,8 @@ pub(crate) fn builtin_style_cards() -> Vec<StyleCardEntry> {
             exemplars: vec![
                 StyleExemplar { text: "O, then, I see Queen Mab hath been with you. She is the fairies' midwife, and she comes in shape no bigger than an agate-stone.".into() },
                 StyleExemplar { text: "Lord, what fools these mortals be!".into() },
+                StyleExemplar { text: "Alas, poor Romeo! He is already dead; stabbed with a white wench's black eye; shot through the ear with a love-song; the very pin of his heart cleft with the blind bow-boy's butt-shaft.".into() },
+                StyleExemplar { text: "The better part of valour is discretion; in the which better part I have saved my life.".into() },
             ],
             source_urls: vec![],
         },
@@ -144,6 +148,7 @@ pub(crate) fn builtin_style_cards() -> Vec<StyleCardEntry> {
             exemplars: vec![
                 StyleExemplar { text: "But, soft! what light through yonder window breaks? It is the east, and Juliet is the sun.".into() },
                 StyleExemplar { text: "To be, or not to be, that is the question: Whether 'tis nobler in the mind to suffer the slings and arrows of outrageous fortune\u{2026}".into() },
+                StyleExemplar { text: "Between the acting of a dreadful thing and the first motion, all the interim is like a phantasma, or a hideous dream.".into() },
             ],
             source_urls: vec![],
         },
@@ -165,6 +170,7 @@ pub(crate) fn builtin_style_cards() -> Vec<StyleCardEntry> {
             exemplars: vec![
                 StyleExemplar { text: "I am not what I am.".into() },
                 StyleExemplar { text: "And therefore, since I cannot prove a lover, to entertain these fair well-spoken days, I am determined to prove a villain.".into() },
+                StyleExemplar { text: "Thou, nature, art my goddess; to thy law my services are bound. Wherefore should I stand in the plague of custom...".into() },
             ],
             source_urls: vec![],
         },
@@ -184,6 +190,7 @@ pub(crate) fn builtin_style_cards() -> Vec<StyleCardEntry> {
                 StylePattern { text: "Prefer precise, concrete verbs and natural-cause explanations; avoid slang, irony, and ornate metaphor.".into() },
             ],
             exemplars: vec![
+                StyleExemplar { text: "These gentle giants have been overlooked and have already become extinct in seven countries.".into() },
                 StyleExemplar { text: "At the edge of the reedbed, the heron waits. Every movement must justify its cost, for in this cold light even patience consumes energy.".into() },
                 StyleExemplar { text: "Beneath the fallen leaves, a small world is already awake. Fungi thread through the soil, turning last year's growth into the beginning of the next.".into() },
             ],
@@ -205,8 +212,11 @@ pub(crate) fn builtin_style_cards() -> Vec<StyleCardEntry> {
                 StylePattern { text: "Favor balanced, periodic sentences with qualifications and reversals; avoid modern slang, abrupt minimalism, and overt moralizing.".into() },
             ],
             exemplars: vec![
+                StyleExemplar { text: "It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.".into() },
+                StyleExemplar { text: "Seldom, very seldom, does complete truth belong to any human disclosure; seldom can it happen that something is not a little disguised, or a little mistaken; but where, as in this case, though the conduct is mistaken, the feelings are not, it may not be very material.".into() },
                 StyleExemplar { text: "Mrs. Harcourt had long considered herself immune to flattery, by which she meant only that she preferred it carefully disguised.".into() },
                 StyleExemplar { text: "Edward's silence was judged by his aunt to be prudence, by his sister to be indifference, and by himself, when he could bear the reflection, to be cowardice.".into() },
+                StyleExemplar { text: "The invitation, arriving three days later than civility required, supplied the family with both gratification and resentment in nearly equal measure.".into() },
             ],
             source_urls: vec![],
         },
@@ -226,8 +236,11 @@ pub(crate) fn builtin_style_cards() -> Vec<StyleCardEntry> {
                 StylePattern { text: "Let description carry moral atmosphere: light, shadow, wind, stone, trees, roads, stars, and thresholds should imply danger or hope.".into() },
             ],
             exemplars: vec![
-                StyleExemplar { text: "Beyond the last tilled field the road bent northward, and there the wind came down cold from the hills, bearing the smell of rain and stone.".into() },
-                StyleExemplar { text: "Few now remembered the name of that tower, though shepherds still avoided its shadow when evening gathered in the valley.".into() },
+                StyleExemplar { text: "Many that live deserve death. And some that die deserve life. Can you give it to them?".into() },
+                StyleExemplar { text: "Then suddenly, as before under the eaves of the Emyn Muil, Sam saw these two rivals with other vision. A crouching shape, scarcely more than the shadow of a living thing, a creature now wholly ruined and defeated, yet filled with a hideous lust and rage; and before it stood stern, untouchable now by pity, a figure robed in white, but at its breast it held a wheel of fire.".into() },
+                StyleExemplar { text: "Few now remembered the name of that tower, though shepherds still avoided its shadow.".into() },
+                StyleExemplar { text: "I do not love the bright sword for its sharpness, nor the arrow for its swiftness, nor the warrior for his glory. I love only that which they defend: the city of the Men of Númenor; and I would have her loved for her memory, her ancientry, her beauty, and her present wisdom. Not feared, save as men may fear the dignity of a man, old and wise.".into() },
+                StyleExemplar { text: "The great shadow descended like a falling cloud. And behold! it was a winged creature: if bird, then greater than all other birds, and it was naked, and neither quill nor feather did it bear, and its vast pinions were as webs of hide between horned fingers; and it stank. A creature of an older world maybe it was, whose kind, lingering in forgotten mountains cold beneath the Moon, outstayed their day, and in hideous eyrie brid this last untimely brood, apt to evil".into() },
             ],
             source_urls: vec![],
         },
