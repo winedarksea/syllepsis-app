@@ -12,6 +12,7 @@ fn disabled_generation_blocks_only_background_notes() {
 #[test]
 fn battery_policy_is_configurable() {
     let mut policy = LocalAiDevicePolicy::default();
+    policy.pause_note_embeddings_on_battery = true;
     assert!(note_generation_blocked(&policy, &PowerSource::Battery));
     policy.pause_note_embeddings_on_battery = false;
     assert!(!note_generation_blocked(&policy, &PowerSource::Battery));

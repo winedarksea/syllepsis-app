@@ -314,6 +314,74 @@
   background: var(--color-bg);
 }
 
+.llm-job-tray {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: 140;
+  display: grid;
+  gap: var(--sp-2);
+  width: min(360px, calc(100vw - var(--sp-8)));
+}
+
+.llm-job-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: var(--sp-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.18));
+}
+
+.llm-job-card.complete { border-color: var(--color-accent); }
+.llm-job-card.failed,
+.llm-job-card.error { border-color: var(--color-error); color: var(--color-error); }
+
+.llm-job-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.llm-job-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-heading);
+  text-transform: capitalize;
+}
+
+.llm-job-status,
+.llm-job-error {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.llm-job-error { color: var(--color-error); }
+
+.llm-job-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.llm-job-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
 /* ── Responsive layout ── */
 
 /* Tablet: narrow sidebar */

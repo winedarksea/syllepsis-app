@@ -7,7 +7,7 @@ import type {
   NoteNeighbors, NoteTokenCount, NoteEmbeddingDetails, MergeNotesRequest, SplitNoteRequest, SplitNoteResult,
   SearchResults, RelatedNote, EmbeddingDiagnostics, CategoryEmbeddingStats,
   GraphAnalysisRequest, GraphAnalysisResult,
-  LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, CloudLlmPrompt, CloudLlmCompletion,
+  LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, QueuedLlmJobRequest, QueuedLlmJobResult, CloudLlmPrompt, CloudLlmCompletion,
   CloudLlmConnectionTestResult, CloudLlmProviderDescriptor, CloudLlmProviderSettings,
   ModelManifest, ModelCacheStatus, ModelDownloadReport,
   BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig,
@@ -83,7 +83,6 @@ export const api = {
   setPrior: (id: string, prior: PriorEdge | null) =>
     invoke<NoteDto>('set_prior', { id, prior }),
   forkNote: (id: string) => invoke<NoteDto>('fork_note', { id }),
-  deleteNote: (id: string) => invoke<void>('delete_note', { id }),
   exportMarkdown: () => invoke<string>('export_markdown'),
   exportHtml: (path: string) => invoke<void>('export_html', { path }),
   exportMarkdownToFile: (path: string) => invoke<void>('export_markdown_to_file', { path }),
@@ -142,6 +141,18 @@ export const api = {
       task,
       modelOverride: modelOverride ?? null,
     }),
+  enqueueLlmJob: (request: QueuedLlmJobRequest) =>
+    invoke<QueuedLlmJobResult>('enqueue_llm_job', { request }),
+  listLlmJobs: () => invoke<QueuedLlmJobResult[]>('list_llm_jobs'),
+  getLlmJob: (jobId: string) => invoke<QueuedLlmJobResult | null>('get_llm_job', { jobId }),
+  acceptLlmJobResult: (jobId: string, storeOldAsCommentary = false, factCheckPassed = false) =>
+    invoke<NoteDto>('accept_llm_job_result', {
+      jobId,
+      storeOldAsCommentary,
+      factCheckPassed,
+    }),
+  dismissLlmJobResult: (jobId: string) =>
+    invoke<void>('dismiss_llm_job_result', { jobId }),
   prepareCloudPrompt: (noteId: string, task: LlmTask, modelOverride?: ModelRef) =>
     invoke<CloudLlmPrompt>('prepare_cloud_prompt', {
       noteId,

@@ -19,6 +19,7 @@ import { StyleCardsView } from './views/StyleCardsView';
 import { SettingsView } from './views/SettingsView';
 import { Editor } from './editor/Editor';
 import { Icon } from './components/Icon';
+import { LlmJobTray } from './components/LlmJobTray';
 import { resolveThemeVars, resolveThemeStyle } from './theme/themes';
 import type { BookInfo, TrackedBookInfo, ObjectType } from './types';
 import './App.css';
@@ -447,6 +448,7 @@ function Workspace() {
           <UnsortedQueue />
         )}
       </main>
+      <LlmJobTray />
     </div>
   );
 }

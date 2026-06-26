@@ -19,6 +19,7 @@ use syllepsis_core::embeddings::{
 };
 use syllepsis_core::id::NoteId;
 use syllepsis_core::llm::{select_llm_provider, LlmService, LlmTask, Proposal};
+use syllepsis_core::llm::prompts::LlmTaskOptions;
 use syllepsis_core::storage::{Book, NoteStore};
 
 use power::detect_power_source;
@@ -70,6 +71,7 @@ struct LlmJob {
     note_id: String,
     task: LlmTask,
     model_override: Option<ModelRef>,
+    options: LlmTaskOptions,
     response: mpsc::SyncSender<Result<Proposal, String>>,
 }
 
@@ -269,6 +271,7 @@ impl LocalAiWorker {
         note_id: String,
         task: LlmTask,
         model_override: Option<ModelRef>,
+        options: LlmTaskOptions,
     ) -> Result<Proposal, String> {
         let (response_tx, response_rx) = mpsc::sync_channel(1);
         let models_root = book
@@ -286,6 +289,37 @@ impl LocalAiWorker {
                 note_id,
                 task,
                 model_override,
+                options,
+                response: response_tx,
+            });
+        self.shared.wake.notify_all();
+        response_rx
+            .recv()
+            .map_err(|_| "local AI worker stopped".to_string())?
+    }
+
+    pub fn submit_llm_path(
+        &self,
+        book_root: PathBuf,
+        models_root: PathBuf,
+        note_id: String,
+        task: LlmTask,
+        model_override: Option<ModelRef>,
+        options: LlmTaskOptions,
+    ) -> Result<Proposal, String> {
+        let (response_tx, response_rx) = mpsc::sync_channel(1);
+        self.shared
+            .state
+            .lock()
+            .unwrap()
+            .llm_jobs
+            .push_back(LlmJob {
+                book_root,
+                models_root,
+                note_id,
+                task,
+                model_override,
+                options,
                 response: response_tx,
             });
         self.shared.wake.notify_all();
@@ -465,12 +499,13 @@ fn process_llm_job(runtime: &mut RuntimeCache, job: &LlmJob) -> Result<Proposal,
     let RuntimeCache::Llm { service, .. } = runtime else {
         unreachable!()
     };
-    app::llm::generate_proposal_with_service(
+    app::llm::generate_proposal_with_service_and_options(
         &book,
         service.as_ref(),
         &job.note_id,
         job.task,
         job.model_override.clone(),
+        &job.options,
     )
     .map_err(|error| error.to_string())
 }

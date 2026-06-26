@@ -1,11 +1,14 @@
 //! Global application state threaded through Tauri commands via [`tauri::State`].
 
 use crate::local_ai::LocalAiWorker;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use syllepsis_core::app::llm::QueuedLlmJobResult;
 use syllepsis_core::graph_analysis::{
     current_corpus_fingerprint, GraphAnalysisRequest, GraphAnalysisResult, SemanticGraphCorpus,
 };
+use syllepsis_core::llm::prompts::LlmTaskOptions;
 use syllepsis_core::storage::Book;
 
 pub const MODEL_CACHE_ENV_VAR: &str = "SYLLEPSIS_MODEL_CACHE";
@@ -15,6 +18,12 @@ struct CachedGraphCorpus {
     corpus: Arc<SemanticGraphCorpus>,
 }
 
+pub struct QueuedLlmJobRecord {
+    pub result: QueuedLlmJobResult,
+    pub options: LlmTaskOptions,
+    pub dismissed: bool,
+}
+
 /// The single app-level state. The open book is behind a Mutex; `None` means no book
 /// is open yet (the user hasn't opened or created one in this session).
 pub struct AppState {
@@ -22,6 +31,7 @@ pub struct AppState {
     graph_corpus: Mutex<Option<CachedGraphCorpus>>,
     pub file_watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub local_ai: LocalAiWorker,
+    pub llm_jobs: Arc<Mutex<HashMap<String, QueuedLlmJobRecord>>>,
 }
 
 impl AppState {
@@ -31,6 +41,7 @@ impl AppState {
             graph_corpus: Mutex::new(None),
             file_watcher: Mutex::new(None),
             local_ai: LocalAiWorker::new(),
+            llm_jobs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

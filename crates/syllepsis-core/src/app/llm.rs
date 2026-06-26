@@ -17,6 +17,7 @@ use crate::id::NoteId;
 use crate::llm::prompts;
 use crate::llm::selection::select_llm_provider;
 use crate::llm::service::parse_category_list;
+use crate::llm::prompts::LlmTaskOptions;
 use crate::llm::{LlmService, LlmTask, Proposal};
 use crate::model::{Note, ObjectType};
 use crate::onnx::{manifest, ModelCache};
@@ -87,7 +88,29 @@ pub struct QueuedLlmJobRequest {
     pub target_note_id: String,
     pub task: LlmTask,
     pub model_override: Option<ModelRef>,
+    #[serde(default)]
+    pub style_card_id: Option<String>,
+    #[serde(default)]
+    pub style_overrides: Option<String>,
+    #[serde(default)]
+    pub summary_variant: crate::llm::prompts::SummaryVariant,
+    #[serde(default)]
+    pub rewrite_mode: crate::llm::prompts::RewriteMode,
+    #[serde(default)]
     pub store_result_as_commentary: bool,
+}
+
+impl QueuedLlmJobRequest {
+    pub fn task_options(&self) -> LlmTaskOptions {
+        LlmTaskOptions {
+            style_card_id: self.style_card_id.clone(),
+            style_overrides: self.style_overrides.clone(),
+            summary_variant: self.summary_variant,
+            rewrite_mode: self.rewrite_mode,
+            store_result_as_commentary: self.store_result_as_commentary,
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -165,12 +188,28 @@ pub fn prepare_cloud_prompt(
     task: LlmTask,
     model_override: Option<ModelRef>,
 ) -> CoreResult<CloudLlmPrompt> {
+    prepare_cloud_prompt_with_options(
+        book,
+        note_id,
+        task,
+        model_override,
+        &LlmTaskOptions::default(),
+    )
+}
+
+pub fn prepare_cloud_prompt_with_options(
+    book: &Book,
+    note_id: &str,
+    task: LlmTask,
+    model_override: Option<ModelRef>,
+    options: &LlmTaskOptions,
+) -> CoreResult<CloudLlmPrompt> {
     let note = book.store.read_note(&NoteId::parse(note_id)?)?;
     let model_ref =
         model_override.unwrap_or_else(|| task.model_ref(&book.config.llm.routing).clone());
     reject_non_cloud_route(task, &model_ref)?;
     let known_categories = known_categories(book)?;
-    let (system, user) = prompts::build(task, &note, &known_categories);
+    let (system, user) = prompts::build_with_options(task, &note, &known_categories, options);
 
     Ok(CloudLlmPrompt {
         target_note_id: note_id.to_string(),
@@ -211,6 +250,24 @@ pub fn generate_proposal_with_service(
     task: LlmTask,
     model_override: Option<ModelRef>,
 ) -> CoreResult<Proposal> {
+    generate_proposal_with_service_and_options(
+        book,
+        service,
+        note_id,
+        task,
+        model_override,
+        &LlmTaskOptions::default(),
+    )
+}
+
+pub fn generate_proposal_with_service_and_options(
+    book: &Book,
+    service: &LlmService,
+    note_id: &str,
+    task: LlmTask,
+    model_override: Option<ModelRef>,
+    options: &LlmTaskOptions,
+) -> CoreResult<Proposal> {
     let note = book.store.read_note(&NoteId::parse(note_id)?)?;
     let known_categories: Vec<String> = book
         .store
@@ -219,10 +276,14 @@ pub fn generate_proposal_with_service(
         .map(|c| c.name)
         .collect();
     match model_override {
-        Some(model_ref) => {
-            service.generate_with_model_ref(task, model_ref, &note, &known_categories)
-        }
-        None => service.generate(task, &note, &known_categories),
+        Some(model_ref) => service.generate_with_model_ref_and_options(
+            task,
+            model_ref,
+            &note,
+            &known_categories,
+            options,
+        ),
+        None => service.generate_with_options(task, &note, &known_categories, options),
     }
 }
 
@@ -252,13 +313,14 @@ fn reject_non_cloud_route(task: LlmTask, model_ref: &ModelRef) -> CoreResult<()>
     Ok(())
 }
 
-const LLM_TASKS: [LlmTask; 6] = [
+const LLM_TASKS: [LlmTask; 7] = [
     LlmTask::Summarize,
     LlmTask::FactCheck,
     LlmTask::DevilsAdvocate,
     LlmTask::Grammar,
     LlmTask::CategorySuggest,
     LlmTask::Rewrite,
+    LlmTask::GenerateFromSummary,
 ];
 
 fn route_execution_mode(book: &Book, model_ref: &ModelRef) -> (LlmExecutionMode, bool) {
@@ -296,6 +358,7 @@ fn output_contract(task: LlmTask) -> &'static str {
         LlmTask::Grammar => "plain_text_revised_body",
         LlmTask::CategorySuggest => "comma_separated_categories",
         LlmTask::Rewrite => "plain_text_rewritten_body",
+        LlmTask::GenerateFromSummary => "plain_text_generated_body",
     }
 }
 
@@ -321,7 +384,7 @@ pub fn accept_proposal(
         LlmTask::Summarize => {
             note.summary = proposal.content.clone();
         }
-        LlmTask::Grammar | LlmTask::Rewrite => {
+        LlmTask::Grammar | LlmTask::Rewrite | LlmTask::GenerateFromSummary => {
             crate::app::lifecycle::guard_locked_merge(
                 &note,
                 proposal.created_at,
@@ -352,6 +415,31 @@ pub fn accept_proposal(
     note.metadata.dates.updated = Utc::now();
     book.save_note(&note)?;
     Ok(NoteDto::from_note(&note))
+}
+
+pub fn create_proposal_commentary(
+    book: &Book,
+    proposal: &Proposal,
+    job_id: &str,
+    options: &LlmTaskOptions,
+) -> CoreResult<NoteDto> {
+    let target = book.store.read_note(&proposal.target)?;
+    let title = format!("{} proposal for {}", proposal.task.as_str(), target.title);
+    let metadata = serde_json::json!({
+        "kind": "queued_llm_result",
+        "job_id": job_id,
+        "proposal": proposal,
+        "options": options,
+    });
+    let body = format!(
+        "@{}\n\n<!-- syllepsis-llm-job:{} -->\n\n```json\n{}\n```\n\n{}",
+        target.id.ulid(),
+        job_id,
+        serde_json::to_string_pretty(&metadata).map_err(crate::error::CoreError::Json)?,
+        proposal.content
+    );
+    let commentary = create_commentary(book, &target, &title, &body)?;
+    Ok(NoteDto::from_note(&commentary))
 }
 
 /// Create a commentary note linked to `target` by an `@ulid` reference, inheriting its
@@ -577,6 +665,69 @@ mod tests {
         // Summaries never touch the protected body, so the lock does not block them.
         let proposal = proposal(&note, LlmTask::Summarize, "Turn off the breaker first.");
         assert!(accept_proposal(&book, &proposal, false, false).is_ok());
+    }
+
+    #[test]
+    fn queued_job_request_serializes_task_options() {
+        let request = QueuedLlmJobRequest {
+            target_note_id: "note-1".into(),
+            task: LlmTask::Rewrite,
+            model_override: Some(ModelRef::new("local", "gemma")),
+            style_card_id: Some("style-1".into()),
+            style_overrides: Some("Use short paragraphs.".into()),
+            summary_variant: crate::llm::prompts::SummaryVariant::Mnemonic,
+            rewrite_mode: crate::llm::prompts::RewriteMode::Simplify,
+            store_result_as_commentary: true,
+        };
+
+        let json = serde_json::to_value(&request).unwrap();
+
+        assert_eq!(json["task"], "rewrite");
+        assert_eq!(json["style_card_id"], "style-1");
+        assert_eq!(json["summary_variant"], "mnemonic");
+        assert_eq!(json["rewrite_mode"], "simplify");
+        assert!(json["store_result_as_commentary"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn accept_generate_from_summary_replaces_body() {
+        let (_d, book) = book();
+        let mut note = seed(&book, "");
+        note.summary = "Turn off the breaker before touching the panel.".into();
+        let note = update_note(&book, note).unwrap();
+        let proposal = proposal(
+            &note,
+            LlmTask::GenerateFromSummary,
+            "Turn off the breaker before touching the electrical panel.",
+        );
+
+        let updated = accept_proposal(&book, &proposal, false, false).unwrap();
+
+        assert_eq!(
+            updated.body,
+            "Turn off the breaker before touching the electrical panel."
+        );
+        assert!(updated.metadata.authorship.ai_generated);
+    }
+
+    #[test]
+    fn completed_job_can_be_persisted_as_linked_commentary() {
+        let (_d, book) = book();
+        let note = seed(&book, "Breaker notes.");
+        let proposal = proposal(&note, LlmTask::Summarize, "Turn off the breaker first.");
+        let options = LlmTaskOptions {
+            store_result_as_commentary: true,
+            ..Default::default()
+        };
+
+        let commentary =
+            create_proposal_commentary(&book, &proposal, "job-123", &options).unwrap();
+
+        assert_eq!(commentary.object_type, ObjectType::Commentary);
+        assert!(commentary.body.contains("syllepsis-llm-job:job-123"));
+        assert!(commentary.body.contains("\"kind\": \"queued_llm_result\""));
+        assert!(commentary.body.contains("Turn off the breaker first."));
+        assert!(commentary.metadata.authorship.ai_generated);
     }
 
     #[test]

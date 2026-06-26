@@ -11,6 +11,7 @@ use tauri::State;
 
 use syllepsis_core::app::llm::{self as app, CloudLlmCompletion, CloudLlmPrompt};
 use syllepsis_core::config::ModelRef;
+use syllepsis_core::llm::prompts::LlmTaskOptions;
 use syllepsis_core::llm::{LlmTask, Proposal};
 
 use crate::state::AppState;
@@ -153,12 +154,22 @@ pub fn generate_cloud_proposal(
     task: LlmTask,
     model_override: Option<ModelRef>,
 ) -> Result<Proposal, String> {
+    generate_cloud_proposal_for_state(&state, note_id, task, model_override, &LlmTaskOptions::default())
+}
+
+pub(crate) fn generate_cloud_proposal_for_state(
+    state: &AppState,
+    note_id: String,
+    task: LlmTask,
+    model_override: Option<ModelRef>,
+    options: &LlmTaskOptions,
+) -> Result<Proposal, String> {
     let prompt = {
         let guard = state.book.lock().unwrap();
         let book = guard
             .as_ref()
             .ok_or_else(|| "no book is open".to_string())?;
-        app::prepare_cloud_prompt(book, &note_id, task, model_override)
+        app::prepare_cloud_prompt_with_options(book, &note_id, task, model_override, options)
             .map_err(|e| e.to_string())?
     };
     let content = execute_cloud_prompt(&KeyringCredentialStore, &prompt)?;
@@ -436,7 +447,7 @@ fn execute_cloud_prompt(
 }
 
 fn proposal_from_completed_prompt(
-    state: &State<AppState>,
+    state: &AppState,
     prompt: CloudLlmPrompt,
     content: String,
 ) -> Result<Proposal, String> {

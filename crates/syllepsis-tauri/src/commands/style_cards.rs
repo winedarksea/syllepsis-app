@@ -50,6 +50,20 @@ fn ensure_dir(path: &std::path::Path) -> Result<(), String> {
     std::fs::create_dir_all(path).map_err(|e| format!("create _style_cards dir: {e}"))
 }
 
+pub(crate) fn style_card_for_book(
+    book_root: &std::path::Path,
+    id: &str,
+) -> Result<Option<StyleCardEntry>, String> {
+    let path = card_path(book_root, id);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str::<StyleCardEntry>(&text)
+        .map(Some)
+        .map_err(|e| format!("parse style card {id}: {e}"))
+}
+
 /// List all style cards in the open book.
 #[tauri::command]
 pub fn list_style_cards(state: State<AppState>) -> Result<Vec<StyleCardEntry>, String> {

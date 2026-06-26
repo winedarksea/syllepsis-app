@@ -285,6 +285,8 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
   const [findOpen, setFindOpen] = useState(false);
   const [findPattern, setFindPattern] = useState('');
   const [findIndex, setFindIndex] = useState(0);
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false);
 
   useEffect(() => {
     setNote(null);
@@ -446,19 +448,6 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
     }
   }, [note, noteId, closeEditor]);
 
-  const handleProposalApplied = useCallback((updated: NoteDto) => {
-    setNote(updated);
-    setTitle(updated.title);
-    setSummary(updated.summary);
-    setDirty(false);
-    setMode('read');
-    if (updated.type !== 'table') {
-      setBody(updated.body);
-      setReloadKey((k) => k + 1);
-    }
-    api.allCategories().then(setCategories).catch(() => {});
-  }, [setCategories]);
-
   const switchMode = useCallback((nextMode: NoteScreenMode) => {
     if (nextMode === mode) return;
     if (mode === 'source') {
@@ -607,15 +596,14 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const handleMerge = useCallback(async () => {
+  const handleMerge = useCallback(async (sourceIds: string[]) => {
     if (!note) return;
-    const sourceId = window.prompt('Note id to merge into this note');
-    if (!sourceId?.trim()) return;
+    if (sourceIds.length === 0) return;
     if (dirtyRef.current) await saveRef.current();
     try {
       const updated = await api.mergeNotes({
         target_note_id: note.id,
-        source_note_ids: [sourceId.trim()],
+        source_note_ids: sourceIds,
       });
       setNote(updated);
       setTitle(updated.title);
@@ -631,19 +619,15 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
     }
   }, [note, setCategories]);
 
-  const handleSplit = useCallback(async () => {
+  const handleSplit = useCallback(async (splitAt: number, secondTitle?: string) => {
     if (!note || note.type === 'table' || note.type === 'picture' || note.type === 'drawing') return;
-    const defaultOffset = String(getCurrentBody.current().length);
-    const rawOffset = window.prompt('Split body at character offset', defaultOffset);
-    if (!rawOffset) return;
-    const splitAt = Number.parseInt(rawOffset, 10);
     if (!Number.isFinite(splitAt) || splitAt < 0) {
       setError('Split offset must be a non-negative number.');
       return;
     }
     if (dirtyRef.current) await saveRef.current();
     try {
-      const result = await api.splitNote({ note_id: note.id, split_at: splitAt });
+      const result = await api.splitNote({ note_id: note.id, split_at: splitAt, second_title: secondTitle || null });
       setNote(result.first);
       setTitle(result.first.title);
       setSummary(result.first.summary);
@@ -723,13 +707,18 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
           <button className="editor-tool-btn" onClick={() => setFindOpen((open) => !open)} title="Find in note">
             <Icon name="search" size={16} />
           </button>
-          <button className="editor-tool-btn" onClick={() => void handleMerge()} title="Merge another note into this note">
+          <button className="editor-tool-btn" onClick={() => setMergeDialogOpen(true)} title="Merge another note into this note">
             Merge
           </button>
-          <button className="editor-tool-btn" onClick={() => void handleSplit()} title="Split this note at an offset">
+          <button
+            className="editor-tool-btn"
+            onClick={() => setSplitDialogOpen(true)}
+            title="Split this note at an offset"
+            disabled={isTable || isImageObject}
+          >
             Split
           </button>
-          <LlmToolsMenu noteId={noteId} onApplied={handleProposalApplied} />
+          <LlmToolsMenu noteId={noteId} />
           <button className="editor-delete-btn" onClick={handleDelete} title="Delete note">
             <Icon name="delete" size={16} />
           </button>
@@ -900,6 +889,28 @@ export function Editor({ noteId, initialMode = 'read' }: Props) {
       )}
 
       <RelatedCarousel noteId={noteId} />
+      {mergeDialogOpen && (
+        <MergeDialog
+          target={note}
+          allNotes={allNotes}
+          onClose={() => setMergeDialogOpen(false)}
+          onMerge={(sourceIds) => {
+            setMergeDialogOpen(false);
+            void handleMerge(sourceIds);
+          }}
+        />
+      )}
+      {splitDialogOpen && (
+        <SplitDialog
+          body={getCurrentBody.current()}
+          defaultOffset={mode === 'source' ? rawTextareaRef.current?.selectionStart ?? rawText.length : getCurrentBody.current().length}
+          onClose={() => setSplitDialogOpen(false)}
+          onSplit={(splitAt, secondTitle) => {
+            setSplitDialogOpen(false);
+            void handleSplit(splitAt, secondTitle);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -985,6 +996,133 @@ function FindBar({
       <button onClick={onClose} title="Close find">
         <Icon name="close" size={16} />
       </button>
+    </div>
+  );
+}
+
+function MergeDialog({
+  target,
+  allNotes,
+  onClose,
+  onMerge,
+}: {
+  target: NoteDto;
+  allNotes: NoteDto[];
+  onClose: () => void;
+  onMerge: (sourceIds: string[]) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const candidates = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return allNotes
+      .filter((note) => note.id !== target.id)
+      .filter((note) => !q || note.id.toLowerCase().includes(q) || note.title.toLowerCase().includes(q) || note.summary.toLowerCase().includes(q))
+      .slice(0, 40);
+  }, [allNotes, query, target.id]);
+
+  const toggle = (id: string) => {
+    setSelected((current) => current.includes(id)
+      ? current.filter((candidate) => candidate !== id)
+      : [...current, id]);
+  };
+
+  return (
+    <div className="editor-dialog-backdrop" role="presentation" onClick={onClose}>
+      <div className="editor-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="editor-dialog-header">
+          <h3>Merge into current note</h3>
+          <button onClick={onClose} aria-label="Close"><Icon name="close" size={16} /></button>
+        </div>
+        <div className="editor-dialog-body">
+          <div className="editor-dialog-target">
+            Target: <strong>{target.title || target.id}</strong>
+          </div>
+          <input
+            className="editor-dialog-search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search notes to merge..."
+            autoFocus
+          />
+          <div className="editor-merge-list">
+            {candidates.map((note) => (
+              <label key={note.id} className="editor-merge-row">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(note.id)}
+                  onChange={() => toggle(note.id)}
+                />
+                <span className="editor-merge-copy">
+                  <strong>{note.title || note.id}</strong>
+                  <small>{note.summary || note.body.slice(0, 120)}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="editor-dialog-actions">
+          <button className="picker-btn picker-btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="picker-btn picker-btn-primary" disabled={selected.length === 0} onClick={() => onMerge(selected)}>
+            Merge {selected.length || ''}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SplitDialog({
+  body,
+  defaultOffset,
+  onClose,
+  onSplit,
+}: {
+  body: string;
+  defaultOffset: number;
+  onClose: () => void;
+  onSplit: (splitAt: number, secondTitle?: string) => void;
+}) {
+  const [offset, setOffset] = useState(String(defaultOffset));
+  const [secondTitle, setSecondTitle] = useState('');
+  const splitAt = Math.max(0, Math.min(body.length, Number.parseInt(offset, 10) || 0));
+  const first = body.slice(0, splitAt).trimEnd();
+  const second = body.slice(splitAt).trimStart();
+
+  return (
+    <div className="editor-dialog-backdrop" role="presentation" onClick={onClose}>
+      <div className="editor-dialog editor-split-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="editor-dialog-header">
+          <h3>Split note</h3>
+          <button onClick={onClose} aria-label="Close"><Icon name="close" size={16} /></button>
+        </div>
+        <div className="editor-dialog-body">
+          <label className="editor-dialog-field">
+            <span>Character offset</span>
+            <input value={offset} onChange={(event) => setOffset(event.target.value)} inputMode="numeric" autoFocus />
+          </label>
+          <label className="editor-dialog-field">
+            <span>Second note title</span>
+            <input value={secondTitle} onChange={(event) => setSecondTitle(event.target.value)} placeholder="Optional" />
+          </label>
+          <div className="editor-split-preview">
+            <div>
+              <strong>First note</strong>
+              <pre>{first || '(empty)'}</pre>
+            </div>
+            <div>
+              <strong>Second note</strong>
+              <pre>{second || '(empty)'}</pre>
+            </div>
+          </div>
+        </div>
+        <div className="editor-dialog-actions">
+          <button className="picker-btn picker-btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="picker-btn picker-btn-primary" disabled={!second.trim()} onClick={() => onSplit(splitAt, secondTitle.trim() || undefined)}>
+            Split note
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

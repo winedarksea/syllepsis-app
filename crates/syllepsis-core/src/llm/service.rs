@@ -4,7 +4,7 @@
 
 use crate::config::{LlmRouting, ModelRef};
 use crate::error::{CoreError, CoreResult};
-use crate::llm::prompts;
+use crate::llm::prompts::{self, LlmTaskOptions};
 use crate::llm::proposal::Proposal;
 use crate::llm::provider::{LlmProvider, LlmRequest};
 use crate::llm::task::LlmTask;
@@ -55,13 +55,46 @@ impl LlmService {
         note: &Note,
         known_categories: &[String],
     ) -> CoreResult<Proposal> {
+        self.generate_with_model_ref_and_options(
+            task,
+            model_ref,
+            note,
+            known_categories,
+            &LlmTaskOptions::default(),
+        )
+    }
+
+    pub fn generate_with_options(
+        &self,
+        task: LlmTask,
+        note: &Note,
+        known_categories: &[String],
+        options: &LlmTaskOptions,
+    ) -> CoreResult<Proposal> {
+        self.generate_with_model_ref_and_options(
+            task,
+            task.model_ref(&self.routing).clone(),
+            note,
+            known_categories,
+            options,
+        )
+    }
+
+    pub fn generate_with_model_ref_and_options(
+        &self,
+        task: LlmTask,
+        model_ref: ModelRef,
+        note: &Note,
+        known_categories: &[String],
+        options: &LlmTaskOptions,
+    ) -> CoreResult<Proposal> {
         if !self.provider.is_live() {
             return Err(CoreError::Llm(format!(
                 "provider {} is not a model-backed LLM",
                 self.provider.name()
             )));
         }
-        let (system, user) = prompts::build(task, note, known_categories);
+        let (system, user) = prompts::build_with_options(task, note, known_categories, options);
         if self.provider.name() != model_ref.provider {
             return Err(CoreError::Llm(format!(
                 "task {} targets provider {}, but active provider is {}",

@@ -170,6 +170,10 @@ export interface QueuedLlmJobRequest {
   target_note_id: string;
   task: LlmTask;
   model_override?: ModelRef | null;
+  style_card_id?: string | null;
+  style_overrides?: string | null;
+  summary_variant?: SummaryVariant;
+  rewrite_mode?: RewriteMode;
   store_result_as_commentary: boolean;
 }
 
@@ -511,7 +515,11 @@ export type LlmTask =
   | 'devils_advocate'
   | 'grammar'
   | 'category_suggest'
-  | 'rewrite';
+  | 'rewrite'
+  | 'generate_from_summary';
+
+export type SummaryVariant = 'plain' | 'mnemonic' | 'acrostic';
+export type RewriteMode = 'standard' | 'simplify';
 
 export type ProposalStatus = 'pending' | 'accepted' | 'rejected';
 

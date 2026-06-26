@@ -25,6 +25,8 @@ pub enum LlmTask {
     CategorySuggest,
     /// Rewrite the body (e.g. toward a target style) while preserving substance.
     Rewrite,
+    /// Expand the current summary into a note body, optionally following a style card.
+    GenerateFromSummary,
 }
 
 impl LlmTask {
@@ -37,6 +39,7 @@ impl LlmTask {
             LlmTask::Grammar => "grammar",
             LlmTask::CategorySuggest => "category_suggest",
             LlmTask::Rewrite => "rewrite",
+            LlmTask::GenerateFromSummary => "generate_from_summary",
         }
     }
 
@@ -49,13 +52,16 @@ impl LlmTask {
             LlmTask::Grammar => &routing.grammar,
             LlmTask::CategorySuggest => &routing.category_suggest,
             LlmTask::Rewrite => &routing.rewrite,
+            // Use the rewrite route until routing config grows a dedicated slot. This keeps the
+            // task available without changing existing book config schemas.
+            LlmTask::GenerateFromSummary => &routing.rewrite,
         }
     }
 
     /// Whether accepting this task's proposal replaces the note body (Grammar/Rewrite) versus
     /// attaching an annotation alongside it (the rest).
     pub fn replaces_body(self) -> bool {
-        matches!(self, LlmTask::Grammar | LlmTask::Rewrite)
+        matches!(self, LlmTask::Grammar | LlmTask::Rewrite | LlmTask::GenerateFromSummary)
     }
 }
 
@@ -84,6 +90,7 @@ mod tests {
     fn body_replacing_tasks_are_grammar_and_rewrite() {
         assert!(LlmTask::Grammar.replaces_body());
         assert!(LlmTask::Rewrite.replaces_body());
+        assert!(LlmTask::GenerateFromSummary.replaces_body());
         assert!(!LlmTask::FactCheck.replaces_body());
         assert!(!LlmTask::Summarize.replaces_body());
     }
@@ -92,5 +99,7 @@ mod tests {
     fn serde_uses_snake_case() {
         let json = serde_json::to_string(&LlmTask::DevilsAdvocate).unwrap();
         assert_eq!(json, "\"devils_advocate\"");
+        let json = serde_json::to_string(&LlmTask::GenerateFromSummary).unwrap();
+        assert_eq!(json, "\"generate_from_summary\"");
     }
 }
