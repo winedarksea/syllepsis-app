@@ -276,14 +276,16 @@ export const api = {
     invoke<CloudSyncConnectStart>('connect_cloud_sync_provider', { provider }),
   disconnectCloudSyncProvider: (provider: string) =>
     invoke<CloudSyncProviderStatus>('disconnect_cloud_sync_provider', { provider }),
+  activateCloudSyncProvider: (provider: string) =>
+    invoke<CloudSyncProviderStatus>('activate_cloud_sync_provider', { provider }),
   listCloudBooks: (provider: string) =>
     invoke<CloudBookSummary[]>('list_cloud_books', { provider }),
   uploadBookToCloud: (provider: string) =>
     invoke<SyncReport>('upload_book_to_cloud', { provider }),
   syncManagedCloudNow: (provider: string) =>
     invoke<SyncReport>('sync_managed_cloud_now', { provider }),
-  openCloudBook: (provider: string, bookId: string, parentPath: string) =>
-    invoke<void>('open_cloud_book', { provider, bookId, parentPath }),
+  openCloudBook: (provider: string, bookId: string, remoteRoot: string, layout: string, parentPath: string) =>
+    invoke<BookInfo>('open_cloud_book', { provider, bookId, remoteRoot, layout, parentPath }),
   deleteCurrentBook: (expectedBookName: string) =>
     invoke<DeleteCurrentBookReport>('delete_current_book', { expectedBookName }),
 

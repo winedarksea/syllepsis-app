@@ -341,6 +341,19 @@ export interface TrackedBookInfo {
   path: string;
   available: boolean;
   status?: string;
+  git: TrackedBookGitInfo;
+  cloud: TrackedBookCloudInfo;
+}
+
+export interface TrackedBookGitInfo {
+  is_repository: boolean;
+  branch?: string | null;
+}
+
+export interface TrackedBookCloudInfo {
+  active_provider?: string | null;
+  active_provider_display_name?: string | null;
+  known_provider_ids: string[];
 }
 
 export interface BookOpenWarningInfo {
@@ -810,6 +823,7 @@ export interface CloudSyncProviderStatus {
   display_name: string;
   connected: boolean;
   requires_loro: boolean;
+  active_for_current_book: boolean;
 }
 
 export interface CloudSyncConnectStart {
@@ -823,6 +837,8 @@ export interface CloudBookSummary {
   book_id: string;
   name: string;
   updated_at: string;
+  remote_root: string;
+  layout: string;
 }
 
 export interface ManagedCloudReport {

@@ -166,6 +166,7 @@ pub fn run() {
             cloud_sync_provider_statuses,
             connect_cloud_sync_provider,
             disconnect_cloud_sync_provider,
+            activate_cloud_sync_provider,
             list_cloud_books,
             upload_book_to_cloud,
             open_cloud_book,

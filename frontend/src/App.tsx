@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { listen } from '@tauri-apps/api/event';
 import { useStore } from './lib/store';
 import { api } from './lib/api';
 import { Sidebar } from './components/Sidebar';
@@ -21,7 +23,10 @@ import { Editor } from './editor/Editor';
 import { Icon } from './components/Icon';
 import { LlmJobTray } from './components/LlmJobTray';
 import { resolveThemeVars, resolveThemeStyle } from './theme/themes';
-import type { BookInfo, TrackedBookInfo, ObjectType } from './types';
+import type {
+  BookInfo, TrackedBookInfo, ObjectType,
+  CloudBookSummary, CloudSyncProviderDescriptor, CloudSyncProviderStatus,
+} from './types';
 import './App.css';
 
 const PACK_FILTER = [{ name: 'Syllepsis pack', extensions: ['synpack.json', 'json'] }];
@@ -39,7 +44,7 @@ function BookPicker() {
   const [trackedBooks, setTrackedBooks] = useState<TrackedBookInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyPath, setBusyPath] = useState<string | null>(null);
-  const [mode, setMode] = useState<'create' | 'import' | null>(null);
+  const [mode, setMode] = useState<'create' | 'import' | 'cloud' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -136,6 +141,17 @@ function BookPicker() {
                 >
                   <span className="tracked-book-name">{book.name}</span>
                   <span className="tracked-book-path">{book.path}</span>
+                  <span className="tracked-book-badges">
+                    {book.git.is_repository && (
+                      <span className="tracked-book-badge">Git{book.git.branch ? `: ${book.git.branch}` : ''}</span>
+                    )}
+                    {book.cloud.active_provider_display_name && (
+                      <span className="tracked-book-badge">Cloud: {book.cloud.active_provider_display_name}</span>
+                    )}
+                    {!book.cloud.active_provider_display_name && book.cloud.known_provider_ids.length > 0 && (
+                      <span className="tracked-book-badge">Cloud managed</span>
+                    )}
+                  </span>
                   {book.status && <span className="tracked-book-status">{book.status}</span>}
                 </button>
                 {!book.available && (
@@ -158,6 +174,9 @@ function BookPicker() {
           <button className="picker-btn picker-btn-secondary" onClick={handleAddExisting}>
             Add Existing Book...
           </button>
+          <button className="picker-btn picker-btn-secondary" onClick={() => setMode('cloud')}>
+            Load from Cloud
+          </button>
         </div>
       </div>
 
@@ -171,6 +190,14 @@ function BookPicker() {
 
       {mode === 'import' && (
         <ImportBookWizard
+          onCancel={() => setMode(null)}
+          onCreated={handleBookCreated}
+          onError={setError}
+        />
+      )}
+
+      {mode === 'cloud' && (
+        <CloudBookWizard
           onCancel={() => setMode(null)}
           onCreated={handleBookCreated}
           onError={setError}
@@ -353,6 +380,209 @@ function ImportBookWizard({ onCancel, onCreated, onError }: BookWizardProps) {
       </form>
     </WizardShell>
   );
+}
+
+function CloudBookWizard({ onCancel, onCreated, onError }: BookWizardProps) {
+  const [providers, setProviders] = useState<CloudSyncProviderDescriptor[]>([]);
+  const [statuses, setStatuses] = useState<CloudSyncProviderStatus[]>([]);
+  const [books, setBooks] = useState<CloudBookSummary[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState('');
+  const [parentPath, setParentPath] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [loadingBooks, setLoadingBooks] = useState(false);
+
+  const reloadProviders = useCallback(async () => {
+    const [nextProviders, nextStatuses] = await Promise.all([
+      api.cloudSyncProviderDescriptors(),
+      api.cloudSyncProviderStatuses(),
+    ]);
+    setProviders(nextProviders);
+    setStatuses(nextStatuses);
+    setSelectedProvider((current) => current || nextProviders[0]?.provider || '');
+  }, []);
+
+  useEffect(() => {
+    reloadProviders().catch((error) => onError(String(error)));
+  }, [onError, reloadProviders]);
+
+  useEffect(() => {
+    let unlistenCompleted: (() => void) | undefined;
+    let unlistenFailed: (() => void) | undefined;
+    let disposed = false;
+
+    Promise.all([
+      listen<CloudSyncProviderStatus>('cloud-sync://oauth-completed', (event) => {
+        setStatuses((current) => upsertCloudStatus(current, event.payload));
+        setSelectedProvider(event.payload.provider);
+        setBusy(null);
+      }),
+      listen<string>('cloud-sync://oauth-failed', (event) => {
+        setBusy(null);
+        onError(event.payload);
+      }),
+    ]).then(([completed, failed]) => {
+      if (disposed) {
+        completed();
+        failed();
+        return;
+      }
+      unlistenCompleted = completed;
+      unlistenFailed = failed;
+    }).catch((error) => onError(String(error)));
+
+    return () => {
+      disposed = true;
+      unlistenCompleted?.();
+      unlistenFailed?.();
+    };
+  }, [onError]);
+
+  const selectedStatus = statuses.find((status) => status.provider === selectedProvider);
+  const selectedDescriptor = providers.find((provider) => provider.provider === selectedProvider);
+
+  const loadBooks = useCallback(async () => {
+    if (!selectedProvider || !selectedStatus?.connected) {
+      setBooks([]);
+      return;
+    }
+    setLoadingBooks(true);
+    try {
+      setBooks(await api.listCloudBooks(selectedProvider));
+    } catch (error) {
+      onError(String(error));
+      setBooks([]);
+    } finally {
+      setLoadingBooks(false);
+    }
+  }, [onError, selectedProvider, selectedStatus?.connected]);
+
+  useEffect(() => {
+    loadBooks();
+  }, [loadBooks]);
+
+  const connect = useCallback(async () => {
+    if (!selectedProvider) return;
+    setBusy(selectedProvider);
+    try {
+      const start = await api.connectCloudSyncProvider(selectedProvider);
+      await openUrl(start.auth_url);
+    } catch (error) {
+      setBusy(null);
+      onError(String(error));
+    }
+  }, [onError, selectedProvider]);
+
+  const chooseParent = useCallback(async () => {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: 'Choose where to save the cloud notebook locally',
+    });
+    if (selected && typeof selected === 'string') setParentPath(selected);
+  }, []);
+
+  const openCloudBook = useCallback(async (book: CloudBookSummary) => {
+    if (!selectedProvider || !parentPath) return;
+    setBusy(book.book_id);
+    try {
+      const info = await api.openCloudBook(
+        selectedProvider,
+        book.book_id,
+        book.remote_root,
+        book.layout,
+        parentPath,
+      );
+      await onCreated(info);
+    } catch (error) {
+      setBusy(null);
+      onError(String(error));
+    }
+  }, [onCreated, onError, parentPath, selectedProvider]);
+
+  return (
+    <WizardShell title="Load from Cloud" onCancel={onCancel}>
+      <div className="wizard-form">
+        <label className="wizard-field">
+          <span>Cloud provider</span>
+          <select
+            className="wizard-input"
+            value={selectedProvider}
+            onChange={(event) => setSelectedProvider(event.target.value)}
+          >
+            {providers.map((provider) => (
+              <option key={provider.provider} value={provider.provider}>{provider.display_name}</option>
+            ))}
+          </select>
+        </label>
+
+        <div className="cloud-load-status">
+          <span>{selectedDescriptor?.display_name ?? 'Cloud'} is {selectedStatus?.connected ? 'connected' : 'not connected'}.</span>
+          <button
+            type="button"
+            className="picker-btn picker-btn-secondary"
+            disabled={!selectedProvider || busy === selectedProvider}
+            onClick={connect}
+          >
+            {selectedStatus?.connected ? 'Reauthorize' : 'Authorize'}
+          </button>
+        </div>
+
+        <label className="wizard-field">
+          <span>Local parent folder</span>
+          <div className="path-picker">
+            <input value={parentPath} readOnly placeholder="Choose a folder" />
+            <button type="button" className="picker-btn picker-btn-secondary" onClick={chooseParent}>
+              Choose...
+            </button>
+          </div>
+        </label>
+
+        <div className="cloud-book-list">
+          {!selectedStatus?.connected ? (
+            <div className="picker-empty">Authorize the provider to list cloud notebooks.</div>
+          ) : loadingBooks ? (
+            <div className="picker-empty">Loading cloud notebooks...</div>
+          ) : books.length === 0 ? (
+            <div className="picker-empty">No Syllepsis notebooks found in this cloud account.</div>
+          ) : (
+            books.map((book) => (
+              <button
+                key={`${book.layout}:${book.remote_root}:${book.book_id}`}
+                type="button"
+                className="cloud-book-row"
+                disabled={!parentPath || busy === book.book_id}
+                onClick={() => openCloudBook(book)}
+              >
+                <span className="tracked-book-name">{book.name}</span>
+                <span className="tracked-book-path">{new Date(book.updated_at).toLocaleString()}</span>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="wizard-actions">
+          <button type="button" className="picker-btn picker-btn-secondary" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="picker-btn picker-btn-secondary" disabled={!selectedStatus?.connected} onClick={loadBooks}>
+            Refresh
+          </button>
+        </div>
+      </div>
+    </WizardShell>
+  );
+}
+
+function upsertCloudStatus(
+  statuses: CloudSyncProviderStatus[],
+  nextStatus: CloudSyncProviderStatus,
+): CloudSyncProviderStatus[] {
+  const replaced = statuses.map((status) =>
+    status.provider === nextStatus.provider ? nextStatus : status
+  );
+  return replaced.some((status) => status.provider === nextStatus.provider)
+    ? replaced
+    : [...statuses, nextStatus];
 }
 
 function WizardShell({ title, onCancel, children }: { title: string; onCancel: () => void; children: ReactNode }) {

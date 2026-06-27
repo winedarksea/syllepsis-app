@@ -19,7 +19,8 @@ use syllepsis_core::app::git as git_app;
 use syllepsis_core::app::sync as app;
 use syllepsis_core::app::sync::SyncStatusDto;
 use syllepsis_core::id::NoteId;
-use syllepsis_core::storage::{layout, Book, NoteStore};
+use syllepsis_core::markdown::split_frontmatter;
+use syllepsis_core::storage::{layout, Book, BookMetadata, NoteStore};
 use syllepsis_core::sync::{
     content_revision, latest_note_activity, list_activity, prune_activity, summarize_activity,
     ManagedCloudSyncEngine, ManagedObjectEntry, ManagedObjectStore, NoteSyncActivity, RemoteEntry,
@@ -45,6 +46,11 @@ const MANAGED_CLOUD_AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(60);
 const MANAGED_CLOUD_STATE_FILE_PREFIX: &str = "managed-cloud-";
 const MANAGED_CLOUD_STATE_FILE_SUFFIX: &str = ".json";
 const CLOUD_SYNC_CONNECTION_MARKERS_FILE: &str = "cloud-sync-connected-providers.json";
+const ACTIVE_CLOUD_PROVIDER_FILE: &str = "cloud-provider.json";
+const HUMAN_READABLE_CLOUD_ROOT: &str = "Syllepsis/";
+const HUMAN_READABLE_BOOK_META_SUFFIX: &str = "_book.md";
+const CLOUD_BOOK_LAYOUT_HUMAN_READABLE: &str = "human_readable";
+const CLOUD_BOOK_LAYOUT_LEGACY_MANAGED: &str = "legacy_managed";
 
 macro_rules! with_book {
     ($state:expr, $book:ident, $body:expr) => {{
@@ -301,14 +307,14 @@ fn operational_git_summary(book: &Book) -> OperationalGitSummary {
 }
 
 fn operational_cloud_summary(app: &AppHandle) -> OperationalCloudSummary {
-    match cloud_sync_provider_statuses(app.clone()) {
-        Ok(statuses) => OperationalCloudSummary {
-            provider_count: statuses.len(),
-            connected_provider_count: statuses.iter().filter(|status| status.connected).count(),
-            connected_provider_names: statuses
+    match load_cloud_sync_connection_markers(app) {
+        Ok(connected_provider_ids) => OperationalCloudSummary {
+            provider_count: cloud_descriptors().len(),
+            connected_provider_count: connected_provider_ids.len(),
+            connected_provider_names: cloud_descriptors()
                 .into_iter()
-                .filter(|status| status.connected)
-                .map(|status| status.display_name)
+                .filter(|descriptor| connected_provider_ids.contains(&descriptor.provider))
+                .map(|descriptor| descriptor.display_name)
                 .collect(),
             error: None,
         },
@@ -369,6 +375,7 @@ pub struct CloudSyncProviderStatus {
     pub display_name: String,
     pub connected: bool,
     pub requires_loro: bool,
+    pub active_for_current_book: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -384,6 +391,8 @@ pub struct CloudBookSummary {
     pub book_id: String,
     pub name: String,
     pub updated_at: String,
+    pub remote_root: String,
+    pub layout: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -410,31 +419,22 @@ pub fn cloud_sync_provider_descriptors() -> Vec<CloudSyncProviderDescriptor> {
 #[tauri::command]
 pub fn cloud_sync_provider_statuses(
     app: AppHandle,
+    state: State<AppState>,
 ) -> Result<Vec<CloudSyncProviderStatus>, String> {
     let connected_provider_ids = load_cloud_sync_connection_markers(&app)?;
+    let active_provider = active_cloud_provider_for_current_book(&state)?;
     cloud_descriptors()
         .into_iter()
         .map(|descriptor| {
             Ok(CloudSyncProviderStatus {
                 connected: connected_provider_ids.contains(&descriptor.provider),
+                active_for_current_book: active_provider.as_deref() == Some(&descriptor.provider),
                 requires_loro: true,
                 provider: descriptor.provider,
                 display_name: descriptor.display_name,
             })
         })
         .collect()
-}
-
-fn connected_cloud_sync_provider_ids(app: &AppHandle) -> Result<Vec<String>, String> {
-    let connected_provider_ids = load_cloud_sync_connection_markers(app)?;
-    Ok(cloud_descriptors()
-        .into_iter()
-        .filter_map(|descriptor| {
-            connected_provider_ids
-                .contains(&descriptor.provider)
-                .then_some(descriptor.provider)
-        })
-        .collect())
 }
 
 #[tauri::command]
@@ -545,11 +545,13 @@ fn complete_cloud_sync_oauth_callback(
         display_name: descriptor.display_name,
         connected: true,
         requires_loro: true,
+        active_for_current_book: false,
     })
 }
 
 #[tauri::command]
 pub fn disconnect_cloud_sync_provider(
+    state: State<AppState>,
     app: AppHandle,
     provider: String,
 ) -> Result<CloudSyncProviderStatus, String> {
@@ -560,20 +562,90 @@ pub fn disconnect_cloud_sync_provider(
     store.delete(&account(&provider, OAUTH_STATE_FIELD))?;
     store.delete(&account(&provider, CODE_VERIFIER_FIELD))?;
     mark_cloud_sync_provider_connected(&app, &provider, false)?;
+    clear_active_cloud_provider_if_matches_current_book(&state, &provider)?;
     Ok(CloudSyncProviderStatus {
         provider: descriptor.provider,
         display_name: descriptor.display_name,
         connected: false,
         requires_loro: true,
+        active_for_current_book: false,
+    })
+}
+
+#[tauri::command]
+pub fn activate_cloud_sync_provider(
+    app: AppHandle,
+    state: State<AppState>,
+    provider: String,
+) -> Result<CloudSyncProviderStatus, String> {
+    let descriptor = descriptor_for(&provider)?;
+    let connected_provider_ids = load_cloud_sync_connection_markers(&app)?;
+    if !connected_provider_ids.contains(&provider) {
+        return Err(format!(
+            "{} is not connected on this device",
+            descriptor.display_name
+        ));
+    }
+    set_active_cloud_provider_for_current_book(&state, &provider)?;
+    Ok(CloudSyncProviderStatus {
+        provider: descriptor.provider,
+        display_name: descriptor.display_name,
+        connected: true,
+        requires_loro: true,
+        active_for_current_book: true,
     })
 }
 
 #[tauri::command]
 pub fn list_cloud_books(provider: String) -> Result<Vec<CloudBookSummary>, String> {
     let store = opendal_store_for(&provider)?;
-    let entries = store
-        .list("syllepsis-sync/books/")
-        .map_err(|e| e.to_string())?;
+    list_cloud_books_from_store(&store)
+}
+
+fn list_cloud_books_from_store(
+    store: &OpenDalManagedObjectStore,
+) -> Result<Vec<CloudBookSummary>, String> {
+    let mut summaries = human_readable_cloud_book_summaries(store)?;
+    summaries.extend(legacy_managed_cloud_book_summaries(store)?);
+    summaries.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.remote_root.cmp(&b.remote_root))
+    });
+    summaries.dedup_by(|a, b| a.book_id == b.book_id && a.layout == b.layout);
+    Ok(summaries)
+}
+
+fn human_readable_cloud_book_summaries(
+    store: &OpenDalManagedObjectStore,
+) -> Result<Vec<CloudBookSummary>, String> {
+    let entries = store.list_recursive(HUMAN_READABLE_CLOUD_ROOT)?;
+    let mut summaries = Vec::new();
+    for entry in entries {
+        if !entry.path.ends_with(HUMAN_READABLE_BOOK_META_SUFFIX) {
+            continue;
+        }
+        let bytes = store.get(&entry.path).map_err(|e| e.to_string())?;
+        let metadata = book_metadata_from_markdown_bytes(&bytes)?;
+        let Some(remote_root) = entry.path.strip_suffix(HUMAN_READABLE_BOOK_META_SUFFIX) else {
+            continue;
+        };
+        summaries.push(CloudBookSummary {
+            book_id: metadata.book_id,
+            name: metadata.name,
+            updated_at: Utc::now().to_rfc3339(),
+            remote_root: remote_root.to_string(),
+            layout: CLOUD_BOOK_LAYOUT_HUMAN_READABLE.to_string(),
+        });
+    }
+    Ok(summaries)
+}
+
+fn legacy_managed_cloud_book_summaries(
+    store: &OpenDalManagedObjectStore,
+) -> Result<Vec<CloudBookSummary>, String> {
+    let entries = store.list_recursive("syllepsis-sync/books/")?;
     let mut summaries = Vec::new();
     for entry in entries {
         if !entry.path.ends_with("/manifest.json") && !entry.path.ends_with("manifest.json") {
@@ -582,13 +654,26 @@ pub fn list_cloud_books(provider: String) -> Result<Vec<CloudBookSummary>, Strin
         let bytes = store.get(&entry.path).map_err(|e| e.to_string())?;
         let manifest: syllepsis_core::sync::BookManifest =
             serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        let Some(remote_root) = entry.path.strip_suffix("manifest.json") else {
+            continue;
+        };
         summaries.push(CloudBookSummary {
             book_id: manifest.book_id,
             name: manifest.name,
             updated_at: manifest.updated_at.to_rfc3339(),
+            remote_root: remote_root.to_string(),
+            layout: CLOUD_BOOK_LAYOUT_LEGACY_MANAGED.to_string(),
         });
     }
     Ok(summaries)
+}
+
+fn book_metadata_from_markdown_bytes(bytes: &[u8]) -> Result<BookMetadata, String> {
+    let text =
+        std::str::from_utf8(bytes).map_err(|error| format!("parse _book.md utf-8: {error}"))?;
+    let (frontmatter, _) = split_frontmatter(text)
+        .ok_or_else(|| "cloud _book.md is missing frontmatter".to_string())?;
+    serde_yaml::from_str(&frontmatter).map_err(|error| format!("parse cloud _book.md: {error}"))
 }
 
 #[tauri::command]
@@ -599,6 +684,7 @@ pub fn upload_book_to_cloud(
 ) -> Result<SyncReport, String> {
     let report = upload_book_to_cloud_inner(&state, &provider)?;
     mark_cloud_sync_provider_connected(&app, &provider, true)?;
+    set_active_cloud_provider_for_current_book(&state, &provider)?;
     Ok(report)
 }
 
@@ -622,20 +708,24 @@ pub fn start_managed_cloud_auto_sync(app: AppHandle) {
 }
 
 fn sync_connected_managed_cloud_providers(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    let providers = connected_cloud_sync_provider_ids(app)?;
-    for provider in providers {
-        match upload_book_to_cloud_inner(state, &provider) {
-            Ok(report) => tracing::info!(
-                provider = %provider,
-                pushed = report.pushed.len(),
-                pulled = report.pulled.len(),
-                merged = report.merged.len(),
-                conflicted = report.conflicted.len(),
-                "cloud auto-sync complete"
-            ),
-            Err(error) if error == "no book is open" || error == "sync is disabled" => {}
-            Err(error) => return Err(format!("{provider}: {error}")),
-        }
+    let Some(provider) = active_cloud_provider_for_current_book(state)? else {
+        return Ok(());
+    };
+    let connected_provider_ids = load_cloud_sync_connection_markers(app)?;
+    if !connected_provider_ids.contains(&provider) {
+        return Ok(());
+    }
+    match upload_book_to_cloud_inner(state, &provider) {
+        Ok(report) => tracing::info!(
+            provider = %provider,
+            pushed = report.pushed.len(),
+            pulled = report.pulled.len(),
+            merged = report.merged.len(),
+            conflicted = report.conflicted.len(),
+            "cloud auto-sync complete"
+        ),
+        Err(error) if error == "no book is open" || error == "sync is disabled" => {}
+        Err(error) => return Err(format!("{provider}: {error}")),
     }
     Ok(())
 }
@@ -713,19 +803,113 @@ pub fn delete_current_book(
 
 #[tauri::command]
 pub fn open_cloud_book(
+    app: AppHandle,
     state: State<AppState>,
     provider: String,
     book_id: String,
+    remote_root: String,
+    layout: String,
     parent_path: String,
-) -> Result<(), String> {
+) -> Result<crate::commands::book::BookInfo, String> {
     let store = opendal_store_for(&provider)?;
-    let manifest_path = format!("syllepsis-sync/books/{book_id}/manifest.json");
+    match layout.as_str() {
+        CLOUD_BOOK_LAYOUT_HUMAN_READABLE => open_human_readable_cloud_book(
+            &app,
+            &state,
+            &provider,
+            &book_id,
+            &remote_root,
+            &parent_path,
+            store,
+        ),
+        CLOUD_BOOK_LAYOUT_LEGACY_MANAGED => open_legacy_managed_cloud_book(
+            &app,
+            &state,
+            &provider,
+            &book_id,
+            &remote_root,
+            &parent_path,
+            store,
+        ),
+        other => Err(format!("unknown cloud book layout: {other}")),
+    }
+}
+
+fn open_human_readable_cloud_book(
+    app: &AppHandle,
+    state: &AppState,
+    provider: &str,
+    book_id: &str,
+    remote_root: &str,
+    parent_path: &str,
+    store: OpenDalManagedObjectStore,
+) -> Result<crate::commands::book::BookInfo, String> {
+    let meta_path = format!("{remote_root}{HUMAN_READABLE_BOOK_META_SUFFIX}");
+    let metadata =
+        book_metadata_from_markdown_bytes(&store.get(&meta_path).map_err(|e| e.to_string())?)?;
+    if metadata.book_id != book_id {
+        return Err("selected cloud notebook metadata did not match requested book id".to_string());
+    }
+    let root = local_cloud_book_root(Path::new(parent_path), &metadata)?;
+    if root.exists() {
+        let book = Book::open(&root).map_err(|e| e.to_string())?;
+        if book.metadata.book_id != metadata.book_id {
+            return Err(format!(
+                "local folder {} already contains a different notebook",
+                root.display()
+            ));
+        }
+        let op = opendal_operator_for(provider, &operator_root_from_remote_root(remote_root))?;
+        let sync_provider = OpenDalSyncProvider {
+            provider: provider.to_string(),
+            op,
+        };
+        let actor = syllepsis_core::sync::actor_id_for(&book.root).map_err(|e| e.to_string())?;
+        SyncEngine::new_human_readable_remote(
+            book.root.clone(),
+            Box::new(sync_provider),
+            actor,
+            &book.config.sync,
+        )
+        .sync()
+        .map_err(|e| e.to_string())?;
+    } else {
+        download_human_readable_cloud_book(&store, remote_root, &root)?;
+    }
+    open_downloaded_cloud_book(app, state, root, provider)
+}
+
+fn open_legacy_managed_cloud_book(
+    app: &AppHandle,
+    state: &AppState,
+    provider: &str,
+    book_id: &str,
+    remote_root: &str,
+    parent_path: &str,
+    store: OpenDalManagedObjectStore,
+) -> Result<crate::commands::book::BookInfo, String> {
+    let manifest_path = format!("{remote_root}manifest.json");
     let manifest: syllepsis_core::sync::BookManifest =
         serde_json::from_slice(&store.get(&manifest_path).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
-    let root = Path::new(&parent_path).join(safe_folder_name(&manifest.name));
+    if manifest.book_id != book_id {
+        return Err("selected cloud notebook manifest did not match requested book id".to_string());
+    }
+    let metadata = BookMetadata {
+        book_id: manifest.book_id.clone(),
+        name: manifest.name.clone(),
+        ..BookMetadata::new(&manifest.name)
+    };
+    let root = local_cloud_book_root(Path::new(parent_path), &metadata)?;
     let mut book = if root.exists() {
-        Book::open(&root).map_err(|e| e.to_string())?
+        let book = Book::open(&root).map_err(|e| e.to_string())?;
+        if book.metadata.book_id != manifest.book_id {
+            return Err(format!(
+                "local folder {} already contains a different notebook",
+                root.display()
+            ));
+        }
+        book
     } else {
         Book::create(&root, &manifest.name).map_err(|e| e.to_string())?
     };
@@ -733,11 +917,121 @@ pub fn open_cloud_book(
     book.save_metadata().map_err(|e| e.to_string())?;
     let mut engine = ManagedCloudSyncEngine::new(&book, store, provider);
     engine.sync().map_err(|e| e.to_string())?;
+    open_downloaded_cloud_book(app, state, root, provider)
+}
+
+fn open_downloaded_cloud_book(
+    app: &AppHandle,
+    state: &AppState,
+    root: PathBuf,
+    provider: &str,
+) -> Result<crate::commands::book::BookInfo, String> {
+    let models_root = app
+        .path()
+        .app_data_dir()
+        .map(|app_data_dir| crate::state::models_root_from_app_data(&app_data_dir))
+        .map_err(|e| format!("resolve app data dir: {e}"))?;
+    let book = Book::open(&root)
+        .map(|book| book.with_models_root(models_root))
+        .map_err(|e| e.to_string())?;
+    let info = crate::commands::book::BookInfo {
+        name: book.metadata.name.clone(),
+        path: root.display().to_string(),
+        open_warning: book.open_warning.as_ref().map(|warning| {
+            crate::commands::book::BookOpenWarningInfo {
+                missing_reserved_files: warning.missing_reserved_files.clone(),
+                should_offer_create_here: warning.should_offer_create_here(),
+            }
+        }),
+    };
+    crate::commands::book::track_book_path(app, &root)?;
+    save_active_cloud_provider_for_book_root(&root, Some(provider))?;
     *state.book.lock().unwrap() = Some(book);
+    state.invalidate_llm_service();
+    state.invalidate_graph_corpus();
     if let Some(book) = state.book.lock().unwrap().as_ref() {
+        let _ = syllepsis_core::app::lifecycle::purge_expired_now(book);
         let _ = state.local_ai.enqueue_all_stale(book, false);
     }
+    Ok(info)
+}
+
+fn download_human_readable_cloud_book(
+    store: &OpenDalManagedObjectStore,
+    remote_root: &str,
+    local_root: &Path,
+) -> Result<(), String> {
+    let entries = store.list_recursive(remote_root)?;
+    fs::create_dir_all(local_root).map_err(|error| {
+        format!(
+            "create local notebook folder {}: {error}",
+            local_root.display()
+        )
+    })?;
+    for entry in entries {
+        let Some(rel) = entry.path.strip_prefix(remote_root) else {
+            continue;
+        };
+        if rel.is_empty() {
+            continue;
+        }
+        let destination = local_root.join(rel);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "create local cloud notebook directory {}: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+        let bytes = store.get(&entry.path).map_err(|e| e.to_string())?;
+        fs::write(&destination, bytes).map_err(|error| {
+            format!(
+                "write local cloud notebook file {}: {error}",
+                destination.display()
+            )
+        })?;
+    }
     Ok(())
+}
+
+fn local_cloud_book_root(parent_path: &Path, metadata: &BookMetadata) -> Result<PathBuf, String> {
+    let preferred = parent_path.join(safe_book_folder_name(&metadata.name));
+    if !preferred.exists() {
+        return Ok(preferred);
+    }
+    if local_book_id(&preferred)?.as_deref() == Some(&metadata.book_id) {
+        return Ok(preferred);
+    }
+    unique_cloud_book_root(parent_path, &metadata.name)
+}
+
+fn local_book_id(root: &Path) -> Result<Option<String>, String> {
+    if !root.is_dir() {
+        return Ok(None);
+    }
+    match Book::open(root) {
+        Ok(book) => Ok(Some(book.metadata.book_id)),
+        Err(_) => Ok(None),
+    }
+}
+
+fn unique_cloud_book_root(parent_path: &Path, name: &str) -> Result<PathBuf, String> {
+    let base = safe_book_folder_name(name);
+    for index in 2..1000 {
+        let candidate = parent_path.join(format!("{base}-{index}"));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Err(format!(
+        "could not find an unused local folder for notebook {name:?} under {}",
+        parent_path.display()
+    ))
+}
+
+fn operator_root_from_remote_root(remote_root: &str) -> String {
+    format!("/{}", remote_root.trim_start_matches('/'))
 }
 
 struct KeyringSyncCredentialStore;
@@ -782,6 +1076,92 @@ fn sync_keychain_service() -> &'static str {
 #[derive(Default, Serialize, Deserialize)]
 struct CloudSyncConnectionMarkers {
     providers: BTreeSet<String>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct ActiveCloudProviderMarker {
+    provider: Option<String>,
+}
+
+fn active_cloud_provider_path(book_root: &Path) -> PathBuf {
+    layout::sync_dir(book_root).join(ACTIVE_CLOUD_PROVIDER_FILE)
+}
+
+fn active_cloud_provider_for_book_root(book_root: &Path) -> Result<Option<String>, String> {
+    let path = active_cloud_provider_path(book_root);
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "read active cloud provider from {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    let marker: ActiveCloudProviderMarker = serde_json::from_str(&text).map_err(|error| {
+        format!(
+            "parse active cloud provider from {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(marker.provider)
+}
+
+fn save_active_cloud_provider_for_book_root(
+    book_root: &Path,
+    provider: Option<&str>,
+) -> Result<(), String> {
+    let path = active_cloud_provider_path(book_root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "create active cloud provider directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+    let marker = ActiveCloudProviderMarker {
+        provider: provider.map(str::to_string),
+    };
+    let text = serde_json::to_string_pretty(&marker)
+        .map_err(|error| format!("serialize active cloud provider: {error}"))?;
+    fs::write(&path, text)
+        .map_err(|error| format!("write active cloud provider to {}: {error}", path.display()))
+}
+
+fn active_cloud_provider_for_current_book(state: &AppState) -> Result<Option<String>, String> {
+    let guard = state.book.lock().unwrap();
+    let Some(book) = guard.as_ref() else {
+        return Ok(None);
+    };
+    active_cloud_provider_for_book_root(&book.root)
+}
+
+fn set_active_cloud_provider_for_current_book(
+    state: &AppState,
+    provider: &str,
+) -> Result<(), String> {
+    descriptor_for(provider)?;
+    let guard = state.book.lock().unwrap();
+    let book = guard
+        .as_ref()
+        .ok_or_else(|| "no book is open".to_string())?;
+    save_active_cloud_provider_for_book_root(&book.root, Some(provider))
+}
+
+fn clear_active_cloud_provider_if_matches_current_book(
+    state: &AppState,
+    provider: &str,
+) -> Result<(), String> {
+    let guard = state.book.lock().unwrap();
+    let Some(book) = guard.as_ref() else {
+        return Ok(());
+    };
+    if active_cloud_provider_for_book_root(&book.root)?.as_deref() == Some(provider) {
+        save_active_cloud_provider_for_book_root(&book.root, None)?;
+    }
+    Ok(())
 }
 
 fn cloud_sync_connection_markers_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -852,6 +1232,29 @@ fn mark_cloud_sync_provider_connected(
 
 struct OpenDalManagedObjectStore {
     op: opendal::blocking::Operator,
+}
+
+impl OpenDalManagedObjectStore {
+    fn list_recursive(&self, prefix: &str) -> Result<Vec<ManagedObjectEntry>, String> {
+        let entries = self
+            .op
+            .list_options(
+                prefix,
+                opendal::options::ListOptions {
+                    recursive: true,
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| format!("opendal recursive list {prefix}: {e}"))?;
+        Ok(entries
+            .into_iter()
+            .filter(|entry| entry.metadata().mode() == opendal::EntryMode::FILE)
+            .map(|entry| ManagedObjectEntry {
+                path: entry.path().to_string(),
+                size: entry.metadata().content_length(),
+            })
+            .collect())
+    }
 }
 
 impl ManagedObjectStore for OpenDalManagedObjectStore {
@@ -1685,6 +2088,15 @@ fn safe_folder_name(name: &str) -> String {
         .to_string()
 }
 
+fn safe_book_folder_name(name: &str) -> String {
+    let folder = safe_folder_name(name);
+    if folder.is_empty() {
+        "untitled-book".to_string()
+    } else {
+        folder
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1806,6 +2218,72 @@ mod tests {
         let providers = managed_cloud_state_providers_for_book(temp.path());
 
         assert_eq!(providers, vec!["dropbox", "google_drive"]);
+    }
+
+    #[test]
+    fn active_cloud_provider_marker_round_trips() {
+        let temp = tempdir().unwrap();
+
+        assert_eq!(
+            active_cloud_provider_for_book_root(temp.path()).unwrap(),
+            None
+        );
+        save_active_cloud_provider_for_book_root(temp.path(), Some("google_drive")).unwrap();
+        assert_eq!(
+            active_cloud_provider_for_book_root(temp.path())
+                .unwrap()
+                .as_deref(),
+            Some("google_drive")
+        );
+        save_active_cloud_provider_for_book_root(temp.path(), None).unwrap();
+        assert_eq!(
+            active_cloud_provider_for_book_root(temp.path()).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn cloud_book_metadata_parses_human_readable_book_file() {
+        let metadata = BookMetadata {
+            book_id: "book-123".to_string(),
+            name: "Field Notes".to_string(),
+            ..BookMetadata::new("ignored")
+        };
+        let yaml = serde_yaml::to_string(&metadata).unwrap();
+        let bytes = format!("---\n{yaml}---\n").into_bytes();
+
+        let parsed = book_metadata_from_markdown_bytes(&bytes).unwrap();
+
+        assert_eq!(parsed.book_id, "book-123");
+        assert_eq!(parsed.name, "Field Notes");
+    }
+
+    #[test]
+    fn local_cloud_book_root_reuses_matching_book_and_avoids_unrelated_folder() {
+        let temp = tempdir().unwrap();
+        let preferred = temp.path().join("Field-Notes");
+        let mut existing = Book::create(&preferred, "Field Notes").unwrap();
+        existing.metadata.book_id = "existing-book".to_string();
+        existing.save_metadata().unwrap();
+        let matching = BookMetadata {
+            book_id: "existing-book".to_string(),
+            name: "Field Notes".to_string(),
+            ..BookMetadata::new("ignored")
+        };
+        let unrelated = BookMetadata {
+            book_id: "other-book".to_string(),
+            name: "Field Notes".to_string(),
+            ..BookMetadata::new("ignored")
+        };
+
+        assert_eq!(
+            local_cloud_book_root(temp.path(), &matching).unwrap(),
+            preferred
+        );
+        assert_eq!(
+            local_cloud_book_root(temp.path(), &unrelated).unwrap(),
+            temp.path().join("Field-Notes-2")
+        );
     }
 
     #[test]

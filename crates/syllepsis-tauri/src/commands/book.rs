@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
-use syllepsis_core::storage::{Book, BookMetadata};
+use syllepsis_core::storage::{layout, Book, BookMetadata};
 
 use crate::state::{models_root_from_app_data, AppState};
 
@@ -22,6 +22,21 @@ pub struct TrackedBookInfo {
     pub path: String,
     pub available: bool,
     pub status: Option<String>,
+    pub git: TrackedBookGitInfo,
+    pub cloud: TrackedBookCloudInfo,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct TrackedBookGitInfo {
+    pub is_repository: bool,
+    pub branch: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct TrackedBookCloudInfo {
+    pub active_provider: Option<String>,
+    pub active_provider_display_name: Option<String>,
+    pub known_provider_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -270,6 +285,8 @@ fn track_book_path_in_app_data(app_data_dir: &Path, path: &Path) -> Result<(), S
 
 fn tracked_book_info(path: &Path) -> TrackedBookInfo {
     let path_string = path.display().to_string();
+    let git = tracked_book_git_info(path);
+    let cloud = tracked_book_cloud_info(path);
     if !path.exists() {
         return TrackedBookInfo {
             name: path
@@ -280,6 +297,8 @@ fn tracked_book_info(path: &Path) -> TrackedBookInfo {
             path: path_string,
             available: false,
             status: Some("not found on disk".to_string()),
+            git,
+            cloud,
         };
     }
 
@@ -293,6 +312,8 @@ fn tracked_book_info(path: &Path) -> TrackedBookInfo {
             path: path_string,
             available: false,
             status: Some("path is not a folder".to_string()),
+            git,
+            cloud,
         };
     }
 
@@ -304,6 +325,8 @@ fn tracked_book_info(path: &Path) -> TrackedBookInfo {
             status: book
                 .open_warning
                 .map(|warning| format!("missing {}", warning.missing_reserved_files.join(", "))),
+            git,
+            cloud,
         },
         Err(error) => TrackedBookInfo {
             name: path
@@ -314,7 +337,89 @@ fn tracked_book_info(path: &Path) -> TrackedBookInfo {
             path: path_string,
             available: false,
             status: Some(error.to_string()),
+            git,
+            cloud,
         },
+    }
+}
+
+fn tracked_book_git_info(path: &Path) -> TrackedBookGitInfo {
+    let git_dir = path.join(".git");
+    if !git_dir.exists() {
+        return TrackedBookGitInfo::default();
+    }
+    TrackedBookGitInfo {
+        is_repository: true,
+        branch: read_git_branch(path),
+    }
+}
+
+fn read_git_branch(path: &Path) -> Option<String> {
+    let head = std::fs::read_to_string(path.join(".git").join("HEAD")).ok()?;
+    let trimmed = head.trim();
+    trimmed
+        .strip_prefix("ref: refs/heads/")
+        .map(str::to_string)
+        .or_else(|| (!trimmed.is_empty()).then(|| trimmed.chars().take(12).collect()))
+}
+
+#[derive(Default, Deserialize)]
+struct ActiveCloudProviderMarker {
+    provider: Option<String>,
+}
+
+fn tracked_book_cloud_info(path: &Path) -> TrackedBookCloudInfo {
+    let active_provider = read_active_cloud_provider(path);
+    let mut known_provider_ids = known_cloud_provider_ids(path);
+    if let Some(provider) = active_provider.as_ref() {
+        if !known_provider_ids.contains(provider) {
+            known_provider_ids.push(provider.clone());
+        }
+    }
+    known_provider_ids.sort();
+    known_provider_ids.dedup();
+    TrackedBookCloudInfo {
+        active_provider_display_name: active_provider.as_deref().map(cloud_provider_display_name),
+        active_provider,
+        known_provider_ids,
+    }
+}
+
+fn read_active_cloud_provider(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(layout::sync_dir(path).join("cloud-provider.json")).ok()?;
+    serde_json::from_str::<ActiveCloudProviderMarker>(&text)
+        .ok()
+        .and_then(|marker| marker.provider)
+}
+
+fn known_cloud_provider_ids(path: &Path) -> Vec<String> {
+    std::fs::read_dir(layout::sync_dir(path))
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(Result::ok))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter_map(|name| cloud_provider_id_from_sync_filename(&name))
+        .collect()
+}
+
+fn cloud_provider_id_from_sync_filename(name: &str) -> Option<String> {
+    if let Some(provider) = name
+        .strip_prefix("state-")
+        .and_then(|value| value.strip_suffix(".json"))
+    {
+        return Some(provider.to_string());
+    }
+    name.strip_prefix("managed-cloud-")
+        .and_then(|value| value.strip_suffix(".json"))
+        .map(str::to_string)
+}
+
+fn cloud_provider_display_name(provider: &str) -> String {
+    match provider {
+        "google_drive" => "Google Drive".to_string(),
+        "dropbox" => "Dropbox".to_string(),
+        "onedrive" => "OneDrive".to_string(),
+        other => other.to_string(),
     }
 }
 
