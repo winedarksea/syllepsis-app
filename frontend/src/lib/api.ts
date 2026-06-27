@@ -14,7 +14,7 @@ import type {
   EmbeddingConfig, LocalAiDevicePolicy, LocalAiStatus,
   GitStatusDto, GitCommandReport, SyncActivityEvent, OperationalActivitySummary, NoteSyncActivity,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, CloudSyncConnectStart, CloudBookSummary,
-  ManagedCloudReport, DeleteCurrentBookReport,
+  SyncReport, DeleteCurrentBookReport,
   World, Overlay, LookupEntry, ResolvedLocation, CreateImageWorldRequest, WorldDeletionImpact,
   LockMode, PolicyOverview,
   ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
@@ -279,9 +279,9 @@ export const api = {
   listCloudBooks: (provider: string) =>
     invoke<CloudBookSummary[]>('list_cloud_books', { provider }),
   uploadBookToCloud: (provider: string) =>
-    invoke<ManagedCloudReport>('upload_book_to_cloud', { provider }),
+    invoke<SyncReport>('upload_book_to_cloud', { provider }),
   syncManagedCloudNow: (provider: string) =>
-    invoke<ManagedCloudReport>('sync_managed_cloud_now', { provider }),
+    invoke<SyncReport>('sync_managed_cloud_now', { provider }),
   openCloudBook: (provider: string, bookId: string, parentPath: string) =>
     invoke<void>('open_cloud_book', { provider, bookId, parentPath }),
   deleteCurrentBook: (expectedBookName: string) =>

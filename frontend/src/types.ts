@@ -835,6 +835,16 @@ export interface ManagedCloudReport {
   skipped_notes: number;
 }
 
+export interface SyncReport {
+  pushed: string[];
+  pulled: string[];
+  merged: string[];
+  conflicted: string[];
+  deleted_local: string[];
+  deleted_remote: string[];
+  skipped: number;
+}
+
 export interface DeleteBookCloudCleanupOutcome {
   provider: string;
   attempted: boolean;

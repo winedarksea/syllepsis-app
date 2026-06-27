@@ -57,6 +57,7 @@ pub fn run() {
                     .local_ai
                     .configure_preferences_path(app_data_dir.join("local-ai-device-policy.json"));
             }
+            commands::sync::start_managed_cloud_auto_sync(app.handle().clone());
             model_bootstrap::provision_default_embedding_model(app.handle())?;
             Ok(())
         })

@@ -60,6 +60,8 @@ pub struct SyncEngine {
     backend: Box<dyn CrdtBackend>,
     actor: ActorId,
     conflict_marker: String,
+    sync_crdt_sidecars: bool,
+    sync_embedding_sidecars: bool,
 }
 
 impl SyncEngine {
@@ -77,7 +79,23 @@ impl SyncEngine {
             backend: select_crdt_backend(cfg),
             actor,
             conflict_marker: cfg.conflict_marker.clone(),
+            sync_crdt_sidecars: true,
+            sync_embedding_sidecars: true,
         }
+    }
+
+    /// Build an engine for remotes intended to stay human-readable. Local CRDT and embedding
+    /// sidecars remain local implementation details; markdown and other user-authored files sync.
+    pub fn new_human_readable_remote(
+        book_root: impl Into<PathBuf>,
+        provider: Box<dyn SyncProvider>,
+        actor: ActorId,
+        cfg: &SyncConfig,
+    ) -> SyncEngine {
+        let mut engine = SyncEngine::new(book_root, provider, actor, cfg);
+        engine.sync_crdt_sidecars = false;
+        engine.sync_embedding_sidecars = false;
+        engine
     }
 
     /// Run one sync pass and report what changed.
@@ -97,7 +115,7 @@ impl SyncEngine {
         }
         let remote_primary: BTreeMap<String, String> = remote_all
             .iter()
-            .filter(|(p, _)| !is_sidecar(p) && !is_local_only(p))
+            .filter(|(p, _)| self.is_syncable_primary_path(p))
             .map(|(p, r)| (p.clone(), r.clone()))
             .collect();
 
@@ -183,6 +201,13 @@ impl SyncEngine {
             }
         }
         Ok(())
+    }
+
+    fn is_syncable_primary_path(&self, path: &str) -> bool {
+        if is_local_only(path) || is_sidecar(path) {
+            return false;
+        }
+        self.sync_embedding_sidecars || !is_embedding_sidecar(path)
     }
 
     /// Step 1: ensure every local note has a sidecar whose CRDT text equals its markdown body.
@@ -315,6 +340,9 @@ impl SyncEngine {
     }
 
     fn push_sidecar_of(&self, note_path: &str, state: &mut SyncState) -> CoreResult<()> {
+        if !self.sync_crdt_sidecars {
+            return Ok(());
+        }
         if let Some(sidecar) = sidecar_rel_path(note_path) {
             if self.full(&sidecar).exists() {
                 self.push_file(&sidecar, state)?;
@@ -329,6 +357,9 @@ impl SyncEngine {
         remote_all: &BTreeMap<String, String>,
         state: &mut SyncState,
     ) -> CoreResult<()> {
+        if !self.sync_crdt_sidecars {
+            return Ok(());
+        }
         if let Some(sidecar) = sidecar_rel_path(note_path) {
             if let Some(rev) = remote_all.get(&sidecar) {
                 self.pull_file(&sidecar, rev, state)?;
@@ -381,6 +412,9 @@ impl SyncEngine {
         let mut map = BTreeMap::new();
         for rel in self.walk_files()? {
             if is_local_only(&rel) || is_sidecar(&rel) {
+                continue;
+            }
+            if !self.sync_embedding_sidecars && is_embedding_sidecar(&rel) {
                 continue;
             }
             map.insert(
@@ -466,6 +500,16 @@ mod tests {
             let provider = Box::new(LocalFolderSync::open(&self.remote).unwrap());
             let actor = actor_id_for(self.book.root.as_path()).unwrap();
             SyncEngine::new(self.book.root.clone(), provider, actor, &self.cfg)
+        }
+        fn human_readable_engine(&self) -> SyncEngine {
+            let provider = Box::new(LocalFolderSync::open(&self.remote).unwrap());
+            let actor = actor_id_for(self.book.root.as_path()).unwrap();
+            SyncEngine::new_human_readable_remote(
+                self.book.root.clone(),
+                provider,
+                actor,
+                &self.cfg,
+            )
         }
         fn sync(&self) -> SyncReport {
             self.engine().sync().unwrap()
@@ -562,6 +606,22 @@ mod tests {
         assert!(crate::embeddings::read_sidecar(&sidecar).is_ok());
         b.book.store.refresh().unwrap();
         assert_eq!(b.book.store.read_all_notes().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn human_readable_remote_does_not_publish_sidecar_files() {
+        let (_tmp, a, _b) = two_devices();
+        let mut note = a.book.new_note(ObjectType::Note, "readable").unwrap();
+        note.body = "visible markdown".into();
+        a.book.save_note(&note).unwrap();
+        crate::embeddings::repository::write_test_sidecars(&a.book, &[note.clone()]);
+
+        let report = a.human_readable_engine().sync().unwrap();
+
+        assert!(report.pushed.iter().any(|path| path.ends_with(".md")));
+        assert!(a.remote.join(format!("{}.md", note.id.as_str())).exists());
+        assert!(!a.remote.join("_crdt").exists());
+        assert!(!a.remote.join("_embeddings").exists());
     }
 
     #[test]

@@ -17,7 +17,7 @@ import type {
   PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, ModelRef,
   EmbeddingConfig, LocalAiDevicePolicy, ModelManifest,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, PluginDescriptor,
-  DeleteCurrentBookReport,
+  SyncReport, DeleteCurrentBookReport,
 } from '../types';
 import {
   allThemes, themeById, themeSwatches, themeToJson, normalizeImportedTheme, BUILTIN_THEMES,
@@ -808,11 +808,23 @@ function upsertCloudProviderStatus(
     : [...statuses, nextStatus];
 }
 
+function cloudSyncReportSummary(report: SyncReport): string {
+  return [
+    `Cloud sync complete. ${report.pushed.length} pushed`,
+    `${report.pulled.length} pulled`,
+    `${report.merged.length} merged`,
+    `${report.conflicted.length} conflicted`,
+    `${report.deleted_local.length + report.deleted_remote.length} deleted`,
+    `${report.skipped} unchanged.`,
+  ].join(', ');
+}
+
 function SyncPanel({ value, onSaved, onError }: {
   value: SyncConfig; onSaved: (v: SyncConfig) => void; onError: (m: string) => void;
 }) {
   const [cloudProviders, setCloudProviders] = useState<CloudSyncProviderDescriptor[]>([]);
   const [cloudStatuses, setCloudStatuses] = useState<CloudSyncProviderStatus[]>([]);
+  const [cloudFeedback, setCloudFeedback] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
   const { draft, setDraft, dirty, saving, commit } = useSectionDraft(
@@ -834,6 +846,34 @@ function SyncPanel({ value, onSaved, onError }: {
     loadCloud().catch((e) => onError(String(e)));
   }, [loadCloud, onError]);
 
+  const runCloudSync = useCallback(async (provider: string) => {
+    setBusy(provider);
+    setCloudFeedback((current) => ({ ...current, [provider]: 'Syncing to cloud...' }));
+    try {
+      const report = await api.syncManagedCloudNow(provider);
+      const descriptor = cloudProviders.find((candidate) => candidate.provider === provider);
+      setCloudStatuses((current) => upsertCloudProviderStatus(current, {
+        provider,
+        display_name: descriptor?.display_name ?? provider,
+        connected: true,
+        requires_loro: true,
+      }));
+      setCloudFeedback((current) => ({
+        ...current,
+        [provider]: cloudSyncReportSummary(report),
+      }));
+    } catch (e) {
+      setCloudFeedback((current) => {
+        const next = { ...current };
+        delete next[provider];
+        return next;
+      });
+      onError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }, [cloudProviders, onError]);
+
   useEffect(() => {
     let unlistenCompleted: (() => void) | undefined;
     let unlistenFailed: (() => void) | undefined;
@@ -841,8 +881,12 @@ function SyncPanel({ value, onSaved, onError }: {
 
     Promise.all([
       listen<CloudSyncProviderStatus>('cloud-sync://oauth-completed', (event) => {
-        setBusy(null);
         setCloudStatuses((prev) => upsertCloudProviderStatus(prev, event.payload));
+        setCloudFeedback((current) => ({
+          ...current,
+          [event.payload.provider]: 'Authorization complete. Running initial cloud sync...',
+        }));
+        void runCloudSync(event.payload.provider);
       }),
       listen<string>('cloud-sync://oauth-failed', (event) => {
         setBusy(null);
@@ -863,7 +907,7 @@ function SyncPanel({ value, onSaved, onError }: {
       unlistenCompleted?.();
       unlistenFailed?.();
     };
-  }, [onError]);
+  }, [onError, runCloudSync]);
 
   const cloudStatus = (provider: string) => cloudStatuses.find((status) => status.provider === provider);
 
@@ -886,6 +930,11 @@ function SyncPanel({ value, onSaved, onError }: {
         ...current.filter((status) => status.provider !== provider),
         disconnectedStatus,
       ]);
+      setCloudFeedback((current) => {
+        const next = { ...current };
+        delete next[provider];
+        return next;
+      });
     } catch (e) { onError(String(e)); }
     finally { setBusy(null); }
   }, [onError]);
@@ -916,13 +965,13 @@ function SyncPanel({ value, onSaved, onError }: {
       </Field>
       {draft.crdt_backend !== 'loro' && (
         <p className="sv-error">
-          Managed cloud sync requires <a href={LORO_URL} target="_blank" rel="noreferrer">Loro</a>. Git and mounted-folder sync can still be used.
+          <a href={LORO_URL} target="_blank" rel="noreferrer">Loro</a> is recommended for concurrent note edits. LWW cloud sync still works, but conflicting note bodies will not merge at character level.
         </p>
       )}
       <SaveBar saving={saving} dirty={dirty} onSave={commit} />
 
-      <div className="sv-subhead">Managed Cloud</div>
-      <p className="sv-hint">Authorize in your browser. Syllepsis stores the resulting account tokens in your operating system keychain.</p>
+      <div className="sv-subhead">Cloud Sync</div>
+      <p className="sv-hint">Authorize in your browser. Syllepsis stores account tokens in your operating system keychain and syncs readable notebook files to your drive.</p>
       <div className="sv-providers">
         {cloudProviders.map((provider) => {
           const status = cloudStatus(provider.provider);
@@ -938,8 +987,21 @@ function SyncPanel({ value, onSaved, onError }: {
                 <button className="sv-btn" disabled={busy === provider.provider} onClick={() => connectCloud(provider.provider)}>
                   {status?.connected ? 'Reconnect' : 'Authorize / Reauthorize'}
                 </button>
+                <button
+                  className="sv-btn"
+                  disabled={dirty || saving || busy === provider.provider}
+                  onClick={() => runCloudSync(provider.provider)}
+                >
+                  Sync now
+                </button>
                 <button className="sv-btn" disabled={busy === provider.provider} onClick={() => disconnectCloud(provider.provider)}>Disconnect saved</button>
               </div>
+              {dirty && status?.connected && (
+                <p className="sv-connection-feedback warning">Save sync settings before cloud sync.</p>
+              )}
+              {cloudFeedback[provider.provider] && (
+                <p className="sv-connection-feedback success">{cloudFeedback[provider.provider]}</p>
+              )}
             </div>
           );
         })}

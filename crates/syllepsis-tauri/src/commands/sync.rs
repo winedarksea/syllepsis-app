@@ -1,11 +1,11 @@
 //! Sync commands: mounted-folder sync, git snapshots, file-watch observability, and managed cloud
 //! patch-log sync.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use syllepsis_core::app::git as git_app;
 use syllepsis_core::app::sync as app;
@@ -21,9 +21,10 @@ use syllepsis_core::app::sync::SyncStatusDto;
 use syllepsis_core::id::NoteId;
 use syllepsis_core::storage::{layout, Book, NoteStore};
 use syllepsis_core::sync::{
-    latest_note_activity, list_activity, prune_activity, summarize_activity, ManagedCloudReport,
-    ManagedCloudSyncEngine, ManagedObjectEntry, ManagedObjectStore, NoteSyncActivity,
-    SyncActivityEvent, SyncActivitySummary, SyncProviderDescriptor, SyncReport,
+    content_revision, latest_note_activity, list_activity, prune_activity, summarize_activity,
+    ManagedCloudSyncEngine, ManagedObjectEntry, ManagedObjectStore, NoteSyncActivity, RemoteEntry,
+    RemoteRevision, SyncActivityEvent, SyncActivitySummary, SyncEngine, SyncProvider,
+    SyncProviderDescriptor, SyncReport,
 };
 
 use crate::state::AppState;
@@ -40,8 +41,10 @@ const OAUTH_CLIENT_IDS_LOCAL_FILE: &str = "oauth-client-ids.local.json";
 const GOOGLE_DRIVE_CLIENT_SECRET_ENV_VAR: &str = "SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET";
 const ACTIVITY_RETENTION_DAYS: i64 = 90;
 const WATCH_ACTIVITY_DEBOUNCE: Duration = Duration::from_millis(750);
+const MANAGED_CLOUD_AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(60);
 const MANAGED_CLOUD_STATE_FILE_PREFIX: &str = "managed-cloud-";
 const MANAGED_CLOUD_STATE_FILE_SUFFIX: &str = ".json";
+const CLOUD_SYNC_CONNECTION_MARKERS_FILE: &str = "cloud-sync-connected-providers.json";
 
 macro_rules! with_book {
     ($state:expr, $book:ident, $body:expr) => {{
@@ -240,6 +243,7 @@ pub struct OperationalActivitySummary {
 
 #[tauri::command]
 pub fn operational_activity_summary(
+    app: AppHandle,
     state: State<AppState>,
 ) -> Result<OperationalActivitySummary, String> {
     with_book!(state, book, {
@@ -247,7 +251,7 @@ pub fn operational_activity_summary(
         let events = list_activity(&book.root).map_err(|e| e.to_string())?;
         let activity = summarize_activity(&events, Utc::now());
         let git = operational_git_summary(book);
-        let cloud = operational_cloud_summary();
+        let cloud = operational_cloud_summary(&app);
         let crdt = operational_crdt_summary(book).map_err(|e| e.to_string())?;
         Ok(OperationalActivitySummary {
             activity,
@@ -296,8 +300,8 @@ fn operational_git_summary(book: &Book) -> OperationalGitSummary {
     }
 }
 
-fn operational_cloud_summary() -> OperationalCloudSummary {
-    match cloud_sync_provider_statuses() {
+fn operational_cloud_summary(app: &AppHandle) -> OperationalCloudSummary {
+    match cloud_sync_provider_statuses(app.clone()) {
         Ok(statuses) => OperationalCloudSummary {
             provider_count: statuses.len(),
             connected_provider_count: statuses.iter().filter(|status| status.connected).count(),
@@ -404,19 +408,33 @@ pub fn cloud_sync_provider_descriptors() -> Vec<CloudSyncProviderDescriptor> {
 }
 
 #[tauri::command]
-pub fn cloud_sync_provider_statuses() -> Result<Vec<CloudSyncProviderStatus>, String> {
-    let store = KeyringSyncCredentialStore;
+pub fn cloud_sync_provider_statuses(
+    app: AppHandle,
+) -> Result<Vec<CloudSyncProviderStatus>, String> {
+    let connected_provider_ids = load_cloud_sync_connection_markers(&app)?;
     cloud_descriptors()
         .into_iter()
         .map(|descriptor| {
             Ok(CloudSyncProviderStatus {
-                connected: token_for(&store, &descriptor.provider)?.is_some(),
+                connected: connected_provider_ids.contains(&descriptor.provider),
                 requires_loro: true,
                 provider: descriptor.provider,
                 display_name: descriptor.display_name,
             })
         })
         .collect()
+}
+
+fn connected_cloud_sync_provider_ids(app: &AppHandle) -> Result<Vec<String>, String> {
+    let connected_provider_ids = load_cloud_sync_connection_markers(app)?;
+    Ok(cloud_descriptors()
+        .into_iter()
+        .filter_map(|descriptor| {
+            connected_provider_ids
+                .contains(&descriptor.provider)
+                .then_some(descriptor.provider)
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -452,6 +470,10 @@ pub fn connect_cloud_sync_provider(
                 &callback_url,
                 &callback_redirect_uri,
             )
+            .and_then(|status| {
+                mark_cloud_sync_provider_connected(&app, &status.provider, true)?;
+                Ok(status)
+            })
         });
         match result {
             Ok(status) => {
@@ -527,13 +549,17 @@ fn complete_cloud_sync_oauth_callback(
 }
 
 #[tauri::command]
-pub fn disconnect_cloud_sync_provider(provider: String) -> Result<CloudSyncProviderStatus, String> {
+pub fn disconnect_cloud_sync_provider(
+    app: AppHandle,
+    provider: String,
+) -> Result<CloudSyncProviderStatus, String> {
     let descriptor = descriptor_for(&provider)?;
     let mut store = KeyringSyncCredentialStore;
     store.delete(&account(&provider, ACCESS_TOKEN_FIELD))?;
     store.delete(&account(&provider, REFRESH_TOKEN_FIELD))?;
     store.delete(&account(&provider, OAUTH_STATE_FIELD))?;
     store.delete(&account(&provider, CODE_VERIFIER_FIELD))?;
+    mark_cloud_sync_provider_connected(&app, &provider, false)?;
     Ok(CloudSyncProviderStatus {
         provider: descriptor.provider,
         display_name: descriptor.display_name,
@@ -567,25 +593,83 @@ pub fn list_cloud_books(provider: String) -> Result<Vec<CloudBookSummary>, Strin
 
 #[tauri::command]
 pub fn upload_book_to_cloud(
+    app: AppHandle,
     state: State<AppState>,
     provider: String,
-) -> Result<ManagedCloudReport, String> {
-    with_book!(state, book, {
-        let store = opendal_store_for(&provider)?;
-        let mut engine = ManagedCloudSyncEngine::new(book, store, provider);
-        let report = engine.sync().map_err(|e| e.to_string())?;
-        let _ = state.local_ai.enqueue_all_stale(book, false);
-        state.invalidate_graph_corpus();
-        Ok(report)
-    })
+) -> Result<SyncReport, String> {
+    let report = upload_book_to_cloud_inner(&state, &provider)?;
+    mark_cloud_sync_provider_connected(&app, &provider, true)?;
+    Ok(report)
 }
 
 #[tauri::command]
 pub fn sync_managed_cloud_now(
+    app: AppHandle,
     state: State<AppState>,
     provider: String,
-) -> Result<ManagedCloudReport, String> {
-    upload_book_to_cloud(state, provider)
+) -> Result<SyncReport, String> {
+    upload_book_to_cloud(app, state, provider)
+}
+
+pub fn start_managed_cloud_auto_sync(app: AppHandle) {
+    thread::spawn(move || loop {
+        thread::sleep(MANAGED_CLOUD_AUTO_SYNC_INTERVAL);
+        let state = app.state::<AppState>();
+        if let Err(error) = sync_connected_managed_cloud_providers(&app, &state) {
+            tracing::debug!(error = %error, "managed cloud auto-sync skipped");
+        }
+    });
+}
+
+fn sync_connected_managed_cloud_providers(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let providers = connected_cloud_sync_provider_ids(app)?;
+    for provider in providers {
+        match upload_book_to_cloud_inner(state, &provider) {
+            Ok(report) => tracing::info!(
+                provider = %provider,
+                pushed = report.pushed.len(),
+                pulled = report.pulled.len(),
+                merged = report.merged.len(),
+                conflicted = report.conflicted.len(),
+                "cloud auto-sync complete"
+            ),
+            Err(error) if error == "no book is open" || error == "sync is disabled" => {}
+            Err(error) => return Err(format!("{provider}: {error}")),
+        }
+    }
+    Ok(())
+}
+
+fn upload_book_to_cloud_inner(state: &AppState, provider: &str) -> Result<SyncReport, String> {
+    let guard = state.book.lock().unwrap();
+    let book = guard
+        .as_ref()
+        .ok_or_else(|| "no book is open".to_string())?;
+    if !book.config.sync.enabled {
+        return Err("sync is disabled".to_string());
+    }
+    let store = opendal_sync_provider_for(provider, book)?;
+    let actor = syllepsis_core::sync::actor_id_for(&book.root).map_err(|e| e.to_string())?;
+    let report = SyncEngine::new_human_readable_remote(
+        book.root.clone(),
+        Box::new(store),
+        actor,
+        &book.config.sync,
+    )
+    .sync()
+    .map_err(|e| e.to_string())?;
+    if let Err(error) = delete_cloud_book_prefix(provider, &book.metadata.book_id) {
+        tracing::debug!(
+            provider = %provider,
+            book_id = %book.metadata.book_id,
+            error = %error,
+            "legacy managed cloud cleanup skipped"
+        );
+    }
+    book.store.refresh().map_err(|e| e.to_string())?;
+    let _ = state.local_ai.enqueue_all_stale(book, false);
+    state.invalidate_graph_corpus();
+    Ok(report)
 }
 
 #[tauri::command]
@@ -695,6 +779,77 @@ fn sync_keychain_service() -> &'static str {
     }
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct CloudSyncConnectionMarkers {
+    providers: BTreeSet<String>,
+}
+
+fn cloud_sync_connection_markers_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join(CLOUD_SYNC_CONNECTION_MARKERS_FILE))
+        .map_err(|error| format!("resolve cloud sync connection marker path: {error}"))
+}
+
+fn load_cloud_sync_connection_markers(app: &AppHandle) -> Result<BTreeSet<String>, String> {
+    let path = cloud_sync_connection_markers_path(app)?;
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
+        Err(error) => {
+            return Err(format!(
+                "read cloud sync connection markers from {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    let markers: CloudSyncConnectionMarkers = serde_json::from_str(&text).map_err(|error| {
+        format!(
+            "parse cloud sync connection markers from {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(markers.providers)
+}
+
+fn save_cloud_sync_connection_markers(
+    app: &AppHandle,
+    providers: BTreeSet<String>,
+) -> Result<(), String> {
+    let path = cloud_sync_connection_markers_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "create cloud sync connection marker directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+    let text = serde_json::to_string_pretty(&CloudSyncConnectionMarkers { providers })
+        .map_err(|error| format!("serialize cloud sync connection markers: {error}"))?;
+    fs::write(&path, text).map_err(|error| {
+        format!(
+            "write cloud sync connection markers to {}: {error}",
+            path.display()
+        )
+    })
+}
+
+fn mark_cloud_sync_provider_connected(
+    app: &AppHandle,
+    provider: &str,
+    connected: bool,
+) -> Result<(), String> {
+    descriptor_for(provider)?;
+    let mut providers = load_cloud_sync_connection_markers(app)?;
+    if connected {
+        providers.insert(provider.to_string());
+    } else {
+        providers.remove(provider);
+    }
+    save_cloud_sync_connection_markers(app, providers)
+}
+
 struct OpenDalManagedObjectStore {
     op: opendal::blocking::Operator,
 }
@@ -736,29 +891,101 @@ impl ManagedObjectStore for OpenDalManagedObjectStore {
     }
 }
 
+struct OpenDalSyncProvider {
+    provider: String,
+    op: opendal::blocking::Operator,
+}
+
+impl SyncProvider for OpenDalSyncProvider {
+    fn name(&self) -> &str {
+        &self.provider
+    }
+
+    fn list(&self) -> syllepsis_core::CoreResult<Vec<RemoteEntry>> {
+        let entries = self.op.list("").map_err(|e| {
+            syllepsis_core::CoreError::Sync(format!("opendal list cloud root: {e}"))
+        })?;
+        let mut remote_entries = Vec::new();
+        for entry in entries {
+            if entry.metadata().mode() != opendal::EntryMode::FILE {
+                continue;
+            }
+            let path = entry.path().trim_start_matches('/').to_string();
+            if path.is_empty() {
+                continue;
+            }
+            let bytes = self.get(&path)?;
+            remote_entries.push(RemoteEntry {
+                path,
+                revision: content_revision(&bytes),
+                size: entry.metadata().content_length(),
+            });
+        }
+        Ok(remote_entries)
+    }
+
+    fn get(&self, path: &str) -> syllepsis_core::CoreResult<Vec<u8>> {
+        self.op
+            .read(path)
+            .map(|buffer| buffer.to_vec())
+            .map_err(|e| syllepsis_core::CoreError::Sync(format!("opendal read {path}: {e}")))
+    }
+
+    fn put(&self, path: &str, bytes: &[u8]) -> syllepsis_core::CoreResult<RemoteRevision> {
+        self.op
+            .write(path, bytes.to_vec())
+            .map_err(|e| syllepsis_core::CoreError::Sync(format!("opendal write {path}: {e}")))?;
+        Ok(content_revision(bytes))
+    }
+
+    fn delete(&self, path: &str) -> syllepsis_core::CoreResult<()> {
+        self.op
+            .delete(path)
+            .map_err(|e| syllepsis_core::CoreError::Sync(format!("opendal delete {path}: {e}")))
+    }
+}
+
+fn opendal_sync_provider_for(provider: &str, book: &Book) -> Result<OpenDalSyncProvider, String> {
+    let root = cloud_book_sync_root(book);
+    let op = opendal_operator_for(provider, &root)?;
+    Ok(OpenDalSyncProvider {
+        provider: provider.to_string(),
+        op,
+    })
+}
+
 fn opendal_store_for(provider: &str) -> Result<OpenDalManagedObjectStore, String> {
+    opendal_operator_for(provider, "/").map(|op| OpenDalManagedObjectStore { op })
+}
+
+fn opendal_operator_for(provider: &str, root: &str) -> Result<opendal::blocking::Operator, String> {
     let credentials = credentials_for(provider)?;
     let op = match provider {
         "google_drive" => {
             let mut builder = opendal::services::Gdrive::default();
-            builder = builder.root("/");
+            builder = builder.root(root);
             apply_opendal_tokens_gdrive(builder, &credentials)?
         }
         "dropbox" => {
             let mut builder = opendal::services::Dropbox::default();
-            builder = builder.root("/");
+            builder = builder.root(root);
             apply_opendal_tokens_dropbox(builder, &credentials)?
         }
         "onedrive" => {
             let mut builder = opendal::services::Onedrive::default();
-            builder = builder.root("/");
+            builder = builder.root(root);
             apply_opendal_tokens_onedrive(builder, &credentials)?
         }
         other => return Err(format!("unknown cloud sync provider: {other}")),
     };
+    let runtime_handle = tauri::async_runtime::handle();
+    let _runtime_guard = runtime_handle.inner().enter();
     opendal::blocking::Operator::new(op)
-        .map(|op| OpenDalManagedObjectStore { op })
         .map_err(|e| format!("create blocking OpenDAL operator: {e}"))
+}
+
+fn cloud_book_sync_root(book: &Book) -> String {
+    format!("/Syllepsis/{}/", safe_folder_name(&book.metadata.name))
 }
 
 fn delete_managed_cloud_data_for_connected_providers(
