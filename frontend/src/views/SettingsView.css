@@ -186,6 +186,10 @@
   color: var(--color-accent);
   border-color: var(--color-accent);
 }
+.sv-pill.warn {
+  color: var(--color-text-secondary);
+  border-color: var(--color-secondary);
+}
 
 .sv-subhead {
   font-size: var(--font-size-sm);

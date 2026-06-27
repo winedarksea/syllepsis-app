@@ -227,6 +227,7 @@ export function SettingsView({ launchMode = false }: Props) {
         ) : (
           <Section title="Book Settings" subtitle={SUBTITLES.book[flavorLang]}>
             <p className="sv-locked">Privacy, sync, and advanced tuning are stored per book. Open a book to configure them.</p>
+            <DeviceCloudSyncPanel onError={reportError} />
           </Section>
         )}
 
@@ -808,6 +809,16 @@ function upsertCloudProviderStatus(
     : [...statuses, nextStatus];
 }
 
+function markActiveCloudProvider(
+  statuses: CloudSyncProviderStatus[],
+  activeProvider: string,
+): CloudSyncProviderStatus[] {
+  return statuses.map((status) => ({
+    ...status,
+    active_for_current_book: status.provider === activeProvider,
+  }));
+}
+
 function cloudSyncReportSummary(report: SyncReport): string {
   return [
     `Cloud sync complete. ${report.pushed.length} pushed`,
@@ -817,6 +828,119 @@ function cloudSyncReportSummary(report: SyncReport): string {
     `${report.deleted_local.length + report.deleted_remote.length} deleted`,
     `${report.skipped} unchanged.`,
   ].join(', ');
+}
+
+function DeviceCloudSyncPanel({ onError }: { onError: (m: string) => void }) {
+  const [cloudProviders, setCloudProviders] = useState<CloudSyncProviderDescriptor[]>([]);
+  const [cloudStatuses, setCloudStatuses] = useState<CloudSyncProviderStatus[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Record<string, string>>({});
+
+  const loadCloud = useCallback(async () => {
+    const [providers, statuses] = await Promise.all([
+      api.cloudSyncProviderDescriptors(),
+      api.cloudSyncProviderStatuses(),
+    ]);
+    setCloudProviders(providers);
+    setCloudStatuses(statuses);
+  }, []);
+
+  useEffect(() => {
+    loadCloud().catch((e) => onError(String(e)));
+  }, [loadCloud, onError]);
+
+  useEffect(() => {
+    let unlistenCompleted: (() => void) | undefined;
+    let unlistenFailed: (() => void) | undefined;
+    let disposed = false;
+
+    Promise.all([
+      listen<CloudSyncProviderStatus>('cloud-sync://oauth-completed', (event) => {
+        setCloudStatuses((prev) => upsertCloudProviderStatus(prev, event.payload));
+        setFeedback((current) => ({
+          ...current,
+          [event.payload.provider]: 'Authorization complete.',
+        }));
+        setBusy(null);
+      }),
+      listen<string>('cloud-sync://oauth-failed', (event) => {
+        setBusy(null);
+        onError(event.payload);
+      }),
+    ]).then(([completed, failed]) => {
+      if (disposed) {
+        completed();
+        failed();
+        return;
+      }
+      unlistenCompleted = completed;
+      unlistenFailed = failed;
+    }).catch((error) => onError(String(error)));
+
+    return () => {
+      disposed = true;
+      unlistenCompleted?.();
+      unlistenFailed?.();
+    };
+  }, [onError]);
+
+  const cloudStatus = (provider: string) => cloudStatuses.find((status) => status.provider === provider);
+
+  const connectCloud = useCallback(async (provider: string) => {
+    setBusy(provider);
+    try {
+      const start = await api.connectCloudSyncProvider(provider);
+      await openUrl(start.auth_url);
+    } catch (e) {
+      setBusy(null);
+      onError(String(e));
+    }
+  }, [onError]);
+
+  const disconnectCloud = useCallback(async (provider: string) => {
+    setBusy(provider);
+    try {
+      const status = await api.disconnectCloudSyncProvider(provider);
+      setCloudStatuses((current) => upsertCloudProviderStatus(current, status));
+      setFeedback((current) => {
+        const next = { ...current };
+        delete next[provider];
+        return next;
+      });
+    } catch (e) { onError(String(e)); }
+    finally { setBusy(null); }
+  }, [onError]);
+
+  return (
+    <div className="sv-subpanel">
+      <div className="sv-subhead">Cloud Sync Accounts</div>
+      <p className="sv-hint">Authorize cloud accounts here, then use Load from Cloud on the launch screen to open an existing notebook.</p>
+      <div className="sv-providers">
+        {cloudProviders.map((provider) => {
+          const status = cloudStatus(provider.provider);
+          return (
+            <div key={provider.provider} className="sv-provider">
+              <div className="sv-provider-head">
+                <span className="sv-provider-name">{provider.display_name}</span>
+                <span className={`sv-pill ${status?.connected ? 'ok' : ''}`}>
+                  {status?.connected ? 'Connected' : status ? 'Disconnected' : 'Keychain-backed'}
+                </span>
+              </div>
+              <div className="sv-actions">
+                <button className="sv-btn" disabled={busy === provider.provider} onClick={() => connectCloud(provider.provider)}>
+                  {status?.connected ? 'Reconnect' : 'Authorize / Reauthorize'}
+                </button>
+                <button className="sv-btn" disabled={busy === provider.provider} onClick={() => disconnectCloud(provider.provider)}>Disconnect saved</button>
+              </div>
+              {feedback[provider.provider] && (
+                <p className="sv-connection-feedback success">{feedback[provider.provider]}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function SyncPanel({ value, onSaved, onError }: {
@@ -852,12 +976,13 @@ function SyncPanel({ value, onSaved, onError }: {
     try {
       const report = await api.syncManagedCloudNow(provider);
       const descriptor = cloudProviders.find((candidate) => candidate.provider === provider);
-      setCloudStatuses((current) => upsertCloudProviderStatus(current, {
-        provider,
-        display_name: descriptor?.display_name ?? provider,
-        connected: true,
-        requires_loro: true,
-      }));
+      setCloudStatuses((current) => markActiveCloudProvider(upsertCloudProviderStatus(current, {
+          provider,
+          display_name: descriptor?.display_name ?? provider,
+          connected: true,
+          requires_loro: true,
+          active_for_current_book: true,
+        }), provider));
       setCloudFeedback((current) => ({
         ...current,
         [provider]: cloudSyncReportSummary(report),
@@ -884,9 +1009,9 @@ function SyncPanel({ value, onSaved, onError }: {
         setCloudStatuses((prev) => upsertCloudProviderStatus(prev, event.payload));
         setCloudFeedback((current) => ({
           ...current,
-          [event.payload.provider]: 'Authorization complete. Running initial cloud sync...',
+          [event.payload.provider]: 'Authorization complete. Choose Use for this notebook to enable sync.',
         }));
-        void runCloudSync(event.payload.provider);
+        setBusy(null);
       }),
       listen<string>('cloud-sync://oauth-failed', (event) => {
         setBusy(null);
@@ -907,7 +1032,7 @@ function SyncPanel({ value, onSaved, onError }: {
       unlistenCompleted?.();
       unlistenFailed?.();
     };
-  }, [onError, runCloudSync]);
+  }, [onError]);
 
   const cloudStatus = (provider: string) => cloudStatuses.find((status) => status.provider === provider);
 
@@ -935,6 +1060,19 @@ function SyncPanel({ value, onSaved, onError }: {
         delete next[provider];
         return next;
       });
+    } catch (e) { onError(String(e)); }
+    finally { setBusy(null); }
+  }, [onError]);
+
+  const activateCloud = useCallback(async (provider: string) => {
+    setBusy(provider);
+    try {
+      const status = await api.activateCloudSyncProvider(provider);
+      setCloudStatuses((current) => markActiveCloudProvider(upsertCloudProviderStatus(current, status), provider));
+      setCloudFeedback((current) => ({
+        ...current,
+        [provider]: `${status.display_name} will sync this notebook.`,
+      }));
     } catch (e) { onError(String(e)); }
     finally { setBusy(null); }
   }, [onError]);
@@ -979,25 +1117,33 @@ function SyncPanel({ value, onSaved, onError }: {
             <div key={provider.provider} className="sv-provider">
               <div className="sv-provider-head">
                 <span className="sv-provider-name">{provider.display_name}</span>
-                <span className={`sv-pill ${status?.connected ? 'ok' : ''}`}>
-                  {status?.connected ? 'Connected' : status ? 'Disconnected' : 'Keychain-backed'}
+                <span className={`sv-pill ${status?.active_for_current_book ? 'ok' : status?.connected ? 'warn' : ''}`}>
+                  {status?.active_for_current_book ? 'Active' : status?.connected ? 'Connected' : status ? 'Disconnected' : 'Keychain-backed'}
                 </span>
               </div>
               <div className="sv-actions">
                 <button className="sv-btn" disabled={busy === provider.provider} onClick={() => connectCloud(provider.provider)}>
                   {status?.connected ? 'Reconnect' : 'Authorize / Reauthorize'}
                 </button>
+                {status?.connected && !status.active_for_current_book && (
+                  <button className="sv-btn" disabled={busy === provider.provider} onClick={() => activateCloud(provider.provider)}>
+                    Use for this notebook
+                  </button>
+                )}
                 <button
                   className="sv-btn"
-                  disabled={dirty || saving || busy === provider.provider}
+                  disabled={dirty || saving || busy === provider.provider || !status?.active_for_current_book}
                   onClick={() => runCloudSync(provider.provider)}
                 >
                   Sync now
                 </button>
                 <button className="sv-btn" disabled={busy === provider.provider} onClick={() => disconnectCloud(provider.provider)}>Disconnect saved</button>
               </div>
-              {dirty && status?.connected && (
+              {dirty && status?.active_for_current_book && (
                 <p className="sv-connection-feedback warning">Save sync settings before cloud sync.</p>
+              )}
+              {status?.connected && !status.active_for_current_book && (
+                <p className="sv-connection-feedback warning">Connected on this device, but not used for this notebook.</p>
               )}
               {cloudFeedback[provider.provider] && (
                 <p className="sv-connection-feedback success">{cloudFeedback[provider.provider]}</p>
