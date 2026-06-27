@@ -92,11 +92,13 @@ pub fn sidecar_rel_path(note_path: &str) -> Option<String> {
     ))
 }
 
-/// True if a book-relative path is device-local bookkeeping or an ephemeral cache that must never
-/// be synced (`_sync/`, `_derived/`).
+/// True if a book-relative path is device-local bookkeeping, ephemeral cache data, or OS metadata
+/// that must never be synced.
 pub fn is_local_only(path: &str) -> bool {
     let first = path.split('/').next().unwrap_or("");
-    first == layout::SYNC_DIR || first == layout::DERIVED_DIR
+    first == layout::SYNC_DIR
+        || first == layout::DERIVED_DIR
+        || path.split('/').any(|component| component == ".DS_Store")
 }
 
 /// True if a path is a CRDT sidecar (`_crdt/*.crdt`). Sidecars are synced, but as *dependents* of
@@ -137,6 +139,13 @@ mod tests {
         assert_eq!(sidecar, format!("_crdt/{}.crdt", id.ulid()));
         assert!(is_sidecar(&sidecar));
         assert!(sidecar_rel_path("_book.md").is_none());
+    }
+
+    #[test]
+    fn os_metadata_files_are_local_only() {
+        assert!(is_local_only(".DS_Store"));
+        assert!(is_local_only("_categories/.DS_Store"));
+        assert!(!is_local_only("_categories/real.md"));
     }
 
     #[test]

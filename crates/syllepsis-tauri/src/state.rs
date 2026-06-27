@@ -35,6 +35,14 @@ pub struct CachedCloudLlmCredentials {
     pub base_url: Option<String>,
 }
 
+pub struct CachedCloudSyncCredentials {
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub access_token: Option<String>,
+    pub access_token_expires_at: Option<SystemTime>,
+    pub refresh_token: Option<String>,
+}
+
 /// The single app-level state. The open book is behind a Mutex; `None` means no book
 /// is open yet (the user hasn't opened or created one in this session).
 pub struct AppState {
@@ -45,6 +53,7 @@ pub struct AppState {
     pub llm_jobs: Arc<Mutex<HashMap<String, QueuedLlmJobRecord>>>,
     pub cloud_llm_models: Arc<Mutex<HashMap<String, CachedCloudLlmModels>>>,
     pub cloud_llm_credentials: Arc<Mutex<HashMap<String, CachedCloudLlmCredentials>>>,
+    pub cloud_sync_credentials: Arc<Mutex<HashMap<String, CachedCloudSyncCredentials>>>,
 }
 
 impl AppState {
@@ -57,6 +66,7 @@ impl AppState {
             llm_jobs: Arc::new(Mutex::new(HashMap::new())),
             cloud_llm_models: Arc::new(Mutex::new(HashMap::new())),
             cloud_llm_credentials: Arc::new(Mutex::new(HashMap::new())),
+            cloud_sync_credentials: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

@@ -143,7 +143,7 @@ impl Book {
         std::fs::write(
             root.join(".gitignore"),
             format!(
-                "{}/\n{}/\n{}/\n{}/\n",
+                "{}/\n{}/\n{}/\n{}/\n.DS_Store\n",
                 layout::DERIVED_DIR,
                 layout::EMBEDDINGS_DIR,
                 layout::SYNC_DIR,
@@ -426,6 +426,9 @@ mod tests {
             assert_eq!(book.metadata.name, "My Book");
             assert!(layout::categories_dir(&path).exists());
             assert!(path.join(".gitignore").exists());
+            assert!(std::fs::read_to_string(path.join(".gitignore"))
+                .unwrap()
+                .contains(".DS_Store"));
         }
         let reopened = Book::open(&path).unwrap();
         assert_eq!(reopened.metadata.name, "My Book");

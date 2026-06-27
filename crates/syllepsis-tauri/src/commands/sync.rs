@@ -8,7 +8,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use chrono::Utc;
 use notify::{RecursiveMode, Watcher};
@@ -28,7 +28,7 @@ use syllepsis_core::sync::{
     SyncProviderDescriptor, SyncReport,
 };
 
-use crate::state::AppState;
+use crate::state::{AppState, CachedCloudSyncCredentials};
 
 const SYNC_KEYCHAIN_SERVICE: &str = "syllepsis.sync";
 const DEVELOPMENT_SYNC_KEYCHAIN_SERVICE: &str = "syllepsis.sync.dev";
@@ -47,6 +47,7 @@ const MANAGED_CLOUD_STATE_FILE_PREFIX: &str = "managed-cloud-";
 const MANAGED_CLOUD_STATE_FILE_SUFFIX: &str = ".json";
 const CLOUD_SYNC_CONNECTION_MARKERS_FILE: &str = "cloud-sync-connected-providers.json";
 const ACTIVE_CLOUD_PROVIDER_FILE: &str = "cloud-provider.json";
+const ACCESS_TOKEN_REFRESH_SAFETY_WINDOW: Duration = Duration::from_secs(5 * 60);
 const HUMAN_READABLE_CLOUD_ROOT: &str = "Syllepsis/";
 const HUMAN_READABLE_BOOK_META_SUFFIX: &str = "_book.md";
 const CLOUD_BOOK_LAYOUT_HUMAN_READABLE: &str = "human_readable";
@@ -470,9 +471,15 @@ pub fn connect_cloud_sync_provider(
                 &callback_url,
                 &callback_redirect_uri,
             )
-            .and_then(|status| {
-                mark_cloud_sync_provider_connected(&app, &status.provider, true)?;
-                Ok(status)
+            .and_then(|completion| {
+                mark_cloud_sync_provider_connected(&app, &completion.status.provider, true)?;
+                let state = app.state::<AppState>();
+                cache_sync_credentials(
+                    &state,
+                    &completion.status.provider,
+                    &completion.credentials,
+                );
+                Ok(completion.status)
             })
         });
         match result {
@@ -497,7 +504,7 @@ fn complete_cloud_sync_oauth_callback(
     provider: &str,
     callback_url: &str,
     redirect_uri: &str,
-) -> Result<CloudSyncProviderStatus, String> {
+) -> Result<CloudSyncOAuthCompletion, String> {
     let params = parse_query_params(callback_url);
     let mut store = KeyringSyncCredentialStore;
     let descriptor = descriptor_for(provider)?;
@@ -521,9 +528,12 @@ fn complete_cloud_sync_oauth_callback(
         return Err(format!("{error}: {description}"));
     }
 
-    if let Some(token) = params.get("refresh_token").or_else(|| params.get("token")) {
+    let credentials = if let Some(token) =
+        params.get("refresh_token").or_else(|| params.get("token"))
+    {
         // Some providers (or manual testing) may deliver a token directly.
         store.set(&account(provider, REFRESH_TOKEN_FIELD), token)?;
+        cloud_credentials_for_tokens(provider, None, None, Some(token.clone()))?
     } else if let Some(code) = params.get("code") {
         // Standard authorization-code + PKCE flow: exchange the code for tokens.
         let verifier = store
@@ -531,21 +541,25 @@ fn complete_cloud_sync_oauth_callback(
             .ok_or_else(|| "no PKCE code verifier found; restart the connect flow".to_string())?;
         store.delete(&account(provider, CODE_VERIFIER_FIELD))?;
         let credentials = exchange_code_for_tokens(provider, code, &verifier, redirect_uri)?;
-        if let Some(access) = credentials.access_token {
-            store.set(&account(provider, ACCESS_TOKEN_FIELD), &access)?;
+        if let Some(access) = credentials.access_token.as_ref() {
+            store.set(&account(provider, ACCESS_TOKEN_FIELD), access)?;
         }
-        if let Some(refresh) = credentials.refresh_token {
-            store.set(&account(provider, REFRESH_TOKEN_FIELD), &refresh)?;
+        if let Some(refresh) = credentials.refresh_token.as_ref() {
+            store.set(&account(provider, REFRESH_TOKEN_FIELD), refresh)?;
         }
+        credentials
     } else {
         return Err("OAuth callback did not include a token or code".to_string());
-    }
-    Ok(CloudSyncProviderStatus {
-        provider: descriptor.provider,
-        display_name: descriptor.display_name,
-        connected: true,
-        requires_loro: true,
-        active_for_current_book: false,
+    };
+    Ok(CloudSyncOAuthCompletion {
+        status: CloudSyncProviderStatus {
+            provider: descriptor.provider,
+            display_name: descriptor.display_name,
+            connected: true,
+            requires_loro: true,
+            active_for_current_book: false,
+        },
+        credentials,
     })
 }
 
@@ -561,6 +575,7 @@ pub fn disconnect_cloud_sync_provider(
     store.delete(&account(&provider, REFRESH_TOKEN_FIELD))?;
     store.delete(&account(&provider, OAUTH_STATE_FIELD))?;
     store.delete(&account(&provider, CODE_VERIFIER_FIELD))?;
+    remove_cached_sync_credentials(&state, &provider);
     mark_cloud_sync_provider_connected(&app, &provider, false)?;
     clear_active_cloud_provider_if_matches_current_book(&state, &provider)?;
     Ok(CloudSyncProviderStatus {
@@ -597,8 +612,11 @@ pub fn activate_cloud_sync_provider(
 }
 
 #[tauri::command]
-pub fn list_cloud_books(provider: String) -> Result<Vec<CloudBookSummary>, String> {
-    let store = opendal_store_for(&provider)?;
+pub fn list_cloud_books(
+    state: State<AppState>,
+    provider: String,
+) -> Result<Vec<CloudBookSummary>, String> {
+    let store = opendal_store_for(&state, &provider)?;
     list_cloud_books_from_store(&store)
 }
 
@@ -738,7 +756,7 @@ fn upload_book_to_cloud_inner(state: &AppState, provider: &str) -> Result<SyncRe
     if !book.config.sync.enabled {
         return Err("sync is disabled".to_string());
     }
-    let store = opendal_sync_provider_for(provider, book)?;
+    let store = opendal_sync_provider_for(state, provider, book)?;
     let actor = syllepsis_core::sync::actor_id_for(&book.root).map_err(|e| e.to_string())?;
     let report = SyncEngine::new_human_readable_remote(
         book.root.clone(),
@@ -748,7 +766,7 @@ fn upload_book_to_cloud_inner(state: &AppState, provider: &str) -> Result<SyncRe
     )
     .sync()
     .map_err(|e| e.to_string())?;
-    if let Err(error) = delete_cloud_book_prefix(provider, &book.metadata.book_id) {
+    if let Err(error) = delete_cloud_book_prefix(state, provider, &book.metadata.book_id) {
         tracing::debug!(
             provider = %provider,
             book_id = %book.metadata.book_id,
@@ -785,7 +803,8 @@ pub fn delete_current_book(
         return Err("confirmation did not match the current notebook name".to_string());
     }
 
-    let cloud_cleanup = delete_managed_cloud_data_for_connected_providers(&book_root, &book_id);
+    let cloud_cleanup =
+        delete_managed_cloud_data_for_connected_providers(&state, &book_root, &book_id);
 
     *state.file_watcher.lock().unwrap() = None;
     crate::commands::book::forget_tracked_book(app, book_path.clone())?;
@@ -811,7 +830,7 @@ pub fn open_cloud_book(
     layout: String,
     parent_path: String,
 ) -> Result<crate::commands::book::BookInfo, String> {
-    let store = opendal_store_for(&provider)?;
+    let store = opendal_store_for(&state, &provider)?;
     match layout.as_str() {
         CLOUD_BOOK_LAYOUT_HUMAN_READABLE => open_human_readable_cloud_book(
             &app,
@@ -859,7 +878,11 @@ fn open_human_readable_cloud_book(
                 root.display()
             ));
         }
-        let op = opendal_operator_for(provider, &operator_root_from_remote_root(remote_root))?;
+        let op = opendal_operator_for(
+            state,
+            provider,
+            &operator_root_from_remote_root(remote_root),
+        )?;
         let sync_provider = OpenDalSyncProvider {
             provider: provider.to_string(),
             op,
@@ -1036,8 +1059,14 @@ fn operator_root_from_remote_root(remote_root: &str) -> String {
 
 struct KeyringSyncCredentialStore;
 
-impl KeyringSyncCredentialStore {
-    fn get(&self, account: &str) -> Result<Option<String>, String> {
+trait SyncCredentialStore {
+    fn get(&mut self, account: &str) -> Result<Option<String>, String>;
+    fn set(&mut self, account: &str, secret: &str) -> Result<(), String>;
+    fn delete(&mut self, account: &str) -> Result<(), String>;
+}
+
+impl SyncCredentialStore for KeyringSyncCredentialStore {
+    fn get(&mut self, account: &str) -> Result<Option<String>, String> {
         let entry = keyring::Entry::new(sync_keychain_service(), account)
             .map_err(|e| format!("open keychain entry: {e}"))?;
         match entry.get_password() {
@@ -1091,7 +1120,13 @@ fn active_cloud_provider_for_book_root(book_root: &Path) -> Result<Option<String
     let path = active_cloud_provider_path(book_root);
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let inferred = infer_single_known_cloud_provider_for_book_root(book_root);
+            if let Some(provider) = inferred.as_deref() {
+                save_active_cloud_provider_for_book_root(book_root, Some(provider))?;
+            }
+            return Ok(inferred);
+        }
         Err(error) => {
             return Err(format!(
                 "read active cloud provider from {}: {error}",
@@ -1106,6 +1141,31 @@ fn active_cloud_provider_for_book_root(book_root: &Path) -> Result<Option<String
         )
     })?;
     Ok(marker.provider)
+}
+
+fn infer_single_known_cloud_provider_for_book_root(book_root: &Path) -> Option<String> {
+    let mut providers = fs::read_dir(layout::sync_dir(book_root))
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(Result::ok))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter_map(|name| {
+            name.strip_prefix("state-")
+                .and_then(|value| value.strip_suffix(".json"))
+                .or_else(|| {
+                    name.strip_prefix(MANAGED_CLOUD_STATE_FILE_PREFIX)
+                        .and_then(|value| value.strip_suffix(MANAGED_CLOUD_STATE_FILE_SUFFIX))
+                })
+                .map(str::to_string)
+        })
+        .filter(|provider| descriptor_for(provider).is_ok())
+        .collect::<Vec<_>>();
+    providers.sort();
+    providers.dedup();
+    match providers.as_slice() {
+        [provider] => Some(provider.clone()),
+        _ => None,
+    }
 }
 
 fn save_active_cloud_provider_for_book_root(
@@ -1348,21 +1408,32 @@ impl SyncProvider for OpenDalSyncProvider {
     }
 }
 
-fn opendal_sync_provider_for(provider: &str, book: &Book) -> Result<OpenDalSyncProvider, String> {
+fn opendal_sync_provider_for(
+    state: &AppState,
+    provider: &str,
+    book: &Book,
+) -> Result<OpenDalSyncProvider, String> {
     let root = cloud_book_sync_root(book);
-    let op = opendal_operator_for(provider, &root)?;
+    let op = opendal_operator_for(state, provider, &root)?;
     Ok(OpenDalSyncProvider {
         provider: provider.to_string(),
         op,
     })
 }
 
-fn opendal_store_for(provider: &str) -> Result<OpenDalManagedObjectStore, String> {
-    opendal_operator_for(provider, "/").map(|op| OpenDalManagedObjectStore { op })
+fn opendal_store_for(
+    state: &AppState,
+    provider: &str,
+) -> Result<OpenDalManagedObjectStore, String> {
+    opendal_operator_for(state, provider, "/").map(|op| OpenDalManagedObjectStore { op })
 }
 
-fn opendal_operator_for(provider: &str, root: &str) -> Result<opendal::blocking::Operator, String> {
-    let credentials = credentials_for(provider)?;
+fn opendal_operator_for(
+    state: &AppState,
+    provider: &str,
+    root: &str,
+) -> Result<opendal::blocking::Operator, String> {
+    let credentials = credentials_for(state, provider)?;
     let op = match provider {
         "google_drive" => {
             let mut builder = opendal::services::Gdrive::default();
@@ -1392,16 +1463,17 @@ fn cloud_book_sync_root(book: &Book) -> String {
 }
 
 fn delete_managed_cloud_data_for_connected_providers(
+    state: &AppState,
     book_root: &Path,
     book_id: &str,
 ) -> Vec<DeleteBookCloudCleanupOutcome> {
     let providers = managed_cloud_state_providers_for_book(book_root);
-    let store = KeyringSyncCredentialStore;
     providers
         .into_iter()
         .map(|provider| {
-            let connected = match token_for(&store, &provider) {
-                Ok(token) => token.is_some(),
+            let connected = match credentials_for(state, &provider) {
+                Ok(_) => true,
+                Err(error) if error == format!("{provider} is not connected") => false,
                 Err(error) => {
                     return DeleteBookCloudCleanupOutcome {
                         provider,
@@ -1421,7 +1493,7 @@ fn delete_managed_cloud_data_for_connected_providers(
                     error: None,
                 };
             }
-            match delete_cloud_book_prefix(&provider, book_id) {
+            match delete_cloud_book_prefix(state, &provider, book_id) {
                 Ok(deleted_object_count) => DeleteBookCloudCleanupOutcome {
                     provider,
                     attempted: true,
@@ -1469,8 +1541,12 @@ fn managed_cloud_state_providers_for_book(book_root: &Path) -> Vec<String> {
     providers
 }
 
-fn delete_cloud_book_prefix(provider: &str, book_id: &str) -> Result<usize, String> {
-    let mut store = opendal_store_for(provider)?;
+fn delete_cloud_book_prefix(
+    state: &AppState,
+    provider: &str,
+    book_id: &str,
+) -> Result<usize, String> {
+    let mut store = opendal_store_for(state, provider)?;
     let prefix = format!("syllepsis-sync/books/{book_id}/");
     let entries = store.list(&prefix).map_err(|error| error.to_string())?;
     let mut deleted = 0_usize;
@@ -1483,16 +1559,48 @@ fn delete_cloud_book_prefix(provider: &str, book_id: &str) -> Result<usize, Stri
     Ok(deleted)
 }
 
+struct CloudSyncOAuthCompletion {
+    status: CloudSyncProviderStatus,
+    credentials: CloudCredentials,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct CloudCredentials {
     client_id: String,
     client_secret: Option<String>,
     access_token: Option<String>,
+    access_token_expires_at: Option<SystemTime>,
     refresh_token: Option<String>,
 }
 
-fn credentials_for(provider: &str) -> Result<CloudCredentials, String> {
-    descriptor_for(provider)?;
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CloudAccessToken {
+    token: String,
+    expires_at: Option<SystemTime>,
+}
+
+fn credentials_for(state: &AppState, provider: &str) -> Result<CloudCredentials, String> {
     let mut store = KeyringSyncCredentialStore;
+    let mut refresh_access_token = refresh_google_drive_access_token;
+    credentials_for_with_store_and_refresh(state, &mut store, provider, &mut refresh_access_token)
+}
+
+fn credentials_for_with_store_and_refresh(
+    state: &AppState,
+    store: &mut impl SyncCredentialStore,
+    provider: &str,
+    refresh_access_token: &mut impl FnMut(&str, Option<&str>, &str) -> Result<CloudAccessToken, String>,
+) -> Result<CloudCredentials, String> {
+    descriptor_for(provider)?;
+    if let Some(mut credentials) = cached_sync_credentials(state, provider) {
+        refresh_google_drive_access_token_if_needed(
+            provider,
+            &mut credentials,
+            refresh_access_token,
+        )?;
+        cache_sync_credentials(state, provider, &credentials);
+        return Ok(credentials);
+    }
     let oauth_client_config = oauth_client_config(provider)?;
     let mut credentials = CloudCredentials {
         client_id: oauth_client_config.client_id.trim().to_string(),
@@ -1500,47 +1608,106 @@ fn credentials_for(provider: &str) -> Result<CloudCredentials, String> {
             .client_secret
             .map(|secret| secret.trim().to_string())
             .filter(|secret| !secret.is_empty()),
-        access_token: token_for_field(&store, provider, ACCESS_TOKEN_FIELD)?,
-        refresh_token: token_for_field(&store, provider, REFRESH_TOKEN_FIELD)?,
+        access_token: token_for_field(store, provider, ACCESS_TOKEN_FIELD)?,
+        access_token_expires_at: None,
+        refresh_token: token_for_field(store, provider, REFRESH_TOKEN_FIELD)?,
     };
     if credentials.access_token.is_none() && credentials.refresh_token.is_none() {
         return Err(format!("{provider} is not connected"));
     }
-    if provider == "google_drive" {
-        refresh_google_drive_access_token_if_available(&mut store, &mut credentials)?;
-    }
+    refresh_google_drive_access_token_if_needed(provider, &mut credentials, refresh_access_token)?;
+    cache_sync_credentials(state, provider, &credentials);
     Ok(credentials)
 }
 
-fn refresh_google_drive_access_token_if_available(
-    store: &mut KeyringSyncCredentialStore,
+fn refresh_google_drive_access_token_if_needed(
+    provider: &str,
     credentials: &mut CloudCredentials,
+    refresh_access_token: &mut impl FnMut(&str, Option<&str>, &str) -> Result<CloudAccessToken, String>,
 ) -> Result<(), String> {
+    if provider != "google_drive" || google_drive_access_token_is_current(credentials) {
+        return Ok(());
+    }
     let Some(refresh_token) = credentials.refresh_token.as_deref() else {
         return Ok(());
     };
-    let access_token = refresh_google_drive_access_token(
+    let access_token = refresh_access_token(
         &credentials.client_id,
         credentials.client_secret.as_deref(),
         refresh_token,
     )?;
-    store.set(&account("google_drive", ACCESS_TOKEN_FIELD), &access_token)?;
-    credentials.access_token = Some(access_token);
+    credentials.access_token = Some(access_token.token);
+    credentials.access_token_expires_at = access_token.expires_at;
     Ok(())
 }
 
-fn token_for(store: &KeyringSyncCredentialStore, provider: &str) -> Result<Option<String>, String> {
-    Ok(
-        token_for_field(store, provider, REFRESH_TOKEN_FIELD)?.or(token_for_field(
-            store,
-            provider,
-            ACCESS_TOKEN_FIELD,
-        )?),
-    )
+fn google_drive_access_token_is_current(credentials: &CloudCredentials) -> bool {
+    if credentials.access_token.is_none() {
+        return false;
+    }
+    let Some(expires_at) = credentials.access_token_expires_at else {
+        return credentials.refresh_token.is_none();
+    };
+    expires_at
+        .duration_since(SystemTime::now())
+        .map(|remaining| remaining > ACCESS_TOKEN_REFRESH_SAFETY_WINDOW)
+        .unwrap_or(false)
+}
+
+fn cloud_credentials_for_tokens(
+    provider: &str,
+    access_token: Option<String>,
+    access_token_expires_at: Option<SystemTime>,
+    refresh_token: Option<String>,
+) -> Result<CloudCredentials, String> {
+    let oauth_client_config = oauth_client_config(provider)?;
+    Ok(CloudCredentials {
+        client_id: oauth_client_config.client_id.trim().to_string(),
+        client_secret: oauth_client_config
+            .client_secret
+            .map(|secret| secret.trim().to_string())
+            .filter(|secret| !secret.is_empty()),
+        access_token,
+        access_token_expires_at,
+        refresh_token,
+    })
+}
+
+fn cached_sync_credentials(state: &AppState, provider: &str) -> Option<CloudCredentials> {
+    let cache = state.cloud_sync_credentials.lock().unwrap();
+    let credentials = cache.get(provider)?;
+    Some(CloudCredentials {
+        client_id: credentials.client_id.clone(),
+        client_secret: credentials.client_secret.clone(),
+        access_token: credentials.access_token.clone(),
+        access_token_expires_at: credentials.access_token_expires_at,
+        refresh_token: credentials.refresh_token.clone(),
+    })
+}
+
+fn cache_sync_credentials(state: &AppState, provider: &str, credentials: &CloudCredentials) {
+    state.cloud_sync_credentials.lock().unwrap().insert(
+        provider.to_string(),
+        CachedCloudSyncCredentials {
+            client_id: credentials.client_id.clone(),
+            client_secret: credentials.client_secret.clone(),
+            access_token: credentials.access_token.clone(),
+            access_token_expires_at: credentials.access_token_expires_at,
+            refresh_token: credentials.refresh_token.clone(),
+        },
+    );
+}
+
+fn remove_cached_sync_credentials(state: &AppState, provider: &str) {
+    state
+        .cloud_sync_credentials
+        .lock()
+        .unwrap()
+        .remove(provider);
 }
 
 fn token_for_field(
-    store: &KeyringSyncCredentialStore,
+    store: &mut impl SyncCredentialStore,
     provider: &str,
     field: &str,
 ) -> Result<Option<String>, String> {
@@ -1847,6 +2014,7 @@ fn exchange_code_for_tokens(
         .get("access_token")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
+    let access_token_expires_at = access_token_expires_at_from_json(&json);
     let refresh_token = json
         .get("refresh_token")
         .and_then(serde_json::Value::as_str)
@@ -1861,6 +2029,7 @@ fn exchange_code_for_tokens(
         client_id,
         client_secret,
         access_token,
+        access_token_expires_at,
         refresh_token,
     })
 }
@@ -1879,7 +2048,7 @@ fn refresh_google_drive_access_token(
     client_id: &str,
     client_secret: Option<&str>,
     refresh_token: &str,
-) -> Result<String, String> {
+) -> Result<CloudAccessToken, String> {
     let mut body = format!(
         "grant_type=refresh_token&refresh_token={}&client_id={}",
         percent_encode(refresh_token),
@@ -1907,12 +2076,23 @@ fn refresh_google_drive_access_token(
     let json: serde_json::Value = response
         .json()
         .map_err(|e| format!("refresh Google Drive token response parse failed: {e}"))?;
-    json.get("access_token")
+    let token = json
+        .get("access_token")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| {
             format!("refresh Google Drive token response returned no access token: {json}")
-        })
+        })?;
+    Ok(CloudAccessToken {
+        token,
+        expires_at: access_token_expires_at_from_json(&json),
+    })
+}
+
+fn access_token_expires_at_from_json(json: &serde_json::Value) -> Option<SystemTime> {
+    json.get("expires_in")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|seconds| SystemTime::now().checked_add(Duration::from_secs(seconds)))
 }
 
 fn receive_oauth_callback(listener: TcpListener) -> Result<String, String> {
@@ -2100,8 +2280,187 @@ fn safe_book_folder_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use std::collections::HashMap;
     use std::fs::{create_dir_all, write};
     use tempfile::tempdir;
+
+    #[derive(Default)]
+    struct FakeSyncCredentialStore {
+        values: HashMap<String, String>,
+        get_count: usize,
+        set_count: usize,
+        delete_count: usize,
+    }
+
+    impl SyncCredentialStore for FakeSyncCredentialStore {
+        fn get(&mut self, account: &str) -> Result<Option<String>, String> {
+            self.get_count += 1;
+            Ok(self.values.get(account).cloned())
+        }
+
+        fn set(&mut self, account: &str, secret: &str) -> Result<(), String> {
+            self.set_count += 1;
+            self.values.insert(account.to_string(), secret.to_string());
+            Ok(())
+        }
+
+        fn delete(&mut self, account: &str) -> Result<(), String> {
+            self.delete_count += 1;
+            self.values.remove(account);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn sync_credentials_cache_prevents_repeated_store_reads() {
+        let state = AppState::new();
+        let mut store = FakeSyncCredentialStore::default();
+        store.values.insert(
+            account("dropbox", ACCESS_TOKEN_FIELD),
+            "access-token".to_string(),
+        );
+        store.values.insert(
+            account("dropbox", REFRESH_TOKEN_FIELD),
+            "refresh-token".to_string(),
+        );
+        let mut refresh_access_token = |_: &str, _: Option<&str>, _: &str| {
+            panic!("dropbox should not refresh Google access tokens")
+        };
+
+        let first = credentials_for_with_store_and_refresh(
+            &state,
+            &mut store,
+            "dropbox",
+            &mut refresh_access_token,
+        )
+        .unwrap();
+        assert_eq!(first.access_token.as_deref(), Some("access-token"));
+        assert_eq!(first.refresh_token.as_deref(), Some("refresh-token"));
+        assert_eq!(store.get_count, 2);
+
+        let second = credentials_for_with_store_and_refresh(
+            &state,
+            &mut store,
+            "dropbox",
+            &mut refresh_access_token,
+        )
+        .unwrap();
+        assert_eq!(second.access_token.as_deref(), Some("access-token"));
+        assert_eq!(store.get_count, 2);
+    }
+
+    #[test]
+    fn cached_sync_credentials_can_be_cleared_for_disconnect() {
+        let state = AppState::new();
+        let credentials = cloud_credentials_for_tokens(
+            "dropbox",
+            Some("access-token".to_string()),
+            None,
+            Some("refresh-token".to_string()),
+        )
+        .unwrap();
+
+        cache_sync_credentials(&state, "dropbox", &credentials);
+        assert!(cached_sync_credentials(&state, "dropbox").is_some());
+
+        remove_cached_sync_credentials(&state, "dropbox");
+        assert!(cached_sync_credentials(&state, "dropbox").is_none());
+    }
+
+    #[test]
+    fn google_access_token_refresh_respects_expiry_window() {
+        let state = AppState::new();
+        let valid_credentials = cloud_credentials_for_tokens(
+            "google_drive",
+            Some("cached-access".to_string()),
+            Some(SystemTime::now() + Duration::from_secs(60 * 60)),
+            Some("refresh-token".to_string()),
+        )
+        .unwrap();
+        cache_sync_credentials(&state, "google_drive", &valid_credentials);
+        let mut store = FakeSyncCredentialStore::default();
+        let refresh_count = Cell::new(0_usize);
+        let mut refresh_access_token = |_: &str, _: Option<&str>, _: &str| {
+            refresh_count.set(refresh_count.get() + 1);
+            Ok(CloudAccessToken {
+                token: "new-access".to_string(),
+                expires_at: Some(SystemTime::now() + Duration::from_secs(60 * 60)),
+            })
+        };
+
+        let reused = credentials_for_with_store_and_refresh(
+            &state,
+            &mut store,
+            "google_drive",
+            &mut refresh_access_token,
+        )
+        .unwrap();
+        assert_eq!(reused.access_token.as_deref(), Some("cached-access"));
+        assert_eq!(refresh_count.get(), 0);
+
+        let near_expiry_credentials = cloud_credentials_for_tokens(
+            "google_drive",
+            Some("almost-expired".to_string()),
+            Some(SystemTime::now() + Duration::from_secs(60)),
+            Some("refresh-token".to_string()),
+        )
+        .unwrap();
+        cache_sync_credentials(&state, "google_drive", &near_expiry_credentials);
+
+        let refreshed = credentials_for_with_store_and_refresh(
+            &state,
+            &mut store,
+            "google_drive",
+            &mut refresh_access_token,
+        )
+        .unwrap();
+        assert_eq!(refreshed.access_token.as_deref(), Some("new-access"));
+        assert_eq!(refresh_count.get(), 1);
+
+        let reused_refreshed = credentials_for_with_store_and_refresh(
+            &state,
+            &mut store,
+            "google_drive",
+            &mut refresh_access_token,
+        )
+        .unwrap();
+        assert_eq!(reused_refreshed.access_token.as_deref(), Some("new-access"));
+        assert_eq!(refresh_count.get(), 1);
+    }
+
+    #[test]
+    fn google_access_token_refreshes_when_missing() {
+        let state = AppState::new();
+        let missing_access_credentials = cloud_credentials_for_tokens(
+            "google_drive",
+            None,
+            None,
+            Some("refresh-token".to_string()),
+        )
+        .unwrap();
+        cache_sync_credentials(&state, "google_drive", &missing_access_credentials);
+        let mut store = FakeSyncCredentialStore::default();
+        let refresh_count = Cell::new(0_usize);
+        let mut refresh_access_token = |_: &str, _: Option<&str>, _: &str| {
+            refresh_count.set(refresh_count.get() + 1);
+            Ok(CloudAccessToken {
+                token: "new-access".to_string(),
+                expires_at: Some(SystemTime::now() + Duration::from_secs(60 * 60)),
+            })
+        };
+
+        let refreshed = credentials_for_with_store_and_refresh(
+            &state,
+            &mut store,
+            "google_drive",
+            &mut refresh_access_token,
+        )
+        .unwrap();
+
+        assert_eq!(refreshed.access_token.as_deref(), Some("new-access"));
+        assert_eq!(refresh_count.get(), 1);
+    }
 
     #[test]
     fn watch_filter_ignores_local_sidecar_and_scratch_paths() {
@@ -2236,6 +2595,41 @@ mod tests {
             Some("google_drive")
         );
         save_active_cloud_provider_for_book_root(temp.path(), None).unwrap();
+        assert_eq!(
+            active_cloud_provider_for_book_root(temp.path()).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn missing_active_marker_infers_single_known_cloud_provider() {
+        let temp = tempdir().unwrap();
+        let sync_dir = layout::sync_dir(temp.path());
+        create_dir_all(&sync_dir).unwrap();
+        write(sync_dir.join("state-google_drive.json"), b"{}").unwrap();
+
+        assert_eq!(
+            active_cloud_provider_for_book_root(temp.path())
+                .unwrap()
+                .as_deref(),
+            Some("google_drive")
+        );
+        assert_eq!(
+            active_cloud_provider_for_book_root(temp.path())
+                .unwrap()
+                .as_deref(),
+            Some("google_drive")
+        );
+    }
+
+    #[test]
+    fn missing_active_marker_does_not_guess_between_multiple_cloud_providers() {
+        let temp = tempdir().unwrap();
+        let sync_dir = layout::sync_dir(temp.path());
+        create_dir_all(&sync_dir).unwrap();
+        write(sync_dir.join("state-google_drive.json"), b"{}").unwrap();
+        write(sync_dir.join("state-dropbox.json"), b"{}").unwrap();
+
         assert_eq!(
             active_cloud_provider_for_book_root(temp.path()).unwrap(),
             None

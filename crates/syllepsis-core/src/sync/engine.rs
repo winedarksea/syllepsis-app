@@ -625,6 +625,20 @@ mod tests {
     }
 
     #[test]
+    fn os_metadata_files_are_not_synced() {
+        let (_tmp, a, _b) = two_devices();
+        std::fs::write(a.book.root.join(".DS_Store"), b"finder").unwrap();
+        std::fs::create_dir_all(a.book.root.join("_categories")).unwrap();
+        std::fs::write(a.book.root.join("_categories/.DS_Store"), b"finder").unwrap();
+
+        let report = a.sync();
+
+        assert!(!report.pushed.iter().any(|path| path.contains(".DS_Store")));
+        assert!(!a.remote.join(".DS_Store").exists());
+        assert!(!a.remote.join("_categories/.DS_Store").exists());
+    }
+
+    #[test]
     fn concurrent_note_edits_converge() {
         let (_tmp, a, b) = two_devices();
         let note = a.book.new_note(ObjectType::Note, "shared").unwrap();
