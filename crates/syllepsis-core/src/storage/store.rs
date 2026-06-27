@@ -219,8 +219,13 @@ impl NoteStore for FsNoteStore {
 
     fn read_category(&self, name: &str) -> CoreResult<Category> {
         let path = layout::categories_dir(&self.root).join(layout::category_filename(name));
-        let content =
-            fs::read_to_string(&path).map_err(|_| CoreError::NotFound(name.to_string()))?;
+        let content = fs::read_to_string(&path).map_err(|error| {
+            if error.kind() == ErrorKind::NotFound {
+                CoreError::NotFound(name.to_string())
+            } else {
+                error.into()
+            }
+        })?;
         parse_category(&content)
     }
 

@@ -7,7 +7,7 @@
 
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
 
 use crate::app::dto::NoteDto;
@@ -229,7 +229,7 @@ fn escape_html_attr(value: &str) -> String {
 /// Aggregate statistics about a book.
 pub fn book_stats(book: &Book) -> CoreResult<BookStats> {
     let all_notes = book.store.read_all_notes()?;
-    let categories = book.store.categories()?;
+    let categories = all_categories(book)?;
 
     let mut stats = BookStats {
         total_notes: 0,
@@ -294,7 +294,10 @@ pub fn unsorted_notes(book: &Book) -> CoreResult<Vec<NoteDto>> {
 
 /// All categories defined in the book.
 pub fn all_categories(book: &Book) -> CoreResult<Vec<Category>> {
-    book.store.categories()
+    hydrate_categories_from_note_metadata(book)?;
+    let mut categories = book.store.categories()?;
+    categories.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(categories)
 }
 
 /// Every visible note (hidden / pending-deletion excluded), title-sorted. Backs views that
@@ -461,11 +464,36 @@ pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
 /// user customizations (icon, long name, privacy) survive.
 fn ensure_categories_declared(book: &Book, categories: &[String]) -> CoreResult<()> {
     for name in categories {
-        if book.store.read_category(name).is_err() {
-            book.store.write_category(&Category::new(name.clone()))?;
+        if name.trim().is_empty() {
+            continue;
+        }
+        match book.store.read_category(name) {
+            Ok(_) => {}
+            Err(CoreError::NotFound(_)) => {
+                book.store.write_category(&Category::new(name.clone()))?
+            }
+            Err(error) => return Err(error),
         }
     }
     Ok(())
+}
+
+fn hydrate_categories_from_note_metadata(book: &Book) -> CoreResult<()> {
+    let mut referenced_categories = BTreeSet::new();
+    for note in book.store.read_all_notes()? {
+        referenced_categories.extend(
+            note.categories
+                .into_iter()
+                .filter(|category| !category.trim().is_empty()),
+        );
+        if let Some(PriorRef::Category(category)) = note.prior.map(|prior| prior.target) {
+            if !category.trim().is_empty() {
+                referenced_categories.insert(category);
+            }
+        }
+    }
+    let referenced_categories: Vec<String> = referenced_categories.into_iter().collect();
+    ensure_categories_declared(book, &referenced_categories)
 }
 
 /// Whether a user-meaningful field of a note changed (the parts a pack re-import would overwrite).
@@ -858,6 +886,32 @@ mod tests {
             .map(|c| c.name)
             .collect();
         assert!(declared.contains(&"research".to_string()));
+    }
+
+    #[test]
+    fn all_categories_hydrates_legacy_note_category_metadata() {
+        let (_dir, book) = book();
+        let mut tagged = book.new_note(ObjectType::Note, "tagged").unwrap();
+        tagged.categories = vec!["legacy".into()];
+        book.save_note(&tagged).unwrap();
+
+        let mut sorted = book.new_note(ObjectType::Note, "sorted").unwrap();
+        sorted.prior = Some(PriorEdge::starts_category("chapter"));
+        book.save_note(&sorted).unwrap();
+
+        assert!(book.store.read_category("legacy").is_err());
+        assert!(book.store.read_category("chapter").is_err());
+
+        let declared: Vec<String> = all_categories(&book)
+            .unwrap()
+            .into_iter()
+            .map(|category| category.name)
+            .collect();
+
+        assert_eq!(declared, vec!["chapter".to_string(), "legacy".to_string()]);
+        assert!(book.store.read_category("legacy").is_ok());
+        assert!(book.store.read_category("chapter").is_ok());
+        assert_eq!(book_stats(&book).unwrap().total_categories, 2);
     }
 
     #[test]
