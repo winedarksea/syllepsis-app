@@ -83,12 +83,14 @@ export function CommentaryPanel({
       .then((next) => {
         setItems(next);
         onCountChange?.(next.length);
-        if (focusId) setSelectedId(focusId);
       })
       .catch((err) => setError(String(err)));
-  }, [focusId, note.id, onCountChange]);
+  }, [note.id, onCountChange]);
 
   useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    if (focusId) setSelectedId(focusId);
+  }, [focusId]);
 
   const selected = items.find((item) => item.id === selectedId) ?? null;
   const groups = useMemo(() => {
@@ -119,6 +121,34 @@ export function CommentaryPanel({
       setBusy(false);
     }
   }, [onApplied, refresh, selected]);
+
+  const dismiss = useCallback(async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await api.dismissCommentary(selected.id);
+      setSelectedId(null);
+      refresh();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [refresh, selected]);
+
+  const pin = useCallback(async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await api.pinCommentary(selected.id);
+      setSelectedId(null);
+      refresh();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [refresh, selected]);
 
   return (
     <>
@@ -174,6 +204,9 @@ export function CommentaryPanel({
               <MarkdownRenderer markdown={selected.body} className="commentary-detail-markdown" />
             )}
             <div className="commentary-detail-actions">
+              <button className="picker-btn picker-btn-secondary" onClick={() => setSelectedId(null)} disabled={busy}>
+                Back
+              </button>
               {selected.metadata.kind === 'proposal' && (
                 <>
                   <button className="picker-btn picker-btn-primary" onClick={() => apply(false)} disabled={busy}>
@@ -191,6 +224,14 @@ export function CommentaryPanel({
                   )}
                 </>
               )}
+              {selected.metadata.status !== 'pinned' && (
+                <button className="picker-btn picker-btn-secondary" onClick={pin} disabled={busy}>
+                  Pin
+                </button>
+              )}
+              <button className="picker-btn picker-btn-secondary" onClick={dismiss} disabled={busy}>
+                Delete
+              </button>
             </div>
           </div>
         </div>
