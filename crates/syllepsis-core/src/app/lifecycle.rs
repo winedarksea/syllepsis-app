@@ -179,9 +179,28 @@ pub fn purge_expired(book: &Book, now: DateTime<Utc>) -> CoreResult<Vec<String>>
 }
 
 /// [`purge_expired`] as of the current wall clock — the entry point the shell calls on startup or
-/// from a "empty trash now" action.
+/// from a "sweep now" action.
 pub fn purge_expired_now(book: &Book) -> CoreResult<Vec<String>> {
     purge_expired(book, Utc::now())
+}
+
+/// Permanently remove every note that is marked for deletion, regardless of whether the
+/// configured delay has elapsed. Used when the user explicitly requests immediate purge.
+pub fn purge_all_trash(book: &Book) -> CoreResult<Vec<String>> {
+    let mut purged = Vec::new();
+    for note in book.store.read_all_notes()? {
+        if note.metadata.lifecycle.marked_for_deletion_at.is_some() {
+            book.delete_note(&note.id)?;
+            purged.push(note.id.to_string());
+        }
+    }
+    for note in book.read_all_commentary_notes()? {
+        if note.metadata.lifecycle.marked_for_deletion_at.is_some() {
+            book.delete_commentary_note(&note.id)?;
+            purged.push(note.id.to_string());
+        }
+    }
+    Ok(purged)
 }
 
 /// Whether a note has passed either expiry clock: the deletion-delay window after a

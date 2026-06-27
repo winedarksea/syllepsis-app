@@ -106,11 +106,23 @@
 .pv-undo:hover:not(:disabled) { border-color: var(--color-accent); }
 .pv-undo:disabled { opacity: 0.5; cursor: default; }
 
+.pv-section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.pv-confirm-inline {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
 .pv-link-btn {
   font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--color-accent);
   cursor: pointer;
 }
+.pv-link-btn--danger { color: var(--color-danger, #c0392b); }
 .pv-link-btn:hover:not(:disabled) { text-decoration: underline; }
 .pv-link-btn:disabled { opacity: 0.5; cursor: default; }

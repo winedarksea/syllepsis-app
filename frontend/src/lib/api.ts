@@ -217,6 +217,7 @@ export const api = {
   requestDeletion: (id: string) => invoke<NoteDto>('request_deletion', { id }),
   restoreNote: (id: string) => invoke<NoteDto>('restore_note', { id }),
   purgeExpired: () => invoke<string[]>('purge_expired'),
+  purgeAllTrash: () => invoke<string[]>('purge_all_trash'),
   deleteImageObjectNow: (id: string) => invoke<void>('delete_image_object_now', { id }),
 
   // Knowledge packs (Phase 6)

@@ -23,6 +23,7 @@ export function PrivacyView() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
 
   const load = useCallback(() => {
     api.policyOverview().then(setPolicy).catch((e) => setError(String(e)));
@@ -83,10 +84,27 @@ export function PrivacyView() {
         <section className="pv-section">
           <div className="pv-section-head">
             <h3 className="pv-section-title">Trash · pending deletion ({policy.pending_deletion.length})</h3>
-            <button className="pv-link-btn" disabled={busy}
-              onClick={() => act(async () => { const ids = await api.purgeExpired(); setNotice(`Purged ${ids.length} expired note${ids.length !== 1 ? 's' : ''}.`); })}>
-              Empty trash now
-            </button>
+            <div className="pv-section-actions">
+              <button className="pv-link-btn" disabled={busy}
+                onClick={() => act(async () => { const ids = await api.purgeExpired(); setNotice(`Swept ${ids.length} expired note${ids.length !== 1 ? 's' : ''}.`); })}>
+                Sweep now
+              </button>
+              {confirmDeleteAll ? (
+                <span className="pv-confirm-inline">
+                  Delete all {policy.pending_deletion.length} now?{' '}
+                  <button className="pv-link-btn pv-link-btn--danger" disabled={busy}
+                    onClick={() => act(async () => { const ids = await api.purgeAllTrash(); setConfirmDeleteAll(false); setNotice(`Permanently deleted ${ids.length} note${ids.length !== 1 ? 's' : ''}.`); })}>
+                    Confirm
+                  </button>
+                  {' '}
+                  <button className="pv-link-btn" disabled={busy} onClick={() => setConfirmDeleteAll(false)}>Cancel</button>
+                </span>
+              ) : (
+                <button className="pv-link-btn pv-link-btn--danger" disabled={busy} onClick={() => setConfirmDeleteAll(true)}>
+                  Delete immediately
+                </button>
+              )}
+            </div>
           </div>
           <p className="pv-hint">Marked for deletion; permanently removed after the delay. Restore to cancel.</p>
           {policy.pending_deletion.map((p) => (

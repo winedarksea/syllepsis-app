@@ -112,6 +112,18 @@ pub fn purge_expired(state: State<AppState>) -> Result<Vec<String>, String> {
     })
 }
 
+/// Permanently remove every note in the trash immediately, ignoring the configured delay.
+#[tauri::command]
+pub fn purge_all_trash(state: State<AppState>) -> Result<Vec<String>, String> {
+    with_book!(state, book, {
+        let purged = app::purge_all_trash(book).map_err(|e| e.to_string())?;
+        if !purged.is_empty() {
+            state.invalidate_graph_corpus();
+        }
+        Ok(purged)
+    })
+}
+
 /// Permanently delete a Picture/Drawing note and its tracked asset immediately.
 #[tauri::command]
 pub fn delete_image_object_now(state: State<AppState>, id: String) -> Result<(), String> {

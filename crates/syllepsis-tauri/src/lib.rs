@@ -191,6 +191,7 @@ pub fn run() {
             request_deletion,
             restore_note,
             purge_expired,
+            purge_all_trash,
             delete_image_object_now,
             // knowledge packs (Phase 6)
             export_pack,
