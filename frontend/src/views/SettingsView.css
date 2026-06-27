@@ -182,6 +182,7 @@
 }
 
 .sv-inline { display: flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
+.sv-inline .cloud-model-picker { display: flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
 
 /* ── Inputs ── */
 .sv-input {

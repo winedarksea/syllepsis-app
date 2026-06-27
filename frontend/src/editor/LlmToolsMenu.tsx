@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { Icon } from '../components/Icon';
+import { CloudLlmModelPicker } from '../components/CloudLlmModelPicker';
 import type {
   CloudLlmProviderDescriptor, LlmRouteStatus, LlmTask, ModelRef, QueuedLlmJobResult,
   RewriteMode, StyleCard, StylePerspective, StyleReadingLevel, StyleVerbosity, StyleVoice,
@@ -11,6 +12,7 @@ import type {
 } from '../types';
 
 const LOCAL_PROVIDER = 'local';
+const BUNDLED_LOCAL_MODEL = 'gemma-4-e2b';
 
 const TASKS: { task: LlmTask; label: string }[] = [
   { task: 'summarize', label: 'Generate summary' },
@@ -79,12 +81,19 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
 
   const modelOverride: ModelRef | null = useMemo(() => {
     if (!overrideProvider) return null;
-    return { provider: overrideProvider, model: overrideModel };
-  }, [overrideProvider, overrideModel]);
+    return {
+      provider: overrideProvider,
+      model: overrideProvider === LOCAL_PROVIDER
+        ? route?.provider === LOCAL_PROVIDER ? route.model : BUNDLED_LOCAL_MODEL
+        : overrideModel.trim(),
+    };
+  }, [overrideProvider, overrideModel, route]);
 
   const displayModel = modelOverride ?? (route ? { provider: route.provider, model: route.model } : null);
   const supportsSummaryOptions = task === 'summarize';
   const supportsStyleOptions = task === 'rewrite' || task === 'generate_from_summary';
+  const cloudOverrideModelMissing = overrideProvider !== '' && overrideProvider !== LOCAL_PROVIDER && !overrideModel.trim();
+  const canQueue = !!route && !busy && !cloudOverrideModelMissing && (overrideProvider !== '' || route.available !== false);
 
   // Seed structured overrides when the selected card changes
   useEffect(() => {
@@ -202,10 +211,12 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
               {overrideProvider && overrideProvider !== LOCAL_PROVIDER && (
                 <label className="llm-tool-field">
                   <span>Model</span>
-                  <input
+                  <CloudLlmModelPicker
+                    key={overrideProvider}
+                    provider={overrideProvider}
                     value={overrideModel}
-                    onChange={(e) => setOverrideModel(e.target.value)}
-                    placeholder="model name"
+                    onChange={setOverrideModel}
+                    modelPlaceholder="model name"
                   />
                 </label>
               )}
@@ -296,7 +307,7 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
               <button className="picker-btn picker-btn-secondary" onClick={() => setOpen(false)} disabled={busy}>
                 Cancel
               </button>
-              <button className="picker-btn picker-btn-primary" onClick={enqueue} disabled={busy || route?.available === false}>
+              <button className="picker-btn picker-btn-primary" onClick={enqueue} disabled={!canQueue}>
                 {busy ? 'Queueing...' : 'Queue job'}
               </button>
             </div>

@@ -595,10 +595,15 @@ export interface CloudLlmProviderSettings {
   base_url?: string | null;
 }
 
+export interface CloudLlmModel {
+  id: string;
+}
+
 export interface CloudLlmConnectionTestResult {
   provider: string;
   display_name: string;
   model_count: number;
+  models: CloudLlmModel[];
   authentication_status: 'verified' | 'not_required' | 'not_tested' | 'inconclusive';
 }
 

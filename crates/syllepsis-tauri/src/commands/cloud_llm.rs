@@ -7,6 +7,7 @@
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::time::{Duration, SystemTime};
 use tauri::State;
 
 use syllepsis_core::app::llm::{self as app, CloudLlmCompletion, CloudLlmPrompt};
@@ -14,7 +15,7 @@ use syllepsis_core::config::ModelRef;
 use syllepsis_core::llm::prompts::LlmTaskOptions;
 use syllepsis_core::llm::{LlmTask, Proposal};
 
-use crate::state::AppState;
+use crate::state::{AppState, CachedCloudLlmCredentials, CachedCloudLlmModels};
 
 const KEYCHAIN_SERVICE: &str = "syllepsis.llm";
 const API_KEY_FIELD: &str = "api-key";
@@ -24,6 +25,7 @@ const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: u32 = 2048;
 const CONNECTION_TEST_TIMEOUT_SECONDS: u64 = 15;
+const MODEL_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CloudLlmProviderDescriptor {
@@ -42,10 +44,16 @@ pub struct CloudLlmProviderSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloudLlmModel {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CloudLlmConnectionTestResult {
     pub provider: String,
     pub display_name: String,
     pub model_count: usize,
+    pub models: Vec<CloudLlmModel>,
     pub authentication_status: CloudLlmAuthenticationStatus,
 }
 
@@ -122,28 +130,64 @@ pub fn cloud_llm_provider_descriptors() -> Vec<CloudLlmProviderDescriptor> {
 
 /// Save or clear provider credentials in the OS keychain.
 #[tauri::command]
-pub fn save_cloud_llm_provider_settings(settings: CloudLlmProviderSettings) -> Result<(), String> {
+pub fn save_cloud_llm_provider_settings(
+    state: State<AppState>,
+    settings: CloudLlmProviderSettings,
+) -> Result<(), String> {
     let mut store = KeyringCredentialStore;
-    save_settings(&mut store, settings)
+    save_settings(&mut store, settings.clone())?;
+    merge_cached_credentials(&state, settings);
+    Ok(())
 }
 
 /// Clear all credential fields for a provider.
 #[tauri::command]
-pub fn clear_cloud_llm_provider_settings(provider: String) -> Result<(), String> {
+pub fn clear_cloud_llm_provider_settings(
+    state: State<AppState>,
+    provider: String,
+) -> Result<(), String> {
     let mut store = KeyringCredentialStore;
-    clear_settings(&mut store, &provider)
+    clear_settings(&mut store, &provider)?;
+    state
+        .cloud_llm_credentials
+        .lock()
+        .unwrap()
+        .remove(&provider);
+    state.cloud_llm_models.lock().unwrap().remove(&provider);
+    Ok(())
 }
 
 /// Validate draft or stored credentials with a model-list request that consumes no LLM tokens.
 #[tauri::command]
 pub fn test_cloud_llm_provider_connection(
+    state: State<AppState>,
     settings: CloudLlmProviderSettings,
 ) -> Result<CloudLlmConnectionTestResult, String> {
-    test_connection(&KeyringCredentialStore, settings)
+    let result = test_connection(&state, &KeyringCredentialStore, settings)?;
+    cache_cloud_models(&state, &result.provider, &result.models);
+    Ok(result)
 }
 
-pub(crate) fn cloud_provider_is_configured(provider: &str) -> Result<bool, String> {
-    provider_is_configured(&KeyringCredentialStore, provider)
+/// Return cached provider models or refresh them from stored credentials when stale.
+#[tauri::command]
+pub fn list_cloud_llm_provider_models(
+    state: State<AppState>,
+    provider: String,
+) -> Result<Vec<CloudLlmModel>, String> {
+    descriptor_for(&provider)?;
+    if let Some(models) = cached_cloud_models(&state, &provider) {
+        return Ok(models);
+    }
+    let models = list_provider_models(&state, &KeyringCredentialStore, &provider)?;
+    cache_cloud_models(&state, &provider, &models);
+    Ok(models)
+}
+
+pub(crate) fn cloud_provider_is_configured(
+    state: &AppState,
+    provider: &str,
+) -> Result<bool, String> {
+    provider_is_configured(state, &KeyringCredentialStore, provider)
 }
 
 /// Generate a proposal through a configured cloud or OpenAI-compatible local server.
@@ -178,7 +222,7 @@ pub(crate) fn generate_cloud_proposal_for_state(
         app::prepare_cloud_prompt_with_options(book, &note_id, task, model_override, options)
             .map_err(|e| e.to_string())?
     };
-    let content = execute_cloud_prompt(&KeyringCredentialStore, &prompt)?;
+    let content = execute_cloud_prompt(state, &KeyringCredentialStore, &prompt)?;
     proposal_from_completed_prompt(state, prompt, content)
 }
 
@@ -242,11 +286,13 @@ fn descriptor_for(provider: &str) -> Result<CloudLlmProviderDescriptor, String> 
 }
 
 fn test_connection(
+    state: &AppState,
     store: &impl CredentialStore,
     settings: CloudLlmProviderSettings,
 ) -> Result<CloudLlmConnectionTestResult, String> {
     let descriptor = descriptor_for(&settings.provider)?;
-    let credentials = credentials_with_draft_overrides(store, &settings)?;
+    let credentials = credentials_with_draft_overrides(state, store, &settings)?;
+    cache_credentials(state, &settings.provider, &credentials);
     let request = build_connection_test_request(&settings.provider, &credentials)?;
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(
@@ -270,31 +316,73 @@ fn test_connection(
             descriptor.display_name
         )
     })?;
-    let model_count = parse_model_count(&descriptor.display_name, &json)?;
+    let models = parse_models(&descriptor.display_name, &json)?;
     let authentication_status = determine_authentication_status(&client, &request, &credentials);
 
     Ok(CloudLlmConnectionTestResult {
         provider: descriptor.provider,
         display_name: descriptor.display_name,
-        model_count,
+        model_count: models.len(),
+        models,
         authentication_status,
     })
 }
 
+fn list_provider_models(
+    state: &AppState,
+    store: &impl CredentialStore,
+    provider: &str,
+) -> Result<Vec<CloudLlmModel>, String> {
+    let descriptor = descriptor_for(provider)?;
+    let credentials = credentials_for(state, store, provider)?;
+    let request = build_connection_test_request(provider, &credentials)?;
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            CONNECTION_TEST_TIMEOUT_SECONDS,
+        ))
+        .build()
+        .map_err(|e| format!("create LLM model-list client: {e}"))?;
+    let response = send_connection_test_request(&client, &request)
+        .map_err(|e| format!("connect to {}: {e}", descriptor.display_name))?;
+    if !response.status.is_success() {
+        return Err(format!(
+            "{} returned HTTP {}: {}",
+            descriptor.display_name,
+            response.status.as_u16(),
+            truncate_for_error(&response.body)
+        ));
+    }
+    let json: Value = serde_json::from_str(&response.body).map_err(|e| {
+        format!(
+            "parse {} model-list response JSON: {e}",
+            descriptor.display_name
+        )
+    })?;
+    parse_models(&descriptor.display_name, &json)
+}
+
 fn credentials_with_draft_overrides(
+    state: &AppState,
     store: &impl CredentialStore,
     settings: &CloudLlmProviderSettings,
 ) -> Result<CloudLlmCredentials, String> {
     descriptor_for(&settings.provider)?;
+    let cached = cached_credentials(state, &settings.provider);
     Ok(CloudLlmCredentials {
         api_key: credential_field_with_draft_override(
             store,
             &account(&settings.provider, API_KEY_FIELD),
+            cached
+                .as_ref()
+                .and_then(|credentials| credentials.api_key.clone()),
             settings.api_key.as_ref(),
         )?,
         base_url: credential_field_with_draft_override(
             store,
             &account(&settings.provider, BASE_URL_FIELD),
+            cached
+                .as_ref()
+                .and_then(|credentials| credentials.base_url.clone()),
             settings.base_url.as_ref(),
         )?,
     })
@@ -303,11 +391,15 @@ fn credentials_with_draft_overrides(
 fn credential_field_with_draft_override(
     store: &impl CredentialStore,
     account: &str,
+    cached_value: Option<String>,
     draft_value: Option<&String>,
 ) -> Result<Option<String>, String> {
     match draft_value {
         Some(value) => Ok(trimmed_secret(Some(value.clone()))),
-        None => Ok(trimmed_secret(store.get(account)?)),
+        None => match cached_value {
+            Some(value) => Ok(trimmed_secret(Some(value))),
+            None => Ok(trimmed_secret(store.get(account)?)),
+        },
     }
 }
 
@@ -350,12 +442,49 @@ fn build_connection_test_request(
     }
 }
 
-fn parse_model_count(display_name: &str, response: &Value) -> Result<usize, String> {
-    response
+fn parse_models(display_name: &str, response: &Value) -> Result<Vec<CloudLlmModel>, String> {
+    let data = response
         .get("data")
         .and_then(Value::as_array)
-        .map(Vec::len)
-        .ok_or_else(|| format!("{display_name} model-list response did not include a data array"))
+        .ok_or_else(|| {
+            format!("{display_name} model-list response did not include a data array")
+        })?;
+    Ok(data
+        .iter()
+        .filter_map(|model| {
+            model
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(|id| CloudLlmModel { id: id.to_string() })
+        })
+        .collect())
+}
+
+fn cache_cloud_models(state: &AppState, provider: &str, models: &[CloudLlmModel]) {
+    state.cloud_llm_models.lock().unwrap().insert(
+        provider.to_string(),
+        CachedCloudLlmModels {
+            model_ids: models.iter().map(|model| model.id.clone()).collect(),
+            fetched_at: SystemTime::now(),
+        },
+    );
+}
+
+fn cached_cloud_models(state: &AppState, provider: &str) -> Option<Vec<CloudLlmModel>> {
+    let cache = state.cloud_llm_models.lock().unwrap();
+    let entry = cache.get(provider)?;
+    if entry.fetched_at.elapsed().ok()? > MODEL_CACHE_TTL {
+        return None;
+    }
+    Some(
+        entry
+            .model_ids
+            .iter()
+            .map(|id| CloudLlmModel { id: id.clone() })
+            .collect(),
+    )
 }
 
 struct CloudLlmConnectionTestResponse {
@@ -419,10 +548,11 @@ fn classify_unauthenticated_response(
 }
 
 fn execute_cloud_prompt(
+    state: &AppState,
     store: &impl CredentialStore,
     prompt: &CloudLlmPrompt,
 ) -> Result<String, String> {
-    let credentials = credentials_for(store, &prompt.provider)?;
+    let credentials = credentials_for(state, store, &prompt.provider)?;
     let request = build_provider_request(prompt, &credentials)?;
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(120))
@@ -476,22 +606,96 @@ fn completion_from_prompt(prompt: CloudLlmPrompt, content: String) -> CloudLlmCo
 }
 
 fn credentials_for(
+    state: &AppState,
     store: &impl CredentialStore,
     provider: &str,
 ) -> Result<CloudLlmCredentials, String> {
     descriptor_for(provider)?;
-    Ok(CloudLlmCredentials {
+    if let Some(credentials) = cached_credentials(state, provider) {
+        return Ok(credentials);
+    }
+    let credentials = CloudLlmCredentials {
         api_key: trimmed_secret(store.get(&account(provider, API_KEY_FIELD))?),
         base_url: trimmed_secret(store.get(&account(provider, BASE_URL_FIELD))?),
+    };
+    cache_credentials(state, provider, &credentials);
+    Ok(credentials)
+}
+
+fn provider_is_configured(
+    state: &AppState,
+    store: &impl CredentialStore,
+    provider: &str,
+) -> Result<bool, String> {
+    descriptor_for(provider)?;
+    if let Some(credentials) = cached_credentials(state, provider) {
+        return Ok(match provider {
+            "anthropic" => credentials.api_key.is_some(),
+            "openai_compatible" => credentials.base_url.is_some(),
+            provider => return Err(format!("unknown cloud LLM provider: {provider}")),
+        });
+    }
+    match provider {
+        "anthropic" => {
+            let api_key = trimmed_secret(store.get(&account(provider, API_KEY_FIELD))?);
+            let configured = api_key.is_some();
+            if configured {
+                cache_credentials(
+                    state,
+                    provider,
+                    &CloudLlmCredentials {
+                        api_key,
+                        base_url: None,
+                    },
+                );
+            }
+            Ok(configured)
+        }
+        "openai_compatible" => {
+            let base_url = trimmed_secret(store.get(&account(provider, BASE_URL_FIELD))?);
+            let configured = base_url.is_some();
+            if configured {
+                let api_key = trimmed_secret(store.get(&account(provider, API_KEY_FIELD))?);
+                cache_credentials(state, provider, &CloudLlmCredentials { api_key, base_url });
+            }
+            Ok(configured)
+        }
+        provider => Err(format!("unknown cloud LLM provider: {provider}")),
+    }
+}
+
+fn cached_credentials(state: &AppState, provider: &str) -> Option<CloudLlmCredentials> {
+    let cache = state.cloud_llm_credentials.lock().unwrap();
+    let credentials = cache.get(provider)?;
+    Some(CloudLlmCredentials {
+        api_key: credentials.api_key.clone(),
+        base_url: credentials.base_url.clone(),
     })
 }
 
-fn provider_is_configured(store: &impl CredentialStore, provider: &str) -> Result<bool, String> {
-    let credentials = credentials_for(store, provider)?;
-    match provider {
-        "anthropic" => Ok(credentials.api_key.is_some()),
-        "openai_compatible" => Ok(credentials.base_url.is_some()),
-        provider => Err(format!("unknown cloud LLM provider: {provider}")),
+fn cache_credentials(state: &AppState, provider: &str, credentials: &CloudLlmCredentials) {
+    state.cloud_llm_credentials.lock().unwrap().insert(
+        provider.to_string(),
+        CachedCloudLlmCredentials {
+            api_key: credentials.api_key.clone(),
+            base_url: credentials.base_url.clone(),
+        },
+    );
+}
+
+fn merge_cached_credentials(state: &AppState, settings: CloudLlmProviderSettings) {
+    let mut cache = state.cloud_llm_credentials.lock().unwrap();
+    let entry = cache
+        .entry(settings.provider)
+        .or_insert_with(|| CachedCloudLlmCredentials {
+            api_key: None,
+            base_url: None,
+        });
+    if let Some(api_key) = settings.api_key {
+        entry.api_key = trimmed_secret(Some(api_key));
+    }
+    if let Some(base_url) = settings.base_url {
+        entry.base_url = trimmed_secret(Some(base_url));
     }
 }
 
@@ -735,9 +939,10 @@ mod tests {
 
     #[test]
     fn provider_readiness_matches_required_credential_fields() {
+        let state = AppState::new();
         let mut store = MemoryCredentialStore::default();
-        assert!(!provider_is_configured(&store, "anthropic").unwrap());
-        assert!(!provider_is_configured(&store, "openai_compatible").unwrap());
+        assert!(!provider_is_configured(&state, &store, "anthropic").unwrap());
+        assert!(!provider_is_configured(&state, &store, "openai_compatible").unwrap());
 
         store
             .set(&account("anthropic", API_KEY_FIELD), "sk-secret")
@@ -749,8 +954,43 @@ mod tests {
             )
             .unwrap();
 
-        assert!(provider_is_configured(&store, "anthropic").unwrap());
-        assert!(provider_is_configured(&store, "openai_compatible").unwrap());
+        assert!(provider_is_configured(&state, &store, "anthropic").unwrap());
+        assert!(provider_is_configured(&state, &store, "openai_compatible").unwrap());
+    }
+
+    #[test]
+    fn model_parser_extracts_ids_and_ignores_malformed_items() {
+        let models = parse_models(
+            "OpenAI-compatible",
+            &json!({
+                "data": [
+                    { "id": "gpt-5.4-mini" },
+                    { "object": "model" },
+                    { "id": "  claude-sonnet-4-6  " },
+                    { "id": "" }
+                ]
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            models,
+            vec![
+                CloudLlmModel {
+                    id: "gpt-5.4-mini".to_string()
+                },
+                CloudLlmModel {
+                    id: "claude-sonnet-4-6".to_string()
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn model_parser_rejects_missing_data_array() {
+        let err = parse_models("OpenAI-compatible", &json!({ "object": "list" })).unwrap_err();
+
+        assert!(err.contains("did not include a data array"));
     }
 
     #[test]
@@ -838,6 +1078,7 @@ mod tests {
 
     #[test]
     fn connection_test_uses_draft_values_without_mutating_stored_credentials() {
+        let state = AppState::new();
         let mut store = MemoryCredentialStore::default();
         store
             .set(
@@ -847,6 +1088,7 @@ mod tests {
             .unwrap();
 
         let credentials = credentials_with_draft_overrides(
+            &state,
             &store,
             &CloudLlmProviderSettings {
                 provider: "openai_compatible".to_string(),
@@ -899,14 +1141,21 @@ mod tests {
     #[test]
     fn connection_test_requires_a_model_list_response() {
         assert_eq!(
-            parse_model_count(
+            parse_models(
                 "Provider",
                 &json!({ "data": [{ "id": "a" }, { "id": "b" }] })
             )
             .unwrap(),
-            2
+            vec![
+                CloudLlmModel {
+                    id: "a".to_string()
+                },
+                CloudLlmModel {
+                    id: "b".to_string()
+                }
+            ]
         );
-        assert!(parse_model_count("Provider", &json!({ "models": [] }))
+        assert!(parse_models("Provider", &json!({ "models": [] }))
             .unwrap_err()
             .contains("did not include a data array"));
     }

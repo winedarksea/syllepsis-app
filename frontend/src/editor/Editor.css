@@ -559,6 +559,11 @@
   font: inherit;
 }
 
+.llm-tool-field .cloud-model-picker {
+  display: grid;
+  gap: var(--sp-2);
+}
+
 .llm-tool-checkbox {
   display: inline-flex;
   align-items: center;

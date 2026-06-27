@@ -120,34 +120,6 @@ export function CommentaryPanel({
     }
   }, [onApplied, refresh, selected]);
 
-  const dismiss = useCallback(async () => {
-    if (!selected) return;
-    setBusy(true);
-    try {
-      await api.dismissCommentary(selected.id);
-      setSelectedId(null);
-      refresh();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [refresh, selected]);
-
-  const pin = useCallback(async () => {
-    if (!selected) return;
-    setBusy(true);
-    try {
-      await api.pinCommentary(selected.id);
-      setSelectedId(null);
-      refresh();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [refresh, selected]);
-
   return (
     <>
       <aside className="commentary-panel" aria-label="Commentary">
@@ -219,12 +191,6 @@ export function CommentaryPanel({
                   )}
                 </>
               )}
-              <button className="picker-btn picker-btn-secondary" onClick={pin} disabled={busy}>
-                Pin
-              </button>
-              <button className="picker-btn picker-btn-secondary" onClick={dismiss} disabled={busy}>
-                Dismiss
-              </button>
             </div>
           </div>
         </div>

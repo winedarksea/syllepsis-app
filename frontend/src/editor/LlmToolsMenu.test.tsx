@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { LlmToolsMenu } from './LlmToolsMenu';
+import type { QueuedLlmJobRequest } from '../types';
 
 const mocks = vi.hoisted(() => ({
+  listCloudLlmProviderModels: vi.fn(async () => [{ id: 'gpt-5.4-mini' }]),
   enqueueLlmJob: vi.fn(async () => ({
     job_id: 'job-1',
     status: 'queued',
@@ -31,7 +33,14 @@ vi.mock('../lib/api', () => ({
         available: true,
       },
     ]),
-    cloudLlmProviderDescriptors: vi.fn(async () => []),
+    cloudLlmProviderDescriptors: vi.fn(async () => [
+      {
+        provider: 'openai_compatible',
+        display_name: 'OpenAI-compatible',
+        base_url_required: true,
+      },
+    ]),
+    listCloudLlmProviderModels: mocks.listCloudLlmProviderModels,
     listStyleCards: vi.fn(async () => [
       {
         id: 'style-1',
@@ -55,7 +64,17 @@ vi.mock('../components/Icon', () => ({
   Icon: ({ name }: { name: string }) => <span aria-hidden="true">{name}</span>,
 }));
 
+function lastQueuedRequest(): QueuedLlmJobRequest {
+  const calls = mocks.enqueueLlmJob.mock.calls as unknown as Array<[QueuedLlmJobRequest]>;
+  return calls[calls.length - 1]![0];
+}
+
 describe('LlmToolsMenu', () => {
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
   it('serializes rewrite options into a queued job request', async () => {
     render(<LlmToolsMenu noteId="note-1" />);
 
@@ -87,6 +106,54 @@ describe('LlmToolsMenu', () => {
       summary_variant: 'plain',
       rewrite_mode: 'simplify',
       store_result_as_commentary: true,
+    });
+  });
+
+  it('serializes a selected cloud model override into a queued job request', async () => {
+    render(<LlmToolsMenu noteId="note-1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /tools/i }));
+    await screen.findByLabelText(/tool/i);
+    fireEvent.change(screen.getByLabelText(/provider override/i), {
+      target: { value: 'openai_compatible' },
+    });
+
+    const modelSelect = await screen.findByRole('combobox', { name: /^model$/i });
+    await waitFor(() => expect(mocks.listCloudLlmProviderModels).toHaveBeenCalledWith('openai_compatible'));
+    await screen.findByText('gpt-5.4-mini');
+    fireEvent.change(modelSelect, { target: { value: 'gpt-5.4-mini' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /queue job/i }));
+
+    await waitFor(() => expect(mocks.enqueueLlmJob).toHaveBeenCalledTimes(1));
+    expect(lastQueuedRequest().model_override).toEqual({
+      provider: 'openai_compatible',
+      model: 'gpt-5.4-mini',
+    });
+  });
+
+  it('serializes a custom cloud model override into a queued job request', async () => {
+    render(<LlmToolsMenu noteId="note-1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /tools/i }));
+    await screen.findByLabelText(/tool/i);
+    fireEvent.change(screen.getByLabelText(/provider override/i), {
+      target: { value: 'openai_compatible' },
+    });
+
+    const modelSelect = await screen.findByRole('combobox', { name: /^model$/i });
+    await screen.findByText('Custom model...');
+    fireEvent.change(modelSelect, { target: { value: '__custom_model__' } });
+    fireEvent.change(screen.getByPlaceholderText(/model name/i), {
+      target: { value: 'gpt-5.4-lab' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /queue job/i }));
+
+    await waitFor(() => expect(mocks.enqueueLlmJob).toHaveBeenCalledTimes(1));
+    expect(lastQueuedRequest().model_override).toEqual({
+      provider: 'openai_compatible',
+      model: 'gpt-5.4-lab',
     });
   });
 });

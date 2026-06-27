@@ -4,6 +4,7 @@ use crate::local_ai::LocalAiWorker;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use syllepsis_core::app::llm::QueuedLlmJobResult;
 use syllepsis_core::graph_analysis::{
     current_corpus_fingerprint, GraphAnalysisRequest, GraphAnalysisResult, SemanticGraphCorpus,
@@ -24,6 +25,16 @@ pub struct QueuedLlmJobRecord {
     pub dismissed: bool,
 }
 
+pub struct CachedCloudLlmModels {
+    pub model_ids: Vec<String>,
+    pub fetched_at: SystemTime,
+}
+
+pub struct CachedCloudLlmCredentials {
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+}
+
 /// The single app-level state. The open book is behind a Mutex; `None` means no book
 /// is open yet (the user hasn't opened or created one in this session).
 pub struct AppState {
@@ -32,6 +43,8 @@ pub struct AppState {
     pub file_watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub local_ai: LocalAiWorker,
     pub llm_jobs: Arc<Mutex<HashMap<String, QueuedLlmJobRecord>>>,
+    pub cloud_llm_models: Arc<Mutex<HashMap<String, CachedCloudLlmModels>>>,
+    pub cloud_llm_credentials: Arc<Mutex<HashMap<String, CachedCloudLlmCredentials>>>,
 }
 
 impl AppState {
@@ -42,6 +55,8 @@ impl AppState {
             file_watcher: Mutex::new(None),
             local_ai: LocalAiWorker::new(),
             llm_jobs: Arc::new(Mutex::new(HashMap::new())),
+            cloud_llm_models: Arc::new(Mutex::new(HashMap::new())),
+            cloud_llm_credentials: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

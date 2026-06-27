@@ -11,7 +11,7 @@ use syllepsis_core::app::llm::{
 };
 use syllepsis_core::config::ModelRef;
 use syllepsis_core::llm::prompts::{LlmTaskOptions, PromptStyleCard};
-use syllepsis_core::llm::{LlmTask, Proposal};
+use syllepsis_core::llm::{LlmTask, Proposal, LOCAL_PROVIDER};
 use syllepsis_core::onnx::{self, FileIntegrity, ModelCache, ModelCacheStatus, ModelManifest};
 
 use crate::commands::cloud_llm::cloud_provider_is_configured;
@@ -40,6 +40,12 @@ macro_rules! with_book {
     }};
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EffectiveLlmExecution {
+    Local { model_ref: ModelRef },
+    Cloud { model_ref: ModelRef },
+}
+
 /// Current LLM provider/config status for the management view.
 #[tauri::command]
 pub fn llm_status(state: State<AppState>) -> Result<LlmStatus, String> {
@@ -54,7 +60,7 @@ pub fn llm_route_statuses(state: State<AppState>) -> Result<Vec<LlmRouteStatus>,
             .into_iter()
             .map(|mut route| {
                 if route.execution_mode == app::LlmExecutionMode::Cloud {
-                    route.available = cloud_provider_is_configured(&route.provider)?;
+                    route.available = cloud_provider_is_configured(&state, &route.provider)?;
                 }
                 Ok(route)
             })
@@ -303,33 +309,15 @@ fn run_queued_llm_job_inner(
     request: &QueuedLlmJobRequest,
     options: &LlmTaskOptions,
 ) -> Result<Proposal, String> {
-    let route = {
-        let guard = state.book.lock().unwrap();
-        let book = guard
-            .as_ref()
-            .ok_or_else(|| "no book is open".to_string())?;
-        app::llm_route_statuses(book)
-            .into_iter()
-            .find(|route| route.task == request.task)
-            .ok_or_else(|| format!("no LLM route for {}", request.task.as_str()))?
-    };
-    if !route.available {
-        return Err(format!(
-            "No runnable LLM is configured for {} via {}/{}.",
-            request.task.as_str(),
-            route.provider,
-            route.model
-        ));
-    }
-    match route.execution_mode {
-        app::LlmExecutionMode::Cloud => cloud_llm::generate_cloud_proposal_for_state(
+    match effective_llm_execution(state, request.task, request.model_override.clone())? {
+        EffectiveLlmExecution::Cloud { model_ref } => cloud_llm::generate_cloud_proposal_for_state(
             state,
             request.target_note_id.clone(),
             request.task,
-            request.model_override.clone(),
+            Some(model_ref),
             options,
         ),
-        app::LlmExecutionMode::Local => {
+        EffectiveLlmExecution::Local { model_ref } => {
             let (book_root, models_root) = {
                 let guard = state.book.lock().unwrap();
                 let book = guard
@@ -346,15 +334,84 @@ fn run_queued_llm_job_inner(
                 models_root,
                 request.target_note_id.clone(),
                 request.task,
-                request.model_override.clone(),
+                Some(model_ref),
                 options.clone(),
             )
         }
-        app::LlmExecutionMode::Disabled | app::LlmExecutionMode::Unavailable => Err(format!(
-            "No runnable LLM is configured for {}.",
-            request.task.as_str()
-        )),
     }
+}
+
+fn effective_llm_execution(
+    state: &AppState,
+    task: LlmTask,
+    model_override: Option<ModelRef>,
+) -> Result<EffectiveLlmExecution, String> {
+    let model_ref = {
+        let guard = state.book.lock().unwrap();
+        let book = guard
+            .as_ref()
+            .ok_or_else(|| "no book is open".to_string())?;
+        if !book.config.llm.enabled {
+            return Err(format!(
+                "No runnable LLM is configured for {}.",
+                task.as_str()
+            ));
+        }
+        model_override.unwrap_or_else(|| task.model_ref(&book.config.llm.routing).clone())
+    };
+
+    if model_ref.provider == LOCAL_PROVIDER {
+        ensure_local_model_available(state, task, &model_ref)?;
+        return Ok(EffectiveLlmExecution::Local { model_ref });
+    }
+    if model_ref.provider == "offline" {
+        return Err(format!(
+            "No runnable LLM is configured for {} via {}/{}.",
+            task.as_str(),
+            model_ref.provider,
+            model_ref.model
+        ));
+    }
+    if !cloud_provider_is_configured(state, &model_ref.provider)? {
+        return Err(format!(
+            "No runnable LLM is configured for {} via {}/{}.",
+            task.as_str(),
+            model_ref.provider,
+            model_ref.model
+        ));
+    }
+    Ok(EffectiveLlmExecution::Cloud { model_ref })
+}
+
+fn ensure_local_model_available(
+    state: &AppState,
+    task: LlmTask,
+    model_ref: &ModelRef,
+) -> Result<(), String> {
+    let guard = state.book.lock().unwrap();
+    let book = guard
+        .as_ref()
+        .ok_or_else(|| "no book is open".to_string())?;
+    let Some(models_root) = book.models_root() else {
+        return Err("local model directory unavailable".to_string());
+    };
+    let Some(model_manifest) = onnx::manifest::builtin(&model_ref.model) else {
+        return Err(format!(
+            "No runnable LLM is configured for {} via {}/{}.",
+            task.as_str(),
+            model_ref.provider,
+            model_ref.model
+        ));
+    };
+    if !ModelCache::new(models_root).is_cached(&model_manifest) {
+        return Err(format!(
+            "No runnable LLM is configured for {} via {}/{}.",
+            task.as_str(),
+            model_ref.provider,
+            model_ref.model
+        ));
+    }
+    Ok(())
 }
 
 fn update_job_status(
@@ -387,18 +444,29 @@ pub async fn generate_proposal(
 ) -> Result<Proposal, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        with_book!(state, book, {
-            state.local_ai.submit_llm(
-                book,
-                note_id,
-                task,
-                model_override,
-                LlmTaskOptions::default(),
-            )
-        })
+        match effective_llm_execution(&state, task, model_override)? {
+            EffectiveLlmExecution::Cloud { model_ref } => {
+                cloud_llm::generate_cloud_proposal_for_state(
+                    &state,
+                    note_id,
+                    task,
+                    Some(model_ref),
+                    &LlmTaskOptions::default(),
+                )
+            }
+            EffectiveLlmExecution::Local { model_ref } => with_book!(state, book, {
+                state.local_ai.submit_llm(
+                    book,
+                    note_id,
+                    task,
+                    Some(model_ref),
+                    LlmTaskOptions::default(),
+                )
+            }),
+        }
     })
     .await
-    .map_err(|error| format!("local LLM worker failed: {error}"))?
+    .map_err(|error| format!("LLM worker failed: {error}"))?
 }
 
 /// Prepare a routed prompt for shell-owned cloud/local-server execution.

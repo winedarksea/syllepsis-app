@@ -26,6 +26,7 @@ import {
 import { getIconSet } from '../theme/icons/sets';
 import { Icon, useThemeStyle } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
+import { CloudLlmModelPicker } from '../components/CloudLlmModelPicker';
 import './SettingsView.css';
 
 // Evocative section sub-text, varying by the active theme's flavor language.
@@ -309,10 +310,10 @@ function Field({ label, hint, children }: { label: string; hint?: React.ReactNod
   );
 }
 
-function SaveBar({ saving, dirty, onSave }: { saving: boolean; dirty: boolean; onSave: () => void }) {
+function SaveBar({ saving, dirty, disabled = false, onSave }: { saving: boolean; dirty: boolean; disabled?: boolean; onSave: () => void }) {
   return (
     <div className="sv-savebar">
-      <button className="sv-btn sv-btn-primary" disabled={saving || !dirty} onClick={onSave}>
+      <button className="sv-btn sv-btn-primary" disabled={saving || disabled || !dirty} onClick={onSave}>
         {saving ? 'Saving…' : 'Save'}
       </button>
     </div>
@@ -653,7 +654,7 @@ function CloudProvidersPanel({ descriptors, onChanged, onError }: {
 
 // ── Default model & behavior (book-level llm config) ────────────────────────────
 
-function LlmDefaultsPanel({ config, providers, onSaved, onError }: {
+export function LlmDefaultsPanel({ config, providers, onSaved, onError }: {
   config: BookConfig;
   providers: CloudLlmProviderDescriptor[];
   onSaved: (llm: LlmConfig) => void;
@@ -678,6 +679,7 @@ function LlmDefaultsPanel({ config, providers, onSaved, onError }: {
 
   const save = useCallback(async () => {
     const isLocal = provider === LOCAL_PROVIDER;
+    if (!isLocal && !model.trim()) return;
     const ref: ModelRef = { provider, model: isLocal ? llm.local_model : model.trim() };
     const next: LlmConfig = {
       ...llm,
@@ -720,11 +722,14 @@ function LlmDefaultsPanel({ config, providers, onSaved, onError }: {
             ))}
           </select>
           {!isLocal && (
-            <input
-              className="sv-input"
-              placeholder="Model name (e.g. claude-sonnet-4-6)"
+            <CloudLlmModelPicker
+              key={provider}
+              provider={provider}
               value={model}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={setModel}
+              selectClassName="sv-input"
+              inputClassName="sv-input"
+              modelPlaceholder="Model name (e.g. claude-sonnet-4-6)"
             />
           )}
         </div>
@@ -735,7 +740,7 @@ function LlmDefaultsPanel({ config, providers, onSaved, onError }: {
       <Field label="Max new tokens" hint="Upper bound on local generation length (bounds latency on CPU).">
         <NumberInput value={maxTokens} onChange={setMaxTokens} step={64} />
       </Field>
-      <SaveBar saving={saving} dirty={dirty} onSave={save} />
+      <SaveBar saving={saving} dirty={dirty} disabled={!isLocal && !model.trim()} onSave={save} />
     </div>
   );
 }

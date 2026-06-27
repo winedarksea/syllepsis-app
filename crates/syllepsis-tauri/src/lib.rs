@@ -132,6 +132,7 @@ pub fn run() {
             save_cloud_llm_provider_settings,
             clear_cloud_llm_provider_settings,
             test_cloud_llm_provider_connection,
+            list_cloud_llm_provider_models,
             generate_cloud_proposal,
             generate_proposal,
             enqueue_llm_job,

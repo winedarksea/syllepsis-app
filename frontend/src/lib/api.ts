@@ -8,7 +8,7 @@ import type {
   SearchResults, RelatedNote, EmbeddingDiagnostics, CategoryEmbeddingStats,
   GraphAnalysisRequest, GraphAnalysisResult,
   LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, QueuedLlmJobRequest, QueuedLlmJobResult, CloudLlmPrompt, CloudLlmCompletion,
-  CloudLlmConnectionTestResult, CloudLlmProviderDescriptor, CloudLlmProviderSettings,
+  CloudLlmConnectionTestResult, CloudLlmModel, CloudLlmProviderDescriptor, CloudLlmProviderSettings,
   ModelManifest, ModelCacheStatus, ModelDownloadReport,
   BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig,
   EmbeddingConfig, LocalAiDevicePolicy, LocalAiStatus,
@@ -144,6 +144,8 @@ export const api = {
     invoke<void>('clear_cloud_llm_provider_settings', { provider }),
   testCloudLlmProviderConnection: (settings: CloudLlmProviderSettings) =>
     invoke<CloudLlmConnectionTestResult>('test_cloud_llm_provider_connection', { settings }),
+  listCloudLlmProviderModels: (provider: string) =>
+    invoke<CloudLlmModel[]>('list_cloud_llm_provider_models', { provider }),
   generateCloudProposal: (noteId: string, task: LlmTask, modelOverride?: ModelRef) =>
     invoke<Proposal>('generate_cloud_proposal', {
       noteId,

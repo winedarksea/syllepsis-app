@@ -75,5 +75,7 @@ describe('CommentaryPanel', () => {
     });
     expect(screen.getAllByText('A concise generated summary.').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Apply' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pin' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
   });
 });
