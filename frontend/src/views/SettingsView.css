@@ -29,6 +29,54 @@
 .sv-notice { color: var(--color-accent); background: var(--color-tag-bg); }
 .sv-error { color: var(--color-text-inverse); background: var(--color-error); }
 
+.sv-error-panel {
+  margin: var(--sp-4) var(--sp-6) 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.sv-error-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
+.sv-error-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-error);
+}
+
+.sv-error-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.sv-error-panel-message {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-base);
+}
+
 .sv-scroll {
   flex: 1;
   overflow-y: auto;
@@ -211,6 +259,10 @@ select.sv-input { min-width: 180px; cursor: pointer; }
   border-radius: var(--radius-md);
   padding: var(--sp-2) var(--sp-4);
   cursor: pointer;
+}
+.sv-btn-compact {
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--font-size-xs);
 }
 .sv-btn-test {
   display: inline-flex;

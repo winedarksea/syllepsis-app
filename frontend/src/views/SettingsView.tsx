@@ -71,28 +71,32 @@ export function SettingsView({ launchMode = false }: Props) {
   const [localAiPolicy, setLocalAiPolicy] = useState<LocalAiDevicePolicy | null>(null);
   const [embeddingModels, setEmbeddingModels] = useState<ModelManifest[]>([]);
 
+  const reportError = useCallback((message: string) => {
+    setNotice(null);
+    setError(message);
+  }, []);
+
   const loadCloud = useCallback(async () => {
     setDescriptors(await api.cloudLlmProviderDescriptors());
   }, []);
 
   useEffect(() => {
-    api.getBuildInfo().then(setBuild).catch((e) => setError(String(e)));
-    loadCloud().catch((e) => setError(String(e)));
-    api.listPlugins().then(setPlugins).catch((e) => setError(String(e)));
-    api.getLocalAiDevicePolicy().then(setLocalAiPolicy).catch((e) => setError(String(e)));
+    api.getBuildInfo().then(setBuild).catch((e) => reportError(String(e)));
+    loadCloud().catch((e) => reportError(String(e)));
+    api.listPlugins().then(setPlugins).catch((e) => reportError(String(e)));
+    api.getLocalAiDevicePolicy().then(setLocalAiPolicy).catch((e) => reportError(String(e)));
     api.builtinModelManifests()
       .then((manifests) => setEmbeddingModels(manifests.filter((manifest) => manifest.kind === 'embedding')))
-      .catch((e) => setError(String(e)));
-  }, [loadCloud]);
+      .catch((e) => reportError(String(e)));
+  }, [loadCloud, reportError]);
 
   useEffect(() => {
     if (!book) { setConfig(null); return; }
-    api.getBookConfig().then(setConfig).catch((e) => setError(String(e)));
-  }, [book]);
+    api.getBookConfig().then(setConfig).catch((e) => reportError(String(e)));
+  }, [book, reportError]);
 
   const flash = useCallback((message: string) => {
     setNotice(message);
-    setError(null);
   }, []);
 
   return (
@@ -105,7 +109,7 @@ export function SettingsView({ launchMode = false }: Props) {
       )}
 
       {notice && <div className="sv-notice" onClick={() => setNotice(null)}>{notice}</div>}
-      {error && <div className="sv-error" onClick={() => setError(null)}>{error}</div>}
+      {error && <SettingsError message={error} onDismiss={() => setError(null)} />}
 
       <div className="sv-scroll">
         {/* ── Appearance ── */}
@@ -126,7 +130,7 @@ export function SettingsView({ launchMode = false }: Props) {
               ))}
             </div>
           </Field>
-          <ThemePicker onNotice={flash} onError={setError} />
+          <ThemePicker onNotice={flash} onError={reportError} />
           <Field label="Show sidebar badges" hint="Displays count badges on the Notebox and Diagnostics sidebar items. Turn off to reduce visual noise.">
             <Toggle checked={!hideUnsortedBadge} onChange={(v) => setHideUnsortedBadge(!v)} />
           </Field>
@@ -137,7 +141,7 @@ export function SettingsView({ launchMode = false }: Props) {
           <CloudProvidersPanel
             descriptors={descriptors}
             onChanged={flash}
-            onError={setError}
+            onError={reportError}
           />
           {localAiPolicy && (
             <DeviceEmbeddingPanel
@@ -146,7 +150,7 @@ export function SettingsView({ launchMode = false }: Props) {
                 setLocalAiPolicy(policy);
                 flash('Device embedding policy saved.');
               }}
-              onError={setError}
+              onError={reportError}
             />
           )}
           {book ? (
@@ -155,7 +159,7 @@ export function SettingsView({ launchMode = false }: Props) {
                 config={config}
                 providers={descriptors}
                 onSaved={(llm) => { setConfig((p) => p && { ...p, llm }); flash('AI defaults saved.'); }}
-                onError={setError}
+                onError={reportError}
               />
             )
           ) : (
@@ -171,7 +175,7 @@ export function SettingsView({ launchMode = false }: Props) {
                 <PrivacyPanel
                   value={config.privacy}
                   onSaved={(privacy) => { setConfig((p) => p && { ...p, privacy }); flash('Privacy saved.'); }}
-                  onError={setError}
+                  onError={reportError}
                 />
               </Section>
 
@@ -179,7 +183,7 @@ export function SettingsView({ launchMode = false }: Props) {
                 <SyncPanel
                   value={config.sync}
                   onSaved={(sync) => { setConfig((p) => p && { ...p, sync }); flash('Sync saved.'); }}
-                  onError={setError}
+                  onError={reportError}
                 />
               </Section>
 
@@ -199,7 +203,7 @@ export function SettingsView({ launchMode = false }: Props) {
                     <SearchPanel
                       value={config.search}
                       onSaved={(search) => { setConfig((p) => p && { ...p, search }); flash('Search tuning saved.'); }}
-                      onError={setError}
+                      onError={reportError}
                     />
                     <EmbeddingPanel
                       value={config.embedding}
@@ -208,12 +212,12 @@ export function SettingsView({ launchMode = false }: Props) {
                         setConfig((p) => p && { ...p, embedding });
                         flash('Embedding configuration saved.');
                       }}
-                      onError={setError}
+                      onError={reportError}
                     />
                     <CleanupPanel
                       value={config.cleanup}
                       onSaved={(cleanup) => { setConfig((p) => p && { ...p, cleanup }); flash('Cleanup saved.'); }}
-                      onError={setError}
+                      onError={reportError}
                     />
                   </div>
                 )}
@@ -234,9 +238,9 @@ export function SettingsView({ launchMode = false }: Props) {
               flash(`"${name}" installed — restart Syllepsis to load it.`);
             }}
             onPluginsChanged={() => {
-              api.listPlugins().then(setPlugins).catch((e) => setError(String(e)));
+              api.listPlugins().then(setPlugins).catch((e) => reportError(String(e)));
             }}
-            onError={setError}
+            onError={reportError}
           />
         </Section>
 
@@ -273,9 +277,9 @@ export function SettingsView({ launchMode = false }: Props) {
                 const failureText = failures
                   .map((failure) => `${failure.provider}: ${failure.error}`)
                   .join(' | ');
-                setError(`Deleted "${report.book_name}" locally. Cloud cleanup failed for ${failures.length} provider${failures.length === 1 ? '' : 's'}: ${failureText}`);
+                reportError(`Deleted "${report.book_name}" locally. Cloud cleanup failed for ${failures.length} provider${failures.length === 1 ? '' : 's'}: ${failureText}`);
               }}
-              onError={setError}
+              onError={reportError}
             />
           </Section>
         )}
@@ -285,6 +289,28 @@ export function SettingsView({ launchMode = false }: Props) {
 }
 
 // ── Layout primitives ──────────────────────────────────────────────────────────
+
+function SettingsError({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  const copyError = useCallback(async () => {
+    await navigator.clipboard?.writeText(message).catch(() => undefined);
+  }, [message]);
+
+  return (
+    <div className="sv-error-panel" role="alert">
+      <div className="sv-error-panel-head">
+        <div className="sv-error-panel-title">
+          <Icon name="error" size={18} />
+          <span>Error</span>
+        </div>
+        <div className="sv-error-panel-actions">
+          <button className="sv-btn sv-btn-compact" type="button" onClick={copyError}>Copy</button>
+          <button className="sv-btn sv-btn-compact" type="button" onClick={onDismiss}>Dismiss</button>
+        </div>
+      </div>
+      <pre className="sv-error-panel-message">{message}</pre>
+    </div>
+  );
+}
 
 function Section({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
@@ -770,6 +796,18 @@ function PrivacyPanel({ value, onSaved, onError }: {
 
 // ── Sync ────────────────────────────────────────────────────────────────────────
 
+function upsertCloudProviderStatus(
+  statuses: CloudSyncProviderStatus[],
+  nextStatus: CloudSyncProviderStatus,
+): CloudSyncProviderStatus[] {
+  const replacedStatuses = statuses.map((status) =>
+    status.provider === nextStatus.provider ? nextStatus : status
+  );
+  return replacedStatuses.some((status) => status.provider === nextStatus.provider)
+    ? replacedStatuses
+    : [...statuses, nextStatus];
+}
+
 function SyncPanel({ value, onSaved, onError }: {
   value: SyncConfig; onSaved: (v: SyncConfig) => void; onError: (m: string) => void;
 }) {
@@ -784,7 +822,12 @@ function SyncPanel({ value, onSaved, onError }: {
   );
 
   const loadCloud = useCallback(async () => {
-    setCloudProviders(await api.cloudSyncProviderDescriptors());
+    const [providers, statuses] = await Promise.all([
+      api.cloudSyncProviderDescriptors(),
+      api.cloudSyncProviderStatuses(),
+    ]);
+    setCloudProviders(providers);
+    setCloudStatuses(statuses);
   }, []);
 
   useEffect(() => {
@@ -799,11 +842,7 @@ function SyncPanel({ value, onSaved, onError }: {
     Promise.all([
       listen<CloudSyncProviderStatus>('cloud-sync://oauth-completed', (event) => {
         setBusy(null);
-        setCloudStatuses((prev) =>
-          prev.map((status) =>
-            status.provider === event.payload.provider ? event.payload : status
-          )
-        );
+        setCloudStatuses((prev) => upsertCloudProviderStatus(prev, event.payload));
       }),
       listen<string>('cloud-sync://oauth-failed', (event) => {
         setBusy(null);
@@ -833,8 +872,10 @@ function SyncPanel({ value, onSaved, onError }: {
     try {
       const start = await api.connectCloudSyncProvider(provider);
       await openUrl(start.auth_url);
-    } catch (e) { onError(String(e)); }
-    finally { setBusy(null); }
+    } catch (e) {
+      setBusy(null);
+      onError(String(e));
+    }
   }, [onError]);
 
   const disconnectCloud = useCallback(async (provider: string) => {

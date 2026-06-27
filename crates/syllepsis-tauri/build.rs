@@ -19,7 +19,9 @@ fn main() {
     // Without these, the date freezes at the first build; "last full rebuild" is acceptable.
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=oauth-client-ids.json");
+    println!("cargo:rerun-if-changed=oauth-client-ids.local.json");
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    println!("cargo:rerun-if-env-changed=SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET");
 
     tauri_build::build()
 }

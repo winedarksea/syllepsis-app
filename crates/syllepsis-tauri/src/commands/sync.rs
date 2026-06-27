@@ -36,6 +36,8 @@ const OAUTH_STATE_FIELD: &str = "oauth-state";
 const CODE_VERIFIER_FIELD: &str = "code-verifier";
 const OAUTH_CALLBACK_PATH: &str = "/oauth-callback";
 const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
+const OAUTH_CLIENT_IDS_LOCAL_FILE: &str = "oauth-client-ids.local.json";
+const GOOGLE_DRIVE_CLIENT_SECRET_ENV_VAR: &str = "SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET";
 const ACTIVITY_RETENTION_DAYS: i64 = 90;
 const WATCH_ACTIVITY_DEBOUNCE: Duration = Duration::from_millis(750);
 const MANAGED_CLOUD_STATE_FILE_PREFIX: &str = "managed-cloud-";
@@ -853,22 +855,48 @@ fn delete_cloud_book_prefix(provider: &str, book_id: &str) -> Result<usize, Stri
 
 struct CloudCredentials {
     client_id: String,
+    client_secret: Option<String>,
     access_token: Option<String>,
     refresh_token: Option<String>,
 }
 
 fn credentials_for(provider: &str) -> Result<CloudCredentials, String> {
     descriptor_for(provider)?;
-    let store = KeyringSyncCredentialStore;
-    let credentials = CloudCredentials {
-        client_id: require_oauth_client_id(provider)?,
+    let mut store = KeyringSyncCredentialStore;
+    let oauth_client_config = oauth_client_config(provider)?;
+    let mut credentials = CloudCredentials {
+        client_id: oauth_client_config.client_id.trim().to_string(),
+        client_secret: oauth_client_config
+            .client_secret
+            .map(|secret| secret.trim().to_string())
+            .filter(|secret| !secret.is_empty()),
         access_token: token_for_field(&store, provider, ACCESS_TOKEN_FIELD)?,
         refresh_token: token_for_field(&store, provider, REFRESH_TOKEN_FIELD)?,
     };
     if credentials.access_token.is_none() && credentials.refresh_token.is_none() {
         return Err(format!("{provider} is not connected"));
     }
+    if provider == "google_drive" {
+        refresh_google_drive_access_token_if_available(&mut store, &mut credentials)?;
+    }
     Ok(credentials)
+}
+
+fn refresh_google_drive_access_token_if_available(
+    store: &mut KeyringSyncCredentialStore,
+    credentials: &mut CloudCredentials,
+) -> Result<(), String> {
+    let Some(refresh_token) = credentials.refresh_token.as_deref() else {
+        return Ok(());
+    };
+    let access_token = refresh_google_drive_access_token(
+        &credentials.client_id,
+        credentials.client_secret.as_deref(),
+        refresh_token,
+    )?;
+    store.set(&account("google_drive", ACCESS_TOKEN_FIELD), &access_token)?;
+    credentials.access_token = Some(access_token);
+    Ok(())
 }
 
 fn token_for(store: &KeyringSyncCredentialStore, provider: &str) -> Result<Option<String>, String> {
@@ -899,9 +927,9 @@ fn apply_opendal_tokens_gdrive(
     builder = builder.client_id(&credentials.client_id);
     if let Some(token) = &credentials.access_token {
         builder = builder.access_token(token);
-    }
-    if let Some(token) = &credentials.refresh_token {
+    } else if let Some(token) = &credentials.refresh_token {
         builder = builder.refresh_token(token);
+        builder = builder.client_secret(credentials.client_secret.as_deref().unwrap_or(""));
     }
     opendal::Operator::new(builder)
         .map(|builder| builder.finish())
@@ -972,6 +1000,8 @@ fn descriptor_for(provider: &str) -> Result<CloudSyncProviderDescriptor, String>
 struct CloudSyncOAuthClientConfig {
     client_id: String,
     callback_port: u16,
+    #[serde(default)]
+    client_secret: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -981,22 +1011,104 @@ struct CloudSyncOAuthClientIds {
     onedrive: CloudSyncOAuthClientConfig,
 }
 
+#[derive(Default, Deserialize)]
+struct CloudSyncOAuthClientIdOverrides {
+    #[serde(default)]
+    google_drive: Option<CloudSyncOAuthClientConfigOverride>,
+    #[serde(default)]
+    dropbox: Option<CloudSyncOAuthClientConfigOverride>,
+    #[serde(default)]
+    onedrive: Option<CloudSyncOAuthClientConfigOverride>,
+}
+
+#[derive(Default, Deserialize)]
+struct CloudSyncOAuthClientConfigOverride {
+    client_id: Option<String>,
+    callback_port: Option<u16>,
+    client_secret: Option<String>,
+}
+
 fn oauth_client_config(provider: &str) -> Result<CloudSyncOAuthClientConfig, String> {
     let configured_client_ids: CloudSyncOAuthClientIds =
         serde_json::from_str(include_str!("../../oauth-client-ids.json"))
             .map_err(|error| format!("parse bundled OAuth client IDs: {error}"))?;
-    let config = match provider {
+    let mut config = match provider {
         "google_drive" => configured_client_ids.google_drive,
         "dropbox" => configured_client_ids.dropbox,
         "onedrive" => configured_client_ids.onedrive,
         other => return Err(format!("unknown cloud sync provider: {other}")),
     };
+    apply_oauth_client_config_override(provider, &mut config)?;
+    apply_oauth_client_secret_env(provider, &mut config);
     if config.client_id.trim().is_empty() {
         return Err(format!(
             "{provider} OAuth is not configured in this build; add the Syllepsis app client ID to crates/syllepsis-tauri/oauth-client-ids.json"
         ));
     }
     Ok(config)
+}
+
+fn apply_oauth_client_config_override(
+    provider: &str,
+    config: &mut CloudSyncOAuthClientConfig,
+) -> Result<(), String> {
+    let local_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(OAUTH_CLIENT_IDS_LOCAL_FILE);
+    let text = match std::fs::read_to_string(&local_path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "read local OAuth client IDs from {}: {error}",
+                local_path.display()
+            ))
+        }
+    };
+    let overrides: CloudSyncOAuthClientIdOverrides =
+        serde_json::from_str(&text).map_err(|error| {
+            format!(
+                "parse local OAuth client IDs from {}: {error}",
+                local_path.display()
+            )
+        })?;
+    let provider_override = match provider {
+        "google_drive" => overrides.google_drive,
+        "dropbox" => overrides.dropbox,
+        "onedrive" => overrides.onedrive,
+        _ => None,
+    };
+    if let Some(provider_override) = provider_override {
+        apply_oauth_client_config_fields(config, provider_override);
+    }
+    Ok(())
+}
+
+fn apply_oauth_client_config_fields(
+    config: &mut CloudSyncOAuthClientConfig,
+    config_override: CloudSyncOAuthClientConfigOverride,
+) {
+    if let Some(client_id) = config_override.client_id {
+        config.client_id = client_id;
+    }
+    if let Some(callback_port) = config_override.callback_port {
+        config.callback_port = callback_port;
+    }
+    if let Some(client_secret) = config_override.client_secret {
+        config.client_secret = Some(client_secret);
+    }
+}
+
+fn apply_oauth_client_secret_env(provider: &str, config: &mut CloudSyncOAuthClientConfig) {
+    let env_var = match provider {
+        "google_drive" => GOOGLE_DRIVE_CLIENT_SECRET_ENV_VAR,
+        _ => return,
+    };
+    if let Some(secret) = std::env::var_os(env_var)
+        .and_then(|value| value.into_string().ok())
+        .map(|secret| secret.trim().to_string())
+        .filter(|secret| !secret.is_empty())
+    {
+        config.client_secret = Some(secret);
+    }
 }
 
 fn require_oauth_client_id(provider: &str) -> Result<String, String> {
@@ -1058,25 +1170,33 @@ fn token_endpoint(provider: &str) -> Result<&'static str, String> {
     }
 }
 
-/// Exchange an OAuth authorization code for access/refresh tokens using PKCE (no client secret
-/// required for public/desktop app registrations).
+/// Exchange an OAuth authorization code for access/refresh tokens using PKCE.
 fn exchange_code_for_tokens(
     provider: &str,
     code: &str,
     verifier: &str,
     redirect_uri: &str,
 ) -> Result<CloudCredentials, String> {
-    let client_id = require_oauth_client_id(provider)?;
+    let oauth_client_config = oauth_client_config(provider)?;
+    let client_id = oauth_client_config.client_id.trim().to_string();
+    let client_secret = oauth_client_config
+        .client_secret
+        .map(|secret| secret.trim().to_string())
+        .filter(|secret| !secret.is_empty());
     let endpoint = token_endpoint(provider)?;
 
     // Build an application/x-www-form-urlencoded body without the `form` reqwest feature.
-    let body = format!(
+    let mut body = format!(
         "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
         percent_encode(code),
         percent_encode(redirect_uri),
         percent_encode(&client_id),
         percent_encode(verifier),
     );
+    if let Some(secret) = client_secret.as_deref() {
+        body.push_str("&client_secret=");
+        body.push_str(&percent_encode(secret));
+    }
     let response = reqwest::blocking::Client::new()
         .post(endpoint)
         .header("Content-Type", "application/x-www-form-urlencoded")
@@ -1087,7 +1207,7 @@ fn exchange_code_for_tokens(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().unwrap_or_default();
-        return Err(format!("token exchange returned {status}: {body}"));
+        return Err(token_exchange_error(provider, status, &body));
     }
     let json: serde_json::Value = response
         .json()
@@ -1109,9 +1229,60 @@ fn exchange_code_for_tokens(
     }
     Ok(CloudCredentials {
         client_id,
+        client_secret,
         access_token,
         refresh_token,
     })
+}
+
+fn token_exchange_error(provider: &str, status: reqwest::StatusCode, body: &str) -> String {
+    let mut message = format!("token exchange returned {status}: {body}");
+    if provider == "google_drive" && body.contains("client_secret is missing") {
+        message.push_str(
+            "\n\nGoogle rejected the token exchange because this OAuth client requires a client_secret. Set SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET or add google_drive.client_secret to the ignored crates/syllepsis-tauri/oauth-client-ids.local.json file, then choose Reconnect.",
+        );
+    }
+    message
+}
+
+fn refresh_google_drive_access_token(
+    client_id: &str,
+    client_secret: Option<&str>,
+    refresh_token: &str,
+) -> Result<String, String> {
+    let mut body = format!(
+        "grant_type=refresh_token&refresh_token={}&client_id={}",
+        percent_encode(refresh_token),
+        percent_encode(client_id),
+    );
+    if let Some(secret) = client_secret.filter(|secret| !secret.is_empty()) {
+        body.push_str("&client_secret=");
+        body.push_str(&percent_encode(secret));
+    }
+    let response = reqwest::blocking::Client::new()
+        .post(token_endpoint("google_drive")?)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .map_err(|e| format!("refresh Google Drive access token request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!(
+            "refresh Google Drive access token returned {status}: {body}"
+        ));
+    }
+
+    let json: serde_json::Value = response
+        .json()
+        .map_err(|e| format!("refresh Google Drive token response parse failed: {e}"))?;
+    json.get("access_token")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!("refresh Google Drive token response returned no access token: {json}")
+        })
 }
 
 fn receive_oauth_callback(listener: TcpListener) -> Result<String, String> {
@@ -1380,6 +1551,19 @@ mod tests {
         assert_ne!(ports[0], ports[1]);
         assert_ne!(ports[0], ports[2]);
         assert_ne!(ports[1], ports[2]);
+    }
+
+    #[test]
+    fn google_token_exchange_secret_error_names_config_field() {
+        let message = token_exchange_error(
+            "google_drive",
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":"invalid_request","error_description":"client_secret is missing."}"#,
+        );
+
+        assert!(message.contains("google_drive.client_secret"));
+        assert!(message.contains(GOOGLE_DRIVE_CLIENT_SECRET_ENV_VAR));
+        assert!(message.contains(OAUTH_CLIENT_IDS_LOCAL_FILE));
     }
 
     #[test]
