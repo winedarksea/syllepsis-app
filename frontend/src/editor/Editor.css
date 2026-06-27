@@ -347,11 +347,14 @@
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   line-height: 1.5;
+  color: var(--color-text);
 }
 
 .commentary-diff .changed {
   display: block;
-  background: var(--color-tertiary-subtle);
+  background: var(--color-secondary-subtle);
+  border-left: 2px solid var(--color-secondary);
+  padding-left: 2px;
 }
 
 .commentary-detail-actions {
