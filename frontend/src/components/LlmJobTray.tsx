@@ -8,10 +8,18 @@ function taskLabel(task: string): string {
   return task.replaceAll('_', ' ');
 }
 
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
 function relativeTime(jobId: string): string {
-  // Job IDs are ULIDs: first 10 chars encode a 48-bit ms timestamp
+  // Job IDs are ULIDs: first 10 chars encode a 48-bit ms timestamp in Crockford base-32
   try {
-    const ms = parseInt(jobId.slice(0, 10), 32);
+    const chars = jobId.slice(0, 10).toUpperCase();
+    let ms = 0;
+    for (const c of chars) {
+      const idx = CROCKFORD.indexOf(c);
+      if (idx === -1) return '';
+      ms = ms * 32 + idx;
+    }
     const seconds = Math.max(0, Math.round((Date.now() - ms) / 1000));
     if (seconds < 60) return 'just now';
     const minutes = Math.round(seconds / 60);
