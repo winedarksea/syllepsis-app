@@ -19,7 +19,7 @@ use crate::search::bm25::Bm25Index;
 use crate::search::exact::match_exact;
 use crate::search::filter::SearchFilter;
 use crate::search::results::{
-    BlindSpot, DuplicatePair, EmbeddingDiagnostics, FacetCount, RelatedNote, SearchHit,
+    BlindSpot, DuplicatePair, EmptyNote, EmbeddingDiagnostics, FacetCount, RelatedNote, SearchHit,
     SearchRankingSignals, SearchResults,
 };
 use crate::search::rrf::reciprocal_rank_fusion;
@@ -303,9 +303,22 @@ impl SearchEngine {
         }
         blind_spots.sort_by(|a, b| a.nearest_similarity.total_cmp(&b.nearest_similarity));
 
+        let mut empty_notes: Vec<EmptyNote> = self
+            .vectors
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.centroid.magnitude() <= f32::EPSILON)
+            .map(|(i, _)| EmptyNote {
+                note_id: self.notes[i].id.to_string(),
+                title: self.notes[i].title.clone(),
+            })
+            .collect();
+        empty_notes.sort_by(|a, b| a.title.cmp(&b.title));
+
         EmbeddingDiagnostics {
             duplicates,
             blind_spots,
+            empty_notes,
         }
     }
 

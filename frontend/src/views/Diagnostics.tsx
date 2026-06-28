@@ -40,7 +40,7 @@ export function Diagnostics() {
       const now = new Date().toISOString();
       setLastRun(now);
       if (lastRunKey) localStorage.setItem(lastRunKey, now);
-      const total = result.duplicates.length + result.blind_spots.length;
+      const total = result.duplicates.length + result.blind_spots.length + result.empty_notes.length;
       setDiagnosticsIssueCount(total);
       if (issueCountKey) localStorage.setItem(issueCountKey, String(total));
     } catch (e) {
@@ -52,7 +52,7 @@ export function Diagnostics() {
 
   useEffect(() => { run(); }, [run]);
 
-  const clean = diag && diag.duplicates.length === 0 && diag.blind_spots.length === 0;
+  const clean = diag && diag.duplicates.length === 0 && diag.blind_spots.length === 0 && diag.empty_notes.length === 0;
 
   return (
     <div className="dg-root">
@@ -96,6 +96,18 @@ export function Diagnostics() {
               <span className="dg-sim dg-sim-weak">
                 nearest {Math.round(b.nearest_similarity * 100)}%
               </span>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {diag && diag.empty_notes.length > 0 && (
+        <section className="dg-section">
+          <h3 className="dg-section-title">Empty notes ({diag.empty_notes.length})</h3>
+          <p className="dg-section-hint">Notes with no body — excluded from search, related notes, and diagnostics until content is added.</p>
+          {diag.empty_notes.map((n) => (
+            <div key={n.note_id} className="dg-row">
+              <button className="dg-link" onClick={() => openEditor(n.note_id)}>{n.title || '(untitled)'}</button>
             </div>
           ))}
         </section>

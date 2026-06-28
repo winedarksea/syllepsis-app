@@ -98,10 +98,18 @@ pub struct BlindSpot {
     pub nearest_similarity: f32,
 }
 
+/// A note with no body — excluded from vectors and all embedding-based features.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EmptyNote {
+    pub note_id: String,
+    pub title: String,
+}
+
 /// The embedding-health report surfaced in the diagnostics view (llm-ai-features.md: duplication
 /// and reverse-similarity / blind-spot detection).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EmbeddingDiagnostics {
     pub duplicates: Vec<DuplicatePair>,
     pub blind_spots: Vec<BlindSpot>,
+    pub empty_notes: Vec<EmptyNote>,
 }

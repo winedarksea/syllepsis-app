@@ -456,9 +456,15 @@ export interface BlindSpot {
   nearest_similarity: number;
 }
 
+export interface EmptyNote {
+  note_id: string;
+  title: string;
+}
+
 export interface EmbeddingDiagnostics {
   duplicates: DuplicatePair[];
   blind_spots: BlindSpot[];
+  empty_notes: EmptyNote[];
 }
 
 export type GraphMode = 'categories' | 'pillars' | 'communities' | 'density' | 'timeline';
