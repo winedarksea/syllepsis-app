@@ -223,7 +223,7 @@ pub(crate) fn builtin_style_cards() -> Vec<StyleCardEntry> {
         StyleCardEntry {
             id: "builtin:tolkien".into(),
             version: 1,
-            name: "J. R. R. Tolkien".into(),
+            name: "Tolkien".into(),
             short_description: "A grave, mythic, third-person omniscient voice suited to journeys, ancient places, moral testing, and the long memory of peoples and lands. Tone is elevated, elegiac, earnest, and expansive.".into(),
             verbosity: "expansive".into(),
             perspective: "third_person_omniscient".into(),

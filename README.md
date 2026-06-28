@@ -1,19 +1,68 @@
+<p align="center">
+  <img src="frontend/public/favicon.svg" alt="Syllepsis" width="96">
+</p>
+
 # Syllepsis
 
-An open-source, local-first note-taking app for building **books** — large, unified
-knowledge spaces — rather than quick notes or to-do lists. Notes start as rough captures and
+An open-source, free, local-first note-taking app for building **books** — large, unified
+knowledge spaces — aiming to organize understanding for large projects. Notes start as rough captures and
 are progressively organized: uncategorized → graph → tree → continuous book. Everything is
-plain markdown on the user's device, synced to their own cloud (Google Drive, GitHub). There
-is no hosted backend. LLMs accelerate every step but are fully optional.
+plain markdown on your device, synced to your own cloud (Google Drive, GitHub). LLMs accelerate every step but are fully optional.
+
+## Features
+
+**Note types**
+- Prose notes, quotes, references, to-dos, Q&A, tables, code blocks, pictures, drawings
+
+**Organization**
+- Hashtag categories with icons and display names
+- Prior-relationship tree for hierarchical note ordering
+- Notebox inbox — capture first, categorize later
+- Book view — flatten the sorted tree into a continuous narrative document
+
+**Search and discovery**
+- Powerful search: three types of search (exact match, BM25, and RAG retrieval) fused to help you find all the relevant content for a query.
+- Semantic graph: three visualization modes: categories, clustering, and timeline allow you to view the patterns of your notes to find and utilize the connections between your ideas.
+- Related notes carousel: easily connect to the similar notes from the current note you are on, like the product recommendation system of an ecommerce site, but speeding up connections among your own ideas.
+- Related notes , duplicate detection, and embedding coverage diagnostics
+
+**AI and LLM**
+- Summarize, expand, rewrite (style-guided), fix grammar, fact-check, and devil's advocate
+- All LLM operations produce non-destructive proposals — accept or reject individually
+- Custom style cards and editable prompts per task allow easy, repeatable formatting of ideas.
+- Routes tasks to local ONNX models (Qwen3-0.6B, EmbeddingGemma 300M Q4) or cloud providers
+- Local models are efficient and fully bundled, avoiding the usual hassle of Local LLM deployments
+
+**Spatial worlds**
+- Tag your notes to specific locations and view them on a map
+- The default map is Earth, but you can also map onto imported images (floor plans, fantasy maps, memory palaces)
+- `loc:` grammar resolves coordinates, named places, and CSV lookup tables at render time
+
+**Privacy and lifecycle**
+- Private, archived, locked, and mark-for-deletion states per note or category
+- 24-hour timed unlock gate with optional fact-check requirement allow users to protect their most critical notes from accidental or impulsive updates.
+- Managed `.gitignore` block automatically excludes private notes from git publishes
+
+**Sync and storage**
+- Plain markdown on disk — no proprietary database
+- LWW-register CRDT with optional fine-grained Loro text CRDT
+- Local folder sync by default; Google Drive and GitHub sync providers planned
+- Conflict copies for binary assets; loop-prevention for re-syncs
+
+**Export and publishing**
+- Knowledge packs — portable versioned JSON bundles for sharing note collections
+- Static site export — self-contained HTML with private content filtered out
+
+**Extensibility**
+- Sandboxed plugin system (Extism) allows users to develop customizations to the app
+- Themes allow you to easily customize the colors and icons of the app for your own person look
 
 See [`docs/`](docs/) for the full design and the implementation roadmap.
 
 ## Architecture
 
 A Cargo workspace with a platform-agnostic Rust **core** and a thin Tauri shell; the React +
-Lexical frontend talks to the core through typed Tauri command wrappers. The core has no Tauri or
-UI dependency, so the future PWA/WASM build can reuse it behind the same trait seams
-(`NoteStore`, `EmbeddingProvider`, `LlmProvider`, `CrdtBackend`, and `SyncProvider`).
+Lexical frontend talks to the core through typed Tauri command wrappers. Cloud sync is managed through OpenDAL, with Loro for CRDT. ONNX runtimes are used for local embedding and LLM models. 
 
 ```
 crates/
@@ -43,53 +92,6 @@ docs/                  design docs + implementation plan
 | `publish` | Read-only static-site rendering (markdown→HTML) and the idempotent managed-`.gitignore` block that excludes private content from a git publish |
 | `app` | Framework-agnostic command surface (DTOs + operations) the Tauri shell wraps — including `lifecycle` (privacy/lock/deletion), `pack` (export/import), and `publish` (site + git exclusion) |
 | `config` / `error` | Typed per-book config (no magic numbers) and the crate-wide error type |
-
-## Status
-
-**Phase 1 core complete and tested** (note model, markdown dialect, file storage, sort/book-render, application command layer).
-
-**Phase 2 & 3 implementation is in place** (core/Tauri/frontend builds pass, `clippy -D warnings` clean):
-shared ONNX Runtime infrastructure (model manifests, sha256-verified bundled/downloaded assets,
-execution-provider selection, session builder) shared by the EmbeddingGemma 300M Q4 embedder (Phase 2) and the Gemma 4 E2B
-local LLM (Phase 3). Canonical note vectors are persisted in synced `_embeddings/` sidecars and projected
-into local SQLite; search degrades to exact + BM25 when query inference is unavailable. Real ONNX inference has gated ignored tests that require
-`SYLLEPSIS_MODEL_CACHE` to point at a populated model cache.
-
-**Phase 4 CRDT sync is in place** (`clippy -D warnings` clean, default suite green): per-note CRDT sidecars
-behind the `NoteCrdt` / `CrdtBackend` seams (always-on deterministic LWW-register default; the fine-grained
-[Loro](https://loro.dev) text CRDT behind the optional `loro` feature), the `SyncProvider` seam with a
-`LocalFolderSync` default (a synced folder *is* how Drive/Dropbox desktop expose the cloud), and a sync engine
-that reconciles markdown ⇄ sidecars, converges concurrent note edits, writes deterministic `.conflict-*` copies
-for non-mergeable files, tracks binary assets by UUID sidecar, and is loop-safe (a quiet re-sync is a no-op).
-Cloud HTTP providers (Google Drive, GitHub) are advertised in the provider registry but not yet wired.
-
-**Phase 5 spatial worlds (first pass) is in place** (`clippy -D warnings` clean, default suite green): the
-`loc:` location grammar (`lat,long`, `world/x,y`, `@named-place`, plain text) parsed and resolved against a
-world registry (`earth` is the implicit default geo world; image-backed worlds reference a drawing/raster
-backdrop) and a CSV text→coordinate lookup table carrying a `world` column. A note's frontmatter `location`
-and inline `loc:` body tokens become overlay **pins**; a category's `location` becomes a pin, or a clickable
-**region** when it also carries `SpatialRegion` geometry (an SVG element id, or a normalized bbox/polygon for
-raster backdrops). The `app::spatial` command surface (list/create/delete worlds, build a world overlay,
-read/edit the lookup table, resolve a token) is wrapped by Tauri commands, and the React **Worlds** view
-renders pins and regions over a normalized coordinate plane (clicking a note pin opens the note; clicking a
-category pin/region runs its filtered-sorted view). An image world's backdrop is served from the core as a
-self-contained `data:` URL and drawn behind the overlay; geo map tiles remain a later pass.
-
-**Phase 6 packs / privacy / serving is in place** (`clippy -D warnings` clean default + `--features loro`,
-257 core tests / 260 with loro): the privacy & lifecycle behavior layer (`app::lifecycle`) finally acts on
-the Phase-1 fields — private/archived/locked toggles, a delayed-deletion "mark for deletion" flow with a
-scheduled purge (and self-destruct `vanish_at`), and the centralized policy overview — with private notes and
-notes in private categories dropped from default views and RAG retrieval. Locked notes gate body changes: an
-unlock delay holds a rewrite until the configured window elapses, and a fact-check gate requires a passing
-check, enforced both in the LLM proposal-accept flow and on direct edits. Knowledge **packs** (`pack` +
-`app::pack`) export a curated, versioned set of notes as a single distributable JSON file and import it with
-category mapping and `locally_modified` overwrite protection on version re-imports. **Serving** (`publish` +
-`app::publish`) renders a read-only static HTML site that excludes private content, and rewrites a managed
-`.gitignore` block so a git publish never carries private notes/categories. The React **Privacy** and
-**Packs** views drive all of it.
-
-Next: cloud HTTP sync providers and git integration; sync UI; the geo map-tile view; plus remaining Phase 3
-product UI work for keychain-backed cloud execution and richer LLM management.
 
 ## Developing
 
