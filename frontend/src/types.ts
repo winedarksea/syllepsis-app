@@ -730,6 +730,7 @@ export interface SyncConfig {
   crdt_backend: string;
   conflict_marker: string;
   external_edit_skew_secs: number;
+  author: string;
 }
 
 export interface GitChangedFile {
@@ -859,6 +860,13 @@ export interface SyncReport {
   deleted_local: string[];
   deleted_remote: string[];
   skipped: number;
+}
+
+/** Payload of the `cloud-sync-finished` event (a backgrounded "Sync now" completing). */
+export interface CloudSyncFinished {
+  provider: string;
+  report?: SyncReport;
+  error?: string;
 }
 
 export interface DeleteBookCloudCleanupOutcome {

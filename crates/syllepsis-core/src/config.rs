@@ -273,6 +273,10 @@ pub struct SyncConfig {
     /// Clock-skew guard: a markdown file whose on-disk mtime leads its sidecar by less than this
     /// many seconds is treated as the same logical edit and not re-ingested as an external change.
     pub external_edit_skew_secs: i64,
+    /// Optional human-facing author for shared books: stamped onto this device's cloud-index
+    /// fragment so a file's latest change can be attributed to a person, not just a device. Empty
+    /// falls back to the device actor id, so single-user use needs no setup.
+    pub author: String,
 }
 
 impl Default for SyncConfig {
@@ -282,6 +286,7 @@ impl Default for SyncConfig {
             crdt_backend: crate::crdt::LORO_BACKEND.to_string(),
             conflict_marker: "conflict".to_string(),
             external_edit_skew_secs: 2,
+            author: String::new(),
         }
     }
 }

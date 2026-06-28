@@ -16,10 +16,13 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use chrono::Utc;
+
 use crate::config::SyncConfig;
 use crate::crdt::{select_crdt_backend, ActorId, CrdtBackend, NoteCrdt};
 use crate::error::CoreResult;
 use crate::markdown::frontmatter;
+use crate::sync::cloud_index::{is_cloud_index_path, IndexEntry};
 use crate::sync::local_folder::content_revision;
 use crate::sync::plan::{plan, SyncAction};
 use crate::sync::provider::SyncProvider;
@@ -62,6 +65,11 @@ pub struct SyncEngine {
     conflict_marker: String,
     sync_crdt_sidecars: bool,
     sync_embedding_sidecars: bool,
+    /// Book id stamped into the published cloud-index fragment (empty for the local-folder engine,
+    /// whose `publish_index` is a no-op).
+    book_id: String,
+    /// Who owns this device's fragment; falls back to the actor id when no author is configured.
+    author: String,
 }
 
 impl SyncEngine {
@@ -73,6 +81,7 @@ impl SyncEngine {
         actor: ActorId,
         cfg: &SyncConfig,
     ) -> SyncEngine {
+        let author = actor.as_str().to_string();
         SyncEngine {
             book_root: book_root.into(),
             provider,
@@ -81,20 +90,31 @@ impl SyncEngine {
             conflict_marker: cfg.conflict_marker.clone(),
             sync_crdt_sidecars: true,
             sync_embedding_sidecars: true,
+            book_id: String::new(),
+            author,
         }
     }
 
     /// Build an engine for remotes intended to stay human-readable. Local CRDT and embedding
     /// sidecars remain local implementation details; markdown and other user-authored files sync.
+    /// `book_id` and `author` are stamped into the cloud-index fragment this device publishes; an
+    /// empty `author` falls back to the device actor.
     pub fn new_human_readable_remote(
         book_root: impl Into<PathBuf>,
         provider: Box<dyn SyncProvider>,
         actor: ActorId,
         cfg: &SyncConfig,
+        book_id: impl Into<String>,
+        author: impl Into<String>,
     ) -> SyncEngine {
         let mut engine = SyncEngine::new(book_root, provider, actor, cfg);
         engine.sync_crdt_sidecars = false;
         engine.sync_embedding_sidecars = false;
+        engine.book_id = book_id.into();
+        let author = author.into();
+        if !author.trim().is_empty() {
+            engine.author = author;
+        }
         engine
     }
 
@@ -143,7 +163,43 @@ impl SyncEngine {
             state.forget(&path);
         }
         state.save(&self.book_root)?;
+
+        self.publish_index(&state, &report)?;
         Ok(report)
+    }
+
+    /// Publish this device's cloud-index fragment from the just-persisted [`SyncState`]: one entry
+    /// per live syncable primary file (its remote revision) plus a tombstone for each path deleted
+    /// remotely this pass. Written once per pass (not per put) so the fragment is uploaded at most
+    /// once. A no-op for providers without a cheap index (the default `publish_index`).
+    fn publish_index(&self, state: &SyncState, report: &SyncReport) -> CoreResult<()> {
+        let now = Utc::now();
+        let mut entries: BTreeMap<String, IndexEntry> = BTreeMap::new();
+        for (path, synced) in &state.files {
+            if !self.is_syncable_primary_path(path) {
+                continue;
+            }
+            entries.insert(
+                path.clone(),
+                IndexEntry {
+                    revision: synced.remote_revision.clone(),
+                    updated_at: now,
+                    deleted: false,
+                },
+            );
+        }
+        for path in &report.deleted_remote {
+            entries.insert(
+                path.clone(),
+                IndexEntry {
+                    revision: String::new(),
+                    updated_at: now,
+                    deleted: true,
+                },
+            );
+        }
+        self.provider
+            .publish_index(self.actor.as_str(), &self.author, &self.book_id, &entries)
     }
 
     fn apply(
@@ -204,7 +260,7 @@ impl SyncEngine {
     }
 
     fn is_syncable_primary_path(&self, path: &str) -> bool {
-        if is_local_only(path) || is_sidecar(path) {
+        if is_local_only(path) || is_sidecar(path) || is_cloud_index_path(path) {
             return false;
         }
         self.sync_embedding_sidecars || !is_embedding_sidecar(path)
@@ -486,7 +542,9 @@ mod tests {
     use super::*;
     use crate::model::ObjectType;
     use crate::storage::{Book, NoteStore};
+    use crate::sync::cloud_index::IndexedLocalFolderSync;
     use crate::sync::{actor_id_for, LocalFolderSync};
+    use std::sync::atomic::Ordering::Relaxed;
 
     /// One device: a book dir plus a freshly-built engine sharing the given remote folder.
     struct Device {
@@ -509,7 +567,30 @@ mod tests {
                 provider,
                 actor,
                 &self.cfg,
+                self.book.metadata.book_id.clone(),
+                "",
             )
+        }
+        /// A human-readable engine over the fragment-aware [`IndexedLocalFolderSync`] test double,
+        /// returned alongside a handle to its content-fetch counter (the bandwidth metric).
+        fn indexed_engine(
+            &self,
+        ) -> (
+            SyncEngine,
+            std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        ) {
+            let provider = IndexedLocalFolderSync::open(&self.remote).unwrap();
+            let counter = provider.get_count_handle();
+            let actor = actor_id_for(self.book.root.as_path()).unwrap();
+            let engine = SyncEngine::new_human_readable_remote(
+                self.book.root.clone(),
+                Box::new(provider),
+                actor,
+                &self.cfg,
+                self.book.metadata.book_id.clone(),
+                "",
+            );
+            (engine, counter)
         }
         fn sync(&self) -> SyncReport {
             self.engine().sync().unwrap()
@@ -622,6 +703,135 @@ mod tests {
         assert!(a.remote.join(format!("{}.md", note.id.as_str())).exists());
         assert!(!a.remote.join("_crdt").exists());
         assert!(!a.remote.join("_embeddings").exists());
+    }
+
+    fn add_note(device: &Device, title: &str, body: &str) -> crate::id::NoteId {
+        let mut note = device.book.new_note(ObjectType::Note, title).unwrap();
+        note.body = body.into();
+        device.book.save_note(&note).unwrap();
+        note.id
+    }
+
+    #[test]
+    fn indexed_round_trip_pulls_only_what_changed() {
+        // A publishes a note + its fragment; B learns the note's revision from the fragment and
+        // fetches only the file it must pull — not every remote file just to fingerprint it.
+        let (_tmp, a, b) = two_devices();
+        let id = add_note(&a, "kitchen", "breaker panel notes");
+
+        let (a_engine, a_count) = a.indexed_engine();
+        a_engine.sync().unwrap();
+        assert_eq!(a_count.load(Relaxed), 0, "pushing device fetches nothing");
+
+        let (b_engine, b_count) = b.indexed_engine();
+        let report = b_engine.sync().unwrap();
+
+        assert!(report.pulled.iter().any(|p| p.ends_with(".md")));
+        // Only the pulled note is fetched; the identical _book.md is skipped via the index, never
+        // downloaded to fingerprint it.
+        assert_eq!(b_count.load(Relaxed), 1, "only the Pull target is fetched");
+        b.book.store.refresh().unwrap();
+        assert_eq!(body_of(&b.book, &id), "breaker panel notes");
+        // The index fragment is the only non-markdown thing on the remote.
+        assert!(b.remote.join(crate::sync::CLOUD_INDEX_DIR).exists());
+        assert!(!b.remote.join("_crdt").exists());
+    }
+
+    #[test]
+    fn indexed_quiet_second_pass_fetches_nothing() {
+        // The bandwidth win: once both devices are in sync, a subsequent pass downloads no bytes.
+        let (_tmp, a, b) = two_devices();
+        add_note(&a, "n", "content");
+        a.indexed_engine().0.sync().unwrap();
+        b.indexed_engine().0.sync().unwrap();
+
+        let (b_engine, b_count) = b.indexed_engine();
+        let report = b_engine.sync().unwrap();
+        assert!(report.is_noop(), "quiet pass changes nothing");
+        assert_eq!(b_count.load(Relaxed), 0, "quiet pass fetches no file bodies");
+    }
+
+    #[test]
+    fn indexed_fragments_from_two_devices_merge_for_a_third_reader() {
+        // A and B each create a different note and publish their own fragment (no overwrite race).
+        // A third reader sees both notes' revisions from the merged index without hashing them.
+        let tmp = tempfile::tempdir().unwrap();
+        let remote = tmp.path().join("remote");
+        let a_book = Book::create(tmp.path().join("device-a"), "Shared").unwrap();
+        let book_id = a_book.metadata.book_id.clone();
+        let mut b_book = Book::create(tmp.path().join("device-b"), "Shared").unwrap();
+        b_book.metadata.book_id = book_id.clone();
+        b_book.save_metadata().unwrap();
+        let mut c_book = Book::create(tmp.path().join("device-c"), "Shared").unwrap();
+        c_book.metadata.book_id = book_id;
+        c_book.save_metadata().unwrap();
+        let cfg = SyncConfig {
+            crdt_backend: crate::crdt::LWW_BACKEND.to_string(),
+            ..SyncConfig::default()
+        };
+        let a = Device { book: a_book, remote: remote.clone(), cfg: cfg.clone() };
+        let b = Device { book: b_book, remote: remote.clone(), cfg: cfg.clone() };
+        let c = Device { book: c_book, remote, cfg };
+
+        let id_a = add_note(&a, "from-a", "alpha body");
+        let id_b = add_note(&b, "from-b", "beta body");
+        a.indexed_engine().0.sync().unwrap();
+        b.indexed_engine().0.sync().unwrap();
+
+        // Two independent fragments exist; neither clobbered the other.
+        let fragments = std::fs::read_dir(a.remote.join(crate::sync::CLOUD_INDEX_DIR))
+            .unwrap()
+            .count();
+        assert_eq!(fragments, 2, "each device wrote its own fragment");
+
+        let (c_engine, c_count) = c.indexed_engine();
+        c_engine.sync().unwrap();
+        c.book.store.refresh().unwrap();
+        assert_eq!(body_of(&c.book, &id_a), "alpha body");
+        assert_eq!(body_of(&c.book, &id_b), "beta body");
+        // Two notes pulled; nothing hashed via the fallback (revisions all came from the index).
+        assert_eq!(c_count.load(Relaxed), 2, "only the two pulled notes are fetched");
+    }
+
+    #[test]
+    fn indexed_tombstone_delete_propagates() {
+        let (_tmp, a, b) = two_devices();
+        let id = add_note(&a, "doomed", "to be deleted");
+        a.indexed_engine().0.sync().unwrap();
+        b.indexed_engine().0.sync().unwrap();
+        b.book.store.refresh().unwrap();
+        assert!(b.book.store.read_note(&id).is_ok());
+
+        // A deletes the note and syncs: the remote file is removed and a tombstone is published.
+        a.book.delete_note(&id).unwrap();
+        let del = a.indexed_engine().0.sync().unwrap();
+        assert!(del.deleted_remote.iter().any(|p| p.ends_with(".md")));
+
+        let report = b.indexed_engine().0.sync().unwrap();
+        assert!(
+            report.deleted_local.iter().any(|p| p.ends_with(".md")),
+            "the delete propagates to device B"
+        );
+    }
+
+    #[test]
+    fn indexed_pre_index_books_fall_back_then_go_cheap() {
+        // Remote files written by a pre-index client (no fragments): the first list() hashes them,
+        // then this device publishes a fragment, so the next pass is cheap.
+        let (_tmp, a, b) = two_devices();
+        add_note(&a, "legacy", "pre-existing");
+        // Push with the plain folder provider so no fragment is written (simulates an old client).
+        a.human_readable_engine().sync().unwrap();
+        assert!(!a.remote.join(crate::sync::CLOUD_INDEX_DIR).exists());
+
+        let (b_engine, b_count) = b.indexed_engine();
+        b_engine.sync().unwrap();
+        // First pass had to hash the unindexed remote files (fallback fired at least once).
+        assert!(b_count.load(Relaxed) >= 1, "first pass hashes unindexed files");
+
+        let (b_engine2, b_count2) = b.indexed_engine();
+        assert!(b_engine2.sync().unwrap().is_noop());
+        assert_eq!(b_count2.load(Relaxed), 0, "second pass is cheap once a fragment exists");
     }
 
     #[test]

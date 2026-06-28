@@ -79,20 +79,39 @@ pub fn enqueue_all_stale_embeddings(state: State<AppState>) -> Result<usize, Str
 }
 
 #[tauri::command]
-pub fn note_editing_finished(state: State<AppState>, note_id: String) -> Result<(), String> {
-    let guard = state.book.lock().unwrap();
-    let book = guard
-        .as_ref()
-        .ok_or_else(|| "no book is open".to_string())?;
-    let id = syllepsis_core::id::NoteId::parse(&note_id).map_err(|error| error.to_string())?;
-    let note = book
-        .store
-        .read_note(&id)
-        .map_err(|error| error.to_string())?;
-    if syllepsis_core::embeddings::note_embedding_is_stale(book, &note)
-        .map_err(|error| error.to_string())?
+pub fn note_editing_finished(
+    app: AppHandle,
+    state: State<AppState>,
+    note_id: String,
+) -> Result<(), String> {
     {
-        state.local_ai.enqueue_note(book, note_id, true)?;
+        let guard = state.book.lock().unwrap();
+        let book = guard
+            .as_ref()
+            .ok_or_else(|| "no book is open".to_string())?;
+        let id = syllepsis_core::id::NoteId::parse(&note_id).map_err(|error| error.to_string())?;
+        let note = book
+            .store
+            .read_note(&id)
+            .map_err(|error| error.to_string())?;
+        if syllepsis_core::embeddings::note_embedding_is_stale(book, &note)
+            .map_err(|error| error.to_string())?
+        {
+            state.local_ai.enqueue_note(book, note_id, true)?;
+        }
     }
+
+    // Finishing a note is a natural sync trigger. Kick a coalesced background sync off the IPC
+    // worker: it's naturally debounced by the sync lock's `try_lock` and gated to enabled+active
+    // cloud providers, so firing it here is safe and non-blocking.
+    let sync_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = sync_app.state::<AppState>();
+        if let Err(error) =
+            crate::commands::sync::sync_connected_managed_cloud_providers(&sync_app, &state)
+        {
+            tracing::debug!(error = %error, "note-editing-finished sync skipped");
+        }
+    });
     Ok(())
 }

@@ -17,7 +17,7 @@ import type {
   PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, ModelRef,
   EmbeddingConfig, LocalAiDevicePolicy, ModelManifest,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, PluginDescriptor,
-  SyncReport, DeleteCurrentBookReport,
+  SyncReport, CloudSyncFinished, DeleteCurrentBookReport,
 } from '../types';
 import {
   allThemes, themeById, themeSwatches, themeToJson, normalizeImportedTheme, BUILTIN_THEMES,
@@ -971,37 +971,27 @@ function SyncPanel({ value, onSaved, onError }: {
   }, [loadCloud, onError]);
 
   const runCloudSync = useCallback(async (provider: string) => {
+    // The sync runs off the IPC worker; results arrive via the `cloud-sync-finished` listener
+    // below, so we only kick it off here and let busy clear when the event lands.
     setBusy(provider);
     setCloudFeedback((current) => ({ ...current, [provider]: 'Syncing to cloud...' }));
     try {
-      const report = await api.syncManagedCloudNow(provider);
-      const descriptor = cloudProviders.find((candidate) => candidate.provider === provider);
-      setCloudStatuses((current) => markActiveCloudProvider(upsertCloudProviderStatus(current, {
-          provider,
-          display_name: descriptor?.display_name ?? provider,
-          connected: true,
-          requires_loro: true,
-          active_for_current_book: true,
-        }), provider));
-      setCloudFeedback((current) => ({
-        ...current,
-        [provider]: cloudSyncReportSummary(report),
-      }));
+      await api.syncManagedCloudNow(provider);
     } catch (e) {
       setCloudFeedback((current) => {
         const next = { ...current };
         delete next[provider];
         return next;
       });
-      onError(String(e));
-    } finally {
       setBusy(null);
+      onError(String(e));
     }
-  }, [cloudProviders, onError]);
+  }, [onError]);
 
   useEffect(() => {
     let unlistenCompleted: (() => void) | undefined;
     let unlistenFailed: (() => void) | undefined;
+    let unlistenSync: (() => void) | undefined;
     let disposed = false;
 
     Promise.all([
@@ -1017,20 +1007,46 @@ function SyncPanel({ value, onSaved, onError }: {
         setBusy(null);
         onError(event.payload);
       }),
-    ]).then(([completed, failed]) => {
+      listen<CloudSyncFinished>('cloud-sync-finished', (event) => {
+        const { provider, report, error } = event.payload;
+        // Only react to syncs the user kicked off from this panel (busy === provider); background
+        // and note-finished syncs also emit this event but should not steal the UI.
+        setBusy((current) => (current === provider ? null : current));
+        if (error) {
+          setCloudFeedback((current) => {
+            const next = { ...current };
+            delete next[provider];
+            return next;
+          });
+          onError(error);
+          return;
+        }
+        if (report) {
+          setCloudStatuses((current) => markActiveCloudProvider(current, provider));
+          setCloudFeedback((current) =>
+            current[provider]
+              ? { ...current, [provider]: cloudSyncReportSummary(report) }
+              : current,
+          );
+        }
+      }),
+    ]).then(([completed, failed, synced]) => {
       if (disposed) {
         completed();
         failed();
+        synced();
         return;
       }
       unlistenCompleted = completed;
       unlistenFailed = failed;
+      unlistenSync = synced;
     }).catch((error) => onError(String(error)));
 
     return () => {
       disposed = true;
       unlistenCompleted?.();
       unlistenFailed?.();
+      unlistenSync?.();
     };
   }, [onError]);
 

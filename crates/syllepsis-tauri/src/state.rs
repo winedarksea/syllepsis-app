@@ -54,6 +54,9 @@ pub struct AppState {
     pub cloud_llm_models: Arc<Mutex<HashMap<String, CachedCloudLlmModels>>>,
     pub cloud_llm_credentials: Arc<Mutex<HashMap<String, CachedCloudLlmCredentials>>>,
     pub cloud_sync_credentials: Arc<Mutex<HashMap<String, CachedCloudSyncCredentials>>>,
+    /// Serializes cloud sync passes. Separate from `book` so no UI command contends on it;
+    /// `try_lock()` gives "only one sync at a time, coalesce overlaps" for free.
+    pub sync_lock: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -67,6 +70,7 @@ impl AppState {
             cloud_llm_models: Arc::new(Mutex::new(HashMap::new())),
             cloud_llm_credentials: Arc::new(Mutex::new(HashMap::new())),
             cloud_sync_credentials: Arc::new(Mutex::new(HashMap::new())),
+            sync_lock: Arc::new(Mutex::new(())),
         }
     }
 

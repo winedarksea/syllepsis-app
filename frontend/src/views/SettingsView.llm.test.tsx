@@ -64,6 +64,7 @@ function config(): BookConfig {
       crdt_backend: 'loro',
       conflict_marker: 'conflict',
       external_edit_skew_secs: 2,
+      author: '',
     },
   };
 }

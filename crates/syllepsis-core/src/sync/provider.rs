@@ -7,9 +7,12 @@
 //! plain directory, which is exactly how the Google Drive / Dropbox desktop apps expose a synced
 //! folder — so it is a genuinely useful default, not a stub, and the one the tests run against.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
+use crate::sync::cloud_index::IndexEntry;
 
 /// An opaque per-file revision token (an etag, a Drive version id, a git blob sha, or — for the
 /// local-folder provider — a content hash). The engine compares these for *equality only*; it
@@ -44,6 +47,20 @@ pub trait SyncProvider: Send {
 
     /// Remove `path` from the remote. Removing an already-absent path is not an error.
     fn delete(&self, path: &str) -> CoreResult<()>;
+
+    /// Publish this device's cloud-index fragment (the revisions it last wrote for each path), so
+    /// other devices can learn revisions from `list()` without downloading every file. Default is a
+    /// no-op: providers that don't support a cheap index (e.g. the plain local folder used in tests)
+    /// simply skip it and fall back to download-and-hash, which stays correct.
+    fn publish_index(
+        &self,
+        _actor: &str,
+        _author: &str,
+        _book_id: &str,
+        _entries: &BTreeMap<String, IndexEntry>,
+    ) -> CoreResult<()> {
+        Ok(())
+    }
 }
 
 /// How a remote stores data, which determines how the app treats it (sync-backup.md): a *drive*

@@ -22,10 +22,11 @@ use syllepsis_core::id::NoteId;
 use syllepsis_core::markdown::split_frontmatter;
 use syllepsis_core::storage::{layout, Book, BookMetadata, NoteStore};
 use syllepsis_core::sync::{
-    content_revision, latest_note_activity, list_activity, prune_activity, summarize_activity,
-    ManagedCloudSyncEngine, ManagedObjectEntry, ManagedObjectStore, NoteSyncActivity, RemoteEntry,
-    RemoteRevision, SyncActivityEvent, SyncActivitySummary, SyncEngine, SyncProvider,
-    SyncProviderDescriptor, SyncReport,
+    build_remote_entries, content_revision, fragment_path, is_cloud_index_path,
+    latest_note_activity, list_activity, prune_activity, summarize_activity, CloudIndex,
+    CloudIndexFragment, IndexEntry, ListedRemoteFile, ManagedCloudSyncEngine, ManagedObjectEntry,
+    ManagedObjectStore, NoteSyncActivity, RemoteEntry, RemoteRevision, SyncActivityEvent,
+    SyncActivitySummary, SyncEngine, SyncProvider, SyncProviderDescriptor, SyncReport,
 };
 
 use crate::state::{AppState, CachedCloudSyncCredentials};
@@ -42,7 +43,7 @@ const OAUTH_CLIENT_IDS_LOCAL_FILE: &str = "oauth-client-ids.local.json";
 const GOOGLE_DRIVE_CLIENT_SECRET_ENV_VAR: &str = "SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET";
 const ACTIVITY_RETENTION_DAYS: i64 = 90;
 const WATCH_ACTIVITY_DEBOUNCE: Duration = Duration::from_millis(750);
-const MANAGED_CLOUD_AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(60);
+const MANAGED_CLOUD_AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const MANAGED_CLOUD_STATE_FILE_PREFIX: &str = "managed-cloud-";
 const MANAGED_CLOUD_STATE_FILE_SUFFIX: &str = ".json";
 const CLOUD_SYNC_CONNECTION_MARKERS_FILE: &str = "cloud-sync-connected-providers.json";
@@ -706,26 +707,66 @@ pub fn upload_book_to_cloud(
     Ok(report)
 }
 
-#[tauri::command]
-pub fn sync_managed_cloud_now(
-    app: AppHandle,
-    state: State<AppState>,
-    provider: String,
-) -> Result<SyncReport, String> {
-    upload_book_to_cloud(app, state, provider)
+/// Payload of the `cloud-sync-finished` event emitted when a backgrounded "Sync now" completes.
+#[derive(Debug, Clone, Serialize)]
+pub struct CloudSyncFinished {
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<SyncReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
-pub fn start_managed_cloud_auto_sync(app: AppHandle) {
-    thread::spawn(move || loop {
-        thread::sleep(MANAGED_CLOUD_AUTO_SYNC_INTERVAL);
-        let state = app.state::<AppState>();
-        if let Err(error) = sync_connected_managed_cloud_providers(&app, &state) {
-            tracing::debug!(error = %error, "managed cloud auto-sync skipped");
+#[tauri::command]
+pub fn sync_managed_cloud_now(app: AppHandle, provider: String) {
+    // Run off the IPC worker so a slow network never ties it up; the book lock is already released
+    // during I/O (see `upload_book_to_cloud_inner`), so the UI stays responsive. Report back via an
+    // event instead of a return value.
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = {
+            let state = app.state::<AppState>();
+            upload_book_to_cloud_inner(&state, &provider).and_then(|report| {
+                mark_cloud_sync_provider_connected(&app, &provider, true)?;
+                set_active_cloud_provider_for_current_book(&state, &provider)?;
+                Ok(report)
+            })
+        };
+        let payload = match result {
+            Ok(report) => CloudSyncFinished {
+                provider: provider.clone(),
+                report: Some(report),
+                error: None,
+            },
+            Err(error) => CloudSyncFinished {
+                provider: provider.clone(),
+                report: None,
+                error: Some(error),
+            },
+        };
+        if let Err(error) = app.emit("cloud-sync-finished", payload) {
+            tracing::debug!(error = %error, "failed to emit cloud-sync-finished");
         }
     });
 }
 
-fn sync_connected_managed_cloud_providers(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub fn start_managed_cloud_auto_sync(app: AppHandle) {
+    thread::spawn(move || loop {
+        // Sync immediately on the first iteration (this is also the startup sync — the engine is
+        // bidirectional, so one pass pulls remote changes), then poll on a relaxed cadence.
+        {
+            let state = app.state::<AppState>();
+            if let Err(error) = sync_connected_managed_cloud_providers(&app, &state) {
+                tracing::debug!(error = %error, "managed cloud auto-sync skipped");
+            }
+        }
+        thread::sleep(MANAGED_CLOUD_AUTO_SYNC_INTERVAL);
+    });
+}
+
+pub(crate) fn sync_connected_managed_cloud_providers(
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
     let Some(provider) = active_cloud_provider_for_current_book(state)? else {
         return Ok(());
     };
@@ -749,34 +790,72 @@ fn sync_connected_managed_cloud_providers(app: &AppHandle, state: &AppState) -> 
 }
 
 fn upload_book_to_cloud_inner(state: &AppState, provider: &str) -> Result<SyncReport, String> {
-    let guard = state.book.lock().unwrap();
-    let book = guard
-        .as_ref()
-        .ok_or_else(|| "no book is open".to_string())?;
-    if !book.config.sync.enabled {
-        return Err("sync is disabled".to_string());
-    }
-    let store = opendal_sync_provider_for(state, provider, book)?;
-    let actor = syllepsis_core::sync::actor_id_for(&book.root).map_err(|e| e.to_string())?;
+    // Coalesce overlapping syncs: hold a dedicated lock no UI command contends on. If another sync
+    // is already running, skip this one (an empty report) rather than queue behind it.
+    let _sync_guard = match state.sync_lock.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => return Ok(SyncReport::default()),
+    };
+
+    // Briefly lock the book only to snapshot what the engine needs (it operates on files, not the
+    // `Book`), then drop the guard so no other Tauri command stalls during network I/O.
+    let (root, book_id, sync_cfg, actor, store, author) = {
+        let guard = state.book.lock().unwrap();
+        let book = guard
+            .as_ref()
+            .ok_or_else(|| "no book is open".to_string())?;
+        if !book.config.sync.enabled {
+            return Err("sync is disabled".to_string());
+        }
+        let store = opendal_sync_provider_for(state, provider, book)?;
+        let actor = syllepsis_core::sync::actor_id_for(&book.root).map_err(|e| e.to_string())?;
+        let author = if book.config.sync.author.trim().is_empty() {
+            actor.as_str().to_string()
+        } else {
+            book.config.sync.author.clone()
+        };
+        (
+            book.root.clone(),
+            book.metadata.book_id.clone(),
+            book.config.sync.clone(),
+            actor,
+            store,
+            author,
+        )
+    };
+
+    // Run the sync with NO book lock held — this is what keeps the UI responsive.
     let report = SyncEngine::new_human_readable_remote(
-        book.root.clone(),
+        root,
         Box::new(store),
         actor,
-        &book.config.sync,
+        &sync_cfg,
+        book_id.clone(),
+        author,
     )
     .sync()
     .map_err(|e| e.to_string())?;
-    if let Err(error) = delete_cloud_book_prefix(state, provider, &book.metadata.book_id) {
+
+    // Legacy managed-cloud cleanup (network I/O, but needs no book lock).
+    if let Err(error) = delete_cloud_book_prefix(state, provider, &book_id) {
         tracing::debug!(
             provider = %provider,
-            book_id = %book.metadata.book_id,
+            book_id = %book_id,
             error = %error,
             "legacy managed cloud cleanup skipped"
         );
     }
-    book.store.refresh().map_err(|e| e.to_string())?;
-    let _ = state.local_ai.enqueue_all_stale(book, false);
-    state.invalidate_graph_corpus();
+
+    // Re-lock briefly to refresh derived state — but only if the same book is still open (guard
+    // against the user switching books mid-sync).
+    let guard = state.book.lock().unwrap();
+    if let Some(book) = guard.as_ref() {
+        if book.metadata.book_id == book_id {
+            book.store.refresh().map_err(|e| e.to_string())?;
+            let _ = state.local_ai.enqueue_all_stale(book, false);
+            state.invalidate_graph_corpus();
+        }
+    }
     Ok(report)
 }
 
@@ -888,11 +967,18 @@ fn open_human_readable_cloud_book(
             op,
         };
         let actor = syllepsis_core::sync::actor_id_for(&book.root).map_err(|e| e.to_string())?;
+        let author = if book.config.sync.author.trim().is_empty() {
+            actor.as_str().to_string()
+        } else {
+            book.config.sync.author.clone()
+        };
         SyncEngine::new_human_readable_remote(
             book.root.clone(),
             Box::new(sync_provider),
             actor,
             &book.config.sync,
+            book.metadata.book_id.clone(),
+            author,
         )
         .sync()
         .map_err(|e| e.to_string())?;
@@ -1365,10 +1451,23 @@ impl SyncProvider for OpenDalSyncProvider {
     }
 
     fn list(&self) -> syllepsis_core::CoreResult<Vec<RemoteEntry>> {
-        let entries = self.op.list("").map_err(|e| {
-            syllepsis_core::CoreError::Sync(format!("opendal list cloud root: {e}"))
-        })?;
-        let mut remote_entries = Vec::new();
+        // List recursively (so files in subdirs like `_categories/` are seen) without downloading
+        // any content. Each device's index fragments under `_sync_index/` carry the revisions, so
+        // most files need no `get()` at all — only the ones the planner will actually pull.
+        let entries = self
+            .op
+            .list_options(
+                "",
+                opendal::options::ListOptions {
+                    recursive: true,
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| {
+                syllepsis_core::CoreError::Sync(format!("opendal recursive list cloud root: {e}"))
+            })?;
+        let mut listed = Vec::new();
+        let mut fragments = Vec::new();
         for entry in entries {
             if entry.metadata().mode() != opendal::EntryMode::FILE {
                 continue;
@@ -1377,14 +1476,23 @@ impl SyncProvider for OpenDalSyncProvider {
             if path.is_empty() {
                 continue;
             }
-            let bytes = self.get(&path)?;
-            remote_entries.push(RemoteEntry {
+            if is_cloud_index_path(&path) {
+                if path.ends_with(".json") {
+                    if let Ok(bytes) = self.get(&path) {
+                        if let Ok(fragment) = serde_json::from_slice::<CloudIndexFragment>(&bytes) {
+                            fragments.push(fragment);
+                        }
+                    }
+                }
+                continue;
+            }
+            listed.push(ListedRemoteFile {
                 path,
-                revision: content_revision(&bytes),
                 size: entry.metadata().content_length(),
             });
         }
-        Ok(remote_entries)
+        let index = CloudIndex::merge(fragments);
+        build_remote_entries(listed, &index, |path| Ok(content_revision(&self.get(path)?)))
     }
 
     fn get(&self, path: &str) -> syllepsis_core::CoreResult<Vec<u8>> {
@@ -1405,6 +1513,24 @@ impl SyncProvider for OpenDalSyncProvider {
         self.op
             .delete(path)
             .map_err(|e| syllepsis_core::CoreError::Sync(format!("opendal delete {path}: {e}")))
+    }
+
+    fn publish_index(
+        &self,
+        actor: &str,
+        author: &str,
+        book_id: &str,
+        entries: &std::collections::BTreeMap<String, IndexEntry>,
+    ) -> syllepsis_core::CoreResult<()> {
+        let fragment = CloudIndexFragment::new(book_id, actor, author, entries.clone());
+        let path = fragment_path(author, actor);
+        let bytes = serde_json::to_vec_pretty(&fragment).map_err(|e| {
+            syllepsis_core::CoreError::Sync(format!("serialize cloud index fragment: {e}"))
+        })?;
+        self.op
+            .write(&path, bytes)
+            .map(|_| ())
+            .map_err(|e| syllepsis_core::CoreError::Sync(format!("opendal write {path}: {e}")))
     }
 }
 

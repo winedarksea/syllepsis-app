@@ -283,8 +283,10 @@ export const api = {
     invoke<CloudBookSummary[]>('list_cloud_books', { provider }),
   uploadBookToCloud: (provider: string) =>
     invoke<SyncReport>('upload_book_to_cloud', { provider }),
+  // Fire-and-forget: the sync runs off the IPC worker and reports back via the
+  // `cloud-sync-finished` event (see CloudSyncFinished).
   syncManagedCloudNow: (provider: string) =>
-    invoke<SyncReport>('sync_managed_cloud_now', { provider }),
+    invoke<void>('sync_managed_cloud_now', { provider }),
   openCloudBook: (provider: string, bookId: string, remoteRoot: string, layout: string, parentPath: string) =>
     invoke<BookInfo>('open_cloud_book', { provider, bookId, remoteRoot, layout, parentPath }),
   deleteCurrentBook: (expectedBookName: string) =>
