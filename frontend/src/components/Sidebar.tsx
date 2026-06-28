@@ -1,6 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../lib/store';
-import type { Category, ObjectType } from '../types';
+import { api } from '../lib/api';
+import type { Category, CloudSyncFinished, ObjectType } from '../types';
 import type { SignatureSlot } from '../theme/themes';
 import { Icon } from './Icon';
 import './Sidebar.css';
@@ -41,6 +43,89 @@ const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[]
 export function Sidebar({ onNewNote, onImportImage, isMobileOpen = false, onClose }: Props) {
   const { view, setView, categories, unsortedCount, hideUnsortedBadge, diagnosticsIssueCount, activeCategory, setActiveCategory, theme, toggleTheme, closeBook } = useStore();
   const [newMenuOpen, setNewMenuOpen] = useState(false);
+
+  type SyncMode = 'cloud' | 'git' | 'local';
+  const [syncMode, setSyncMode] = useState<SyncMode>('local');
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const syncMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showSyncMsg = useCallback((msg: string) => {
+    setSyncMsg(msg);
+    if (syncMsgTimer.current) clearTimeout(syncMsgTimer.current);
+    syncMsgTimer.current = setTimeout(() => setSyncMsg(null), 3000);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const statuses = await api.cloudSyncProviderStatuses();
+        const active = statuses.find((s) => s.active_for_current_book && s.connected);
+        if (!cancelled) {
+          if (active) {
+            setSyncMode('cloud');
+            setActiveProvider(active.provider);
+            return;
+          }
+        }
+        const git = await api.gitStatus();
+        if (!cancelled) {
+          setSyncMode(git.is_repository ? 'git' : 'local');
+        }
+      } catch {
+        // silently keep 'local' default
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (syncMode !== 'cloud' || !activeProvider) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    listen<CloudSyncFinished>('cloud-sync-finished', (event) => {
+      const { provider, report, error } = event.payload;
+      if (provider !== activeProvider) return;
+      setSyncing(false);
+      if (error) {
+        showSyncMsg(`Sync error: ${error}`);
+      } else if (report) {
+        const total = report.pushed.length + report.pulled.length + report.merged.length;
+        showSyncMsg(total > 0 ? `Synced (${total} changes)` : 'Up to date');
+      }
+    }).then((fn) => {
+      if (disposed) { fn(); return; }
+      unlisten = fn;
+    }).catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [syncMode, activeProvider, showSyncMsg]);
+
+  const handleSync = useCallback(async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      if (syncMode === 'cloud' && activeProvider) {
+        await api.syncManagedCloudNow(activeProvider);
+        // result arrives via cloud-sync-finished listener; setSyncing(false) handled there
+      } else if (syncMode === 'git') {
+        await api.gitPull();
+        setSyncing(false);
+        showSyncMsg('Git pull complete');
+      } else {
+        await api.operationalActivitySummary();
+        setSyncing(false);
+        showSyncMsg('Refreshed');
+      }
+    } catch (e) {
+      setSyncing(false);
+      showSyncMsg(String(e));
+    }
+  }, [syncing, syncMode, activeProvider, showSyncMsg]);
 
   const closeMobileDrawer = useCallback(() => {
     setNewMenuOpen(false);
@@ -185,8 +270,18 @@ export function Sidebar({ onNewNote, onImportImage, isMobileOpen = false, onClos
             </div>
           )}
         </div>
-        {/* Sync status placeholder — Phase 4 */}
-        <Icon name="cloud_off" slot="sync" className="sidebar-sync-status" size={18} title="Sync: local only" />
+        <button
+          className={`sidebar-sync-btn${syncing ? ' sidebar-sync-btn--busy' : ''}`}
+          onClick={handleSync}
+          title={syncMsg ?? (syncing ? 'Syncing…' : syncMode === 'cloud' ? 'Sync to cloud now' : syncMode === 'git' ? 'Git pull' : 'Refresh')}
+          disabled={syncing}
+        >
+          <Icon
+            name={syncMode === 'cloud' ? 'cloud_sync' : syncMode === 'git' ? 'merge' : 'cloud_off'}
+            slot="sync"
+            size={18}
+          />
+        </button>
       </div>
     </aside>
   );

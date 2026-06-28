@@ -196,7 +196,30 @@
 }
 .sidebar-new-menu-item:hover { background: var(--color-surface-raised); }
 
-.sidebar-sync-status {
+.sidebar-sync-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-1);
+  border-radius: var(--radius-sm);
   color: var(--color-text-tertiary);
+  transition: color var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.sidebar-sync-btn:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.sidebar-sync-btn:disabled {
   cursor: default;
+}
+
+@keyframes sidebar-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.sidebar-sync-btn--busy .material-symbols-outlined {
+  animation: sidebar-spin 1s linear infinite;
 }
