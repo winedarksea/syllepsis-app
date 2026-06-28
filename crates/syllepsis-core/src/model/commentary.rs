@@ -43,6 +43,17 @@ pub enum CommentaryTargetField {
     Categories,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactCheckAssessment {
+    StrongEvidence,
+    SomeQuestionablePoints,
+    ManyQuestionablePoints,
+    FullFailure,
+    NoCheckableClaims,
+    ResponseFailed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommentaryMetadata {
     pub parent_note_id: NoteId,
@@ -70,6 +81,8 @@ pub struct CommentaryMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fact_check_passed: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact_check_assessment: Option<FactCheckAssessment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approves_commentary_id: Option<NoteId>,
 }
 
@@ -94,6 +107,7 @@ impl CommentaryMetadata {
             crdt_backend: None,
             base_crdt_snapshot_b64: None,
             fact_check_passed: None,
+            fact_check_assessment: None,
             approves_commentary_id: None,
         }
     }

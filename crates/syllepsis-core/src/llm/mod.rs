@@ -23,5 +23,5 @@ pub use onnx::OnnxLlmProvider;
 pub use proposal::{Proposal, ProposalStatus};
 pub use provider::{LlmProvider, LlmRequest, LlmResponse};
 pub use selection::{select_llm_provider, LOCAL_PROVIDER};
-pub use service::{parse_category_list, LlmService};
+pub use service::{parse_category_list, parse_fact_check_response, LlmService};
 pub use task::LlmTask;

@@ -62,7 +62,18 @@ fn system_prompt(task: LlmTask) -> &'static str {
         }
         LlmTask::FactCheck => {
             "You are a careful fact-checker. Identify any claims in the note that are dubious, \
-             unsupported, or incorrect, and briefly say why. If nothing is questionable, say so."
+             likely unsupported by scientific evidence, or incorrect. \
+             A statement like, 'the bible says...' can be assessed on its factual alignment with the text, but a statement like 'God is real' would return FULL_FAILURE as it asserts as fact a point which is not empirically verified. \
+             Respond ONLY in this exact YAML format:\n\
+             assessment: STRONG_EVIDENCE\n\
+             notes: <your plain-language explanation here>\n\n\
+             The assessment field must be exactly one of:\n\
+               STRONG_EVIDENCE – all claims are well-supported or uncontroversial\n\
+               SOME_QUESTIONABLE_POINTS – minor issues found\n\
+               MANY_QUESTIONABLE_POINTS – multiple significant issues found\n\
+               FULL_FAILURE – the note is largely incorrect or unsupported\n\
+               NO_CHECKABLE_CLAIMS – the text contains no factual claims (use sparingly; even narrative may have checkable facts)\n\
+             The notes field is your explanation. If nothing is questionable, say so in notes."
         }
         LlmTask::DevilsAdvocate => {
             "You are a sharp devil's advocate. Give the strongest good-faith counter-argument \

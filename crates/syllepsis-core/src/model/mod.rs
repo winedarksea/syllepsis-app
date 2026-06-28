@@ -17,6 +17,7 @@ pub use category::Category;
 pub use classification::{Basis, Checkability, Classification, Priority, Stability, StatementType};
 pub use commentary::{
     CommentaryKind, CommentaryMetadata, CommentarySource, CommentaryStatus, CommentaryTargetField,
+    FactCheckAssessment,
 };
 pub use metadata::{
     Authorship, DateMetadata, FlexDate, ForkInfo, Kanban, Lifecycle, LockMode, Metadata,

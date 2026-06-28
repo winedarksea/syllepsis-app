@@ -11,10 +11,10 @@ use sha2::{Digest, Sha256};
 use crate::app::dto::NoteDto;
 use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
-use crate::llm::{parse_category_list, LlmTask, Proposal};
+use crate::llm::{parse_category_list, parse_fact_check_response, LlmTask, Proposal};
 use crate::model::{
     CommentaryKind, CommentaryMetadata, CommentarySource, CommentaryStatus, CommentaryTargetField,
-    LockMode, Note, ObjectType,
+    FactCheckAssessment, LockMode, Note, ObjectType,
 };
 use crate::storage::{layout, Book, NoteStore};
 
@@ -169,13 +169,23 @@ pub fn create_proposal_commentary(
             metadata.status = CommentaryStatus::Locked;
         }
     }
-    if proposal.task == LlmTask::FactCheck {
-        metadata.fact_check_passed = Some(false);
-    }
+    let commentary_body = if proposal.task == LlmTask::FactCheck {
+        let (assessment, notes) = parse_fact_check_response(&proposal.content);
+        metadata.fact_check_assessment = Some(assessment);
+        metadata.fact_check_passed = Some(matches!(
+            assessment,
+            FactCheckAssessment::StrongEvidence
+                | FactCheckAssessment::SomeQuestionablePoints
+                | FactCheckAssessment::NoCheckableClaims
+        ));
+        notes
+    } else {
+        proposal.content.clone()
+    };
 
     let title = format!("{} proposal for {}", proposal.task.as_str(), parent.title);
     let mut commentary = book.new_commentary_note(title, metadata)?;
-    commentary.body = proposal.content.clone();
+    commentary.body = commentary_body;
     commentary.metadata.authorship.ai_generated = true;
     book.save_commentary_note(&commentary)?;
     Ok(NoteDto::from_note(&commentary))

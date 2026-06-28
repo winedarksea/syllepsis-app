@@ -2,13 +2,15 @@
 //! the reply as a [`Proposal`]. This is the one object the app layer drives for LLM features; it
 //! owns the provider seam and the routing config so callers never touch either directly.
 
+use serde::Deserialize;
+
 use crate::config::{LlmRouting, ModelRef};
 use crate::error::{CoreError, CoreResult};
 use crate::llm::prompts::{self, LlmTaskOptions};
 use crate::llm::proposal::Proposal;
 use crate::llm::provider::{LlmProvider, LlmRequest};
 use crate::llm::task::LlmTask;
-use crate::model::Note;
+use crate::model::{FactCheckAssessment, Note};
 
 pub struct LlmService {
     provider: Box<dyn LlmProvider>,
@@ -172,6 +174,73 @@ pub fn parse_category_list(text: &str) -> Vec<String> {
     out
 }
 
+/// Parse a fact-check YAML response into an assessment enum and a notes string.
+///
+/// Accepts optional leading/trailing markdown code fences. Block scalars with missing
+/// indentation (a common model quirk) are fixed before parsing so there is a single
+/// `serde_yaml` path. Returns `ResponseFailed` only for truly unrecognisable output.
+pub fn parse_fact_check_response(text: &str) -> (FactCheckAssessment, String) {
+    #[derive(Deserialize)]
+    struct FactCheckYaml {
+        assessment: String,
+        notes: String,
+    }
+
+    let stripped = strip_code_fences(text);
+    let normalized = fix_unindented_block_scalars(stripped);
+    match serde_yaml::from_str::<FactCheckYaml>(&normalized) {
+        Ok(parsed) => {
+            let assessment = match parsed.assessment.trim().to_ascii_uppercase().as_str() {
+                "STRONG_EVIDENCE" => FactCheckAssessment::StrongEvidence,
+                "SOME_QUESTIONABLE_POINTS" => FactCheckAssessment::SomeQuestionablePoints,
+                "MANY_QUESTIONABLE_POINTS" => FactCheckAssessment::ManyQuestionablePoints,
+                "FULL_FAILURE" => FactCheckAssessment::FullFailure,
+                "NO_CHECKABLE_CLAIMS" => FactCheckAssessment::NoCheckableClaims,
+                _ => FactCheckAssessment::ResponseFailed,
+            };
+            (assessment, parsed.notes.trim_end().to_string())
+        }
+        Err(_) => (FactCheckAssessment::ResponseFailed, text.to_string()),
+    }
+}
+
+/// Indent content lines that follow a bare block-scalar indicator (`key: >` / `key: |`) so
+/// `serde_yaml` can parse them. Models sometimes omit the required indentation; valid YAML
+/// passes through unchanged (double-indenting an already-indented block is still valid).
+fn fix_unindented_block_scalars(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut in_block = false;
+
+    for line in text.lines() {
+        if in_block {
+            out.push_str("  ");
+            out.push_str(line);
+        } else {
+            out.push_str(line);
+            if let Some(colon) = line.find(':') {
+                let key = &line[..colon];
+                if key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+                    let val = line[colon + 1..].trim();
+                    if matches!(val, ">" | "|" | ">-" | "|-" | ">+" | "|+") {
+                        in_block = true;
+                    }
+                }
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn strip_code_fences(text: &str) -> &str {
+    let s = text.trim();
+    let s = s
+        .strip_prefix("```yaml")
+        .or_else(|| s.strip_prefix("```"))
+        .unwrap_or(s);
+    s.strip_suffix("```").unwrap_or(s).trim()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,5 +338,62 @@ mod tests {
     fn category_parser_normalizes_messy_model_output() {
         let parsed = parse_category_list("#Electrical, Main Panel ; safety\nsafety");
         assert_eq!(parsed, vec!["electrical", "main-panel", "safety"]);
+    }
+
+    #[test]
+    fn fact_check_parser_handles_each_variant() {
+        for (raw, expected) in [
+            ("STRONG_EVIDENCE", FactCheckAssessment::StrongEvidence),
+            ("SOME_QUESTIONABLE_POINTS", FactCheckAssessment::SomeQuestionablePoints),
+            ("MANY_QUESTIONABLE_POINTS", FactCheckAssessment::ManyQuestionablePoints),
+            ("FULL_FAILURE", FactCheckAssessment::FullFailure),
+            ("NO_CHECKABLE_CLAIMS", FactCheckAssessment::NoCheckableClaims),
+        ] {
+            let yaml = format!("assessment: {raw}\nnotes: some notes here");
+            let (assessment, notes) = parse_fact_check_response(&yaml);
+            assert_eq!(assessment, expected, "failed for {raw}");
+            assert_eq!(notes, "some notes here");
+        }
+    }
+
+    #[test]
+    fn fact_check_parser_is_case_insensitive() {
+        let yaml = "assessment: strong_evidence\nnotes: looks good";
+        let (assessment, notes) = parse_fact_check_response(yaml);
+        assert_eq!(assessment, FactCheckAssessment::StrongEvidence);
+        assert_eq!(notes, "looks good");
+    }
+
+    #[test]
+    fn fact_check_parser_unknown_variant_gives_response_failed() {
+        let yaml = "assessment: UNKNOWN_THING\nnotes: something";
+        let (assessment, _) = parse_fact_check_response(yaml);
+        assert_eq!(assessment, FactCheckAssessment::ResponseFailed);
+    }
+
+    #[test]
+    fn fact_check_parser_invalid_yaml_gives_response_failed_with_raw_text() {
+        let raw = "this is not yaml at all :::";
+        let (assessment, notes) = parse_fact_check_response(raw);
+        assert_eq!(assessment, FactCheckAssessment::ResponseFailed);
+        assert_eq!(notes, raw);
+    }
+
+    #[test]
+    fn fact_check_parser_strips_code_fences() {
+        let fenced = "```yaml\nassessment: FULL_FAILURE\nnotes: bad claims\n```";
+        let (assessment, notes) = parse_fact_check_response(fenced);
+        assert_eq!(assessment, FactCheckAssessment::FullFailure);
+        assert_eq!(notes, "bad claims");
+    }
+
+    #[test]
+    fn fact_check_parser_handles_unindented_block_scalar() {
+        // Models sometimes emit `notes: >` with the content on the next line at zero
+        // indentation, which is invalid YAML — the line-based fallback must recover it.
+        let raw = "assessment: STRONG_EVIDENCE\nnotes: >\nAll claims check out.";
+        let (assessment, notes) = parse_fact_check_response(raw);
+        assert_eq!(assessment, FactCheckAssessment::StrongEvidence);
+        assert_eq!(notes, "All claims check out.");
     }
 }
