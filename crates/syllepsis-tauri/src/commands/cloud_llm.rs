@@ -15,11 +15,9 @@ use syllepsis_core::config::ModelRef;
 use syllepsis_core::llm::prompts::LlmTaskOptions;
 use syllepsis_core::llm::{LlmTask, Proposal};
 
+use crate::secrets::{self, KeyringVaultStore, LlmSecret, VaultStore};
 use crate::state::{AppState, CachedCloudLlmCredentials, CachedCloudLlmModels};
 
-const KEYCHAIN_SERVICE: &str = "syllepsis.llm";
-const API_KEY_FIELD: &str = "api-key";
-const BASE_URL_FIELD: &str = "base-url";
 const ANTHROPIC_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -85,43 +83,6 @@ struct CloudLlmHttpRequest {
     body: Value,
 }
 
-trait CredentialStore {
-    fn get(&self, account: &str) -> Result<Option<String>, String>;
-    fn set(&mut self, account: &str, secret: &str) -> Result<(), String>;
-    fn delete(&mut self, account: &str) -> Result<(), String>;
-}
-
-struct KeyringCredentialStore;
-
-impl CredentialStore for KeyringCredentialStore {
-    fn get(&self, account: &str) -> Result<Option<String>, String> {
-        let entry = keyring::Entry::new(KEYCHAIN_SERVICE, account)
-            .map_err(|e| format!("open keychain entry: {e}"))?;
-        match entry.get_password() {
-            Ok(secret) => Ok(Some(secret)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(format!("read keychain entry: {e}")),
-        }
-    }
-
-    fn set(&mut self, account: &str, secret: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(KEYCHAIN_SERVICE, account)
-            .map_err(|e| format!("open keychain entry: {e}"))?;
-        entry
-            .set_password(secret)
-            .map_err(|e| format!("write keychain entry: {e}"))
-    }
-
-    fn delete(&mut self, account: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(KEYCHAIN_SERVICE, account)
-            .map_err(|e| format!("open keychain entry: {e}"))?;
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("delete keychain entry: {e}")),
-        }
-    }
-}
-
 /// Built-in cloud provider descriptors known to the management UI.
 #[tauri::command]
 pub fn cloud_llm_provider_descriptors() -> Vec<CloudLlmProviderDescriptor> {
@@ -134,8 +95,11 @@ pub fn save_cloud_llm_provider_settings(
     state: State<AppState>,
     settings: CloudLlmProviderSettings,
 ) -> Result<(), String> {
-    let mut store = KeyringCredentialStore;
-    save_settings(&mut store, settings.clone())?;
+    {
+        let _guard = state.secrets_lock.lock().unwrap();
+        let mut store = KeyringVaultStore::new();
+        save_settings(&mut store, settings.clone())?;
+    }
     merge_cached_credentials(&state, settings);
     Ok(())
 }
@@ -146,8 +110,11 @@ pub fn clear_cloud_llm_provider_settings(
     state: State<AppState>,
     provider: String,
 ) -> Result<(), String> {
-    let mut store = KeyringCredentialStore;
-    clear_settings(&mut store, &provider)?;
+    {
+        let _guard = state.secrets_lock.lock().unwrap();
+        let mut store = KeyringVaultStore::new();
+        clear_settings(&mut store, &provider)?;
+    }
     state
         .cloud_llm_credentials
         .lock()
@@ -163,7 +130,8 @@ pub fn test_cloud_llm_provider_connection(
     state: State<AppState>,
     settings: CloudLlmProviderSettings,
 ) -> Result<CloudLlmConnectionTestResult, String> {
-    let result = test_connection(&state, &KeyringCredentialStore, settings)?;
+    let mut store = KeyringVaultStore::new();
+    let result = test_connection(&state, &mut store, settings)?;
     cache_cloud_models(&state, &result.provider, &result.models);
     Ok(result)
 }
@@ -178,7 +146,8 @@ pub fn list_cloud_llm_provider_models(
     if let Some(models) = cached_cloud_models(&state, &provider) {
         return Ok(models);
     }
-    let models = list_provider_models(&state, &KeyringCredentialStore, &provider)?;
+    let mut store = KeyringVaultStore::new();
+    let models = list_provider_models(&state, &mut store, &provider)?;
     cache_cloud_models(&state, &provider, &models);
     Ok(models)
 }
@@ -187,7 +156,8 @@ pub(crate) fn cloud_provider_is_configured(
     state: &AppState,
     provider: &str,
 ) -> Result<bool, String> {
-    provider_is_configured(state, &KeyringCredentialStore, provider)
+    let mut store = KeyringVaultStore::new();
+    provider_is_configured(state, &mut store, provider)
 }
 
 /// Generate a proposal through a configured cloud or OpenAI-compatible local server.
@@ -222,7 +192,8 @@ pub(crate) fn generate_cloud_proposal_for_state(
         app::prepare_cloud_prompt_with_options(book, &note_id, task, model_override, options)
             .map_err(|e| e.to_string())?
     };
-    let content = execute_cloud_prompt(state, &KeyringCredentialStore, &prompt)?;
+    let mut store = KeyringVaultStore::new();
+    let content = execute_cloud_prompt(state, &mut store, &prompt)?;
     proposal_from_completed_prompt(state, prompt, content)
 }
 
@@ -242,39 +213,28 @@ fn provider_descriptors() -> Vec<CloudLlmProviderDescriptor> {
 }
 
 fn save_settings(
-    store: &mut impl CredentialStore,
+    store: &mut impl VaultStore,
     settings: CloudLlmProviderSettings,
 ) -> Result<(), String> {
     descriptor_for(&settings.provider)?;
-    apply_optional_secret(
-        store,
-        &account(&settings.provider, API_KEY_FIELD),
-        settings.api_key,
-    )?;
-    apply_optional_secret(
-        store,
-        &account(&settings.provider, BASE_URL_FIELD),
-        settings.base_url,
-    )?;
-    Ok(())
+    let mut secret = secrets::read_llm_secret(store, &settings.provider)?.unwrap_or_default();
+    apply_optional_field(&mut secret.api_key, settings.api_key);
+    apply_optional_field(&mut secret.base_url, settings.base_url);
+    secrets::write_llm_secret(store, &settings.provider, secret)
 }
 
-fn clear_settings(store: &mut impl CredentialStore, provider: &str) -> Result<(), String> {
+fn clear_settings(store: &mut impl VaultStore, provider: &str) -> Result<(), String> {
     descriptor_for(provider)?;
-    store.delete(&account(provider, API_KEY_FIELD))?;
-    store.delete(&account(provider, BASE_URL_FIELD))?;
-    Ok(())
+    secrets::delete_llm_secret(store, provider)
 }
 
-fn apply_optional_secret(
-    store: &mut impl CredentialStore,
-    account: &str,
-    maybe_secret: Option<String>,
-) -> Result<(), String> {
-    match maybe_secret {
-        None => Ok(()),
-        Some(secret) if secret.trim().is_empty() => store.delete(account),
-        Some(secret) => store.set(account, secret.trim()),
+/// Apply an optional settings field to a stored secret: `None` leaves it untouched, an empty string
+/// clears it, and any other value replaces it (trimmed).
+fn apply_optional_field(field: &mut Option<String>, update: Option<String>) {
+    match update {
+        None => {}
+        Some(value) if value.trim().is_empty() => *field = None,
+        Some(value) => *field = Some(value.trim().to_string()),
     }
 }
 
@@ -287,7 +247,7 @@ fn descriptor_for(provider: &str) -> Result<CloudLlmProviderDescriptor, String> 
 
 fn test_connection(
     state: &AppState,
-    store: &impl CredentialStore,
+    store: &mut impl VaultStore,
     settings: CloudLlmProviderSettings,
 ) -> Result<CloudLlmConnectionTestResult, String> {
     let descriptor = descriptor_for(&settings.provider)?;
@@ -330,7 +290,7 @@ fn test_connection(
 
 fn list_provider_models(
     state: &AppState,
-    store: &impl CredentialStore,
+    store: &mut impl VaultStore,
     provider: &str,
 ) -> Result<Vec<CloudLlmModel>, String> {
     let descriptor = descriptor_for(provider)?;
@@ -363,42 +323,56 @@ fn list_provider_models(
 
 fn credentials_with_draft_overrides(
     state: &AppState,
-    store: &impl CredentialStore,
+    store: &mut impl VaultStore,
     settings: &CloudLlmProviderSettings,
 ) -> Result<CloudLlmCredentials, String> {
     descriptor_for(&settings.provider)?;
     let cached = cached_credentials(state, &settings.provider);
+    // Fall back to the vault only for fields the draft and cache leave unspecified.
+    let need_stored = (settings.api_key.is_none()
+        && cached
+            .as_ref()
+            .map(|credentials| credentials.api_key.is_none())
+            .unwrap_or(true))
+        || (settings.base_url.is_none()
+            && cached
+                .as_ref()
+                .map(|credentials| credentials.base_url.is_none())
+                .unwrap_or(true));
+    let stored = if need_stored {
+        let _guard = state.secrets_lock.lock().unwrap();
+        secrets::read_llm_secret(store, &settings.provider)?.unwrap_or_default()
+    } else {
+        LlmSecret::default()
+    };
     Ok(CloudLlmCredentials {
         api_key: credential_field_with_draft_override(
-            store,
-            &account(&settings.provider, API_KEY_FIELD),
+            settings.api_key.as_ref(),
             cached
                 .as_ref()
                 .and_then(|credentials| credentials.api_key.clone()),
-            settings.api_key.as_ref(),
-        )?,
+            stored.api_key,
+        ),
         base_url: credential_field_with_draft_override(
-            store,
-            &account(&settings.provider, BASE_URL_FIELD),
+            settings.base_url.as_ref(),
             cached
                 .as_ref()
                 .and_then(|credentials| credentials.base_url.clone()),
-            settings.base_url.as_ref(),
-        )?,
+            stored.base_url,
+        ),
     })
 }
 
 fn credential_field_with_draft_override(
-    store: &impl CredentialStore,
-    account: &str,
-    cached_value: Option<String>,
     draft_value: Option<&String>,
-) -> Result<Option<String>, String> {
+    cached_value: Option<String>,
+    stored_value: Option<String>,
+) -> Option<String> {
     match draft_value {
-        Some(value) => Ok(trimmed_secret(Some(value.clone()))),
+        Some(value) => trimmed_secret(Some(value.clone())),
         None => match cached_value {
-            Some(value) => Ok(trimmed_secret(Some(value))),
-            None => Ok(trimmed_secret(store.get(account)?)),
+            Some(value) => trimmed_secret(Some(value)),
+            None => trimmed_secret(stored_value),
         },
     }
 }
@@ -549,7 +523,7 @@ fn classify_unauthenticated_response(
 
 fn execute_cloud_prompt(
     state: &AppState,
-    store: &impl CredentialStore,
+    store: &mut impl VaultStore,
     prompt: &CloudLlmPrompt,
 ) -> Result<String, String> {
     let credentials = credentials_for(state, store, &prompt.provider)?;
@@ -607,16 +581,21 @@ fn completion_from_prompt(prompt: CloudLlmPrompt, content: String) -> CloudLlmCo
 
 fn credentials_for(
     state: &AppState,
-    store: &impl CredentialStore,
+    store: &mut impl VaultStore,
     provider: &str,
 ) -> Result<CloudLlmCredentials, String> {
     descriptor_for(provider)?;
     if let Some(credentials) = cached_credentials(state, provider) {
         return Ok(credentials);
     }
+    // Cold cache: read the single vault item under the shared lock, then cache it in memory.
+    let secret = {
+        let _guard = state.secrets_lock.lock().unwrap();
+        secrets::read_llm_secret(store, provider)?.unwrap_or_default()
+    };
     let credentials = CloudLlmCredentials {
-        api_key: trimmed_secret(store.get(&account(provider, API_KEY_FIELD))?),
-        base_url: trimmed_secret(store.get(&account(provider, BASE_URL_FIELD))?),
+        api_key: trimmed_secret(secret.api_key),
+        base_url: trimmed_secret(secret.base_url),
     };
     cache_credentials(state, provider, &credentials);
     Ok(credentials)
@@ -624,7 +603,7 @@ fn credentials_for(
 
 fn provider_is_configured(
     state: &AppState,
-    store: &impl CredentialStore,
+    store: &mut impl VaultStore,
     provider: &str,
 ) -> Result<bool, String> {
     descriptor_for(provider)?;
@@ -635,9 +614,13 @@ fn provider_is_configured(
             provider => return Err(format!("unknown cloud LLM provider: {provider}")),
         });
     }
+    let secret = {
+        let _guard = state.secrets_lock.lock().unwrap();
+        secrets::read_llm_secret(store, provider)?.unwrap_or_default()
+    };
     match provider {
         "anthropic" => {
-            let api_key = trimmed_secret(store.get(&account(provider, API_KEY_FIELD))?);
+            let api_key = trimmed_secret(secret.api_key);
             let configured = api_key.is_some();
             if configured {
                 cache_credentials(
@@ -652,10 +635,10 @@ fn provider_is_configured(
             Ok(configured)
         }
         "openai_compatible" => {
-            let base_url = trimmed_secret(store.get(&account(provider, BASE_URL_FIELD))?);
+            let base_url = trimmed_secret(secret.base_url);
             let configured = base_url.is_some();
             if configured {
-                let api_key = trimmed_secret(store.get(&account(provider, API_KEY_FIELD))?);
+                let api_key = trimmed_secret(secret.api_key);
                 cache_credentials(state, provider, &CloudLlmCredentials { api_key, base_url });
             }
             Ok(configured)
@@ -839,39 +822,14 @@ fn truncate_for_error(body: &str) -> String {
     }
 }
 
-fn account(provider: &str, field: &str) -> String {
-    format!("{provider}:{field}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
-
-    #[derive(Default)]
-    struct MemoryCredentialStore {
-        values: BTreeMap<String, String>,
-    }
-
-    impl CredentialStore for MemoryCredentialStore {
-        fn get(&self, account: &str) -> Result<Option<String>, String> {
-            Ok(self.values.get(account).cloned())
-        }
-
-        fn set(&mut self, account: &str, secret: &str) -> Result<(), String> {
-            self.values.insert(account.to_string(), secret.to_string());
-            Ok(())
-        }
-
-        fn delete(&mut self, account: &str) -> Result<(), String> {
-            self.values.remove(account);
-            Ok(())
-        }
-    }
+    use crate::secrets::test_support::MemoryVaultStore;
 
     #[test]
     fn save_settings_trims_and_preserves_unspecified_fields() {
-        let mut store = MemoryCredentialStore::default();
+        let mut store = MemoryVaultStore::default();
         save_settings(
             &mut store,
             CloudLlmProviderSettings {
@@ -892,38 +850,37 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            store
-                .get(&account("openai_compatible", API_KEY_FIELD))
-                .unwrap(),
-            Some("key".to_string())
-        );
-        assert_eq!(
-            store
-                .get(&account("openai_compatible", BASE_URL_FIELD))
-                .unwrap(),
-            None
-        );
+        let secret = secrets::read_llm_secret(&mut store, "openai_compatible")
+            .unwrap()
+            .unwrap();
+        // The api_key is preserved (untouched by the second save), the base_url is cleared.
+        assert_eq!(secret.api_key.as_deref(), Some("key"));
+        assert_eq!(secret.base_url, None);
     }
 
     #[test]
     fn clear_settings_removes_all_provider_fields() {
-        let mut store = MemoryCredentialStore::default();
-        store
-            .set(&account("anthropic", API_KEY_FIELD), "sk-secret")
-            .unwrap();
+        let mut store = MemoryVaultStore::default();
+        secrets::write_llm_secret(
+            &mut store,
+            "anthropic",
+            LlmSecret {
+                api_key: Some("sk-secret".to_string()),
+                base_url: None,
+            },
+        )
+        .unwrap();
 
         clear_settings(&mut store, "anthropic").unwrap();
 
-        assert_eq!(
-            store.get(&account("anthropic", API_KEY_FIELD)).unwrap(),
-            None
-        );
+        assert!(secrets::read_llm_secret(&mut store, "anthropic")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
     fn unknown_provider_is_rejected() {
-        let mut store = MemoryCredentialStore::default();
+        let mut store = MemoryVaultStore::default();
         let err = save_settings(
             &mut store,
             CloudLlmProviderSettings {
@@ -940,22 +897,31 @@ mod tests {
     #[test]
     fn provider_readiness_matches_required_credential_fields() {
         let state = AppState::new();
-        let mut store = MemoryCredentialStore::default();
-        assert!(!provider_is_configured(&state, &store, "anthropic").unwrap());
-        assert!(!provider_is_configured(&state, &store, "openai_compatible").unwrap());
+        let mut store = MemoryVaultStore::default();
+        assert!(!provider_is_configured(&state, &mut store, "anthropic").unwrap());
+        assert!(!provider_is_configured(&state, &mut store, "openai_compatible").unwrap());
 
-        store
-            .set(&account("anthropic", API_KEY_FIELD), "sk-secret")
-            .unwrap();
-        store
-            .set(
-                &account("openai_compatible", BASE_URL_FIELD),
-                "http://localhost:8080/v1",
-            )
-            .unwrap();
+        secrets::write_llm_secret(
+            &mut store,
+            "anthropic",
+            LlmSecret {
+                api_key: Some("sk-secret".to_string()),
+                base_url: None,
+            },
+        )
+        .unwrap();
+        secrets::write_llm_secret(
+            &mut store,
+            "openai_compatible",
+            LlmSecret {
+                api_key: None,
+                base_url: Some("http://localhost:8080/v1".to_string()),
+            },
+        )
+        .unwrap();
 
-        assert!(provider_is_configured(&state, &store, "anthropic").unwrap());
-        assert!(provider_is_configured(&state, &store, "openai_compatible").unwrap());
+        assert!(provider_is_configured(&state, &mut store, "anthropic").unwrap());
+        assert!(provider_is_configured(&state, &mut store, "openai_compatible").unwrap());
     }
 
     #[test]
@@ -1079,17 +1045,20 @@ mod tests {
     #[test]
     fn connection_test_uses_draft_values_without_mutating_stored_credentials() {
         let state = AppState::new();
-        let mut store = MemoryCredentialStore::default();
-        store
-            .set(
-                &account("openai_compatible", BASE_URL_FIELD),
-                "https://stored.example/v1",
-            )
-            .unwrap();
+        let mut store = MemoryVaultStore::default();
+        secrets::write_llm_secret(
+            &mut store,
+            "openai_compatible",
+            LlmSecret {
+                api_key: None,
+                base_url: Some("https://stored.example/v1".to_string()),
+            },
+        )
+        .unwrap();
 
         let credentials = credentials_with_draft_overrides(
             &state,
-            &store,
+            &mut store,
             &CloudLlmProviderSettings {
                 provider: "openai_compatible".to_string(),
                 api_key: Some(" draft-key ".to_string()),
@@ -1103,11 +1072,11 @@ mod tests {
             credentials.base_url.as_deref(),
             Some("https://draft.example/v1")
         );
+        let stored = secrets::read_llm_secret(&mut store, "openai_compatible")
+            .unwrap()
+            .unwrap();
         assert_eq!(
-            store
-                .get(&account("openai_compatible", BASE_URL_FIELD))
-                .unwrap()
-                .as_deref(),
+            stored.base_url.as_deref(),
             Some("https://stored.example/v1")
         );
     }

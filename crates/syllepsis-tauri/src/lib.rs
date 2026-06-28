@@ -3,6 +3,7 @@
 pub mod commands;
 pub mod local_ai;
 mod model_bootstrap;
+pub mod secrets;
 pub mod state;
 
 use commands::{

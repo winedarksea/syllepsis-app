@@ -43,6 +43,14 @@ pub struct CachedCloudSyncCredentials {
     pub refresh_token: Option<String>,
 }
 
+/// Transient OAuth handshake state held only in memory for the seconds-long connect flow, so the
+/// PKCE verifier and CSRF state never create their own keychain items.
+#[derive(Clone)]
+pub struct PendingOAuth {
+    pub state: String,
+    pub verifier: String,
+}
+
 /// The single app-level state. The open book is behind a Mutex; `None` means no book
 /// is open yet (the user hasn't opened or created one in this session).
 pub struct AppState {
@@ -54,6 +62,13 @@ pub struct AppState {
     pub cloud_llm_models: Arc<Mutex<HashMap<String, CachedCloudLlmModels>>>,
     pub cloud_llm_credentials: Arc<Mutex<HashMap<String, CachedCloudLlmCredentials>>>,
     pub cloud_sync_credentials: Arc<Mutex<HashMap<String, CachedCloudSyncCredentials>>>,
+    /// Serializes the single keychain "secrets vault" read-modify-write across both the sync and
+    /// cloud-LLM subsystems, which now share one item. Held only around vault access, never across
+    /// network calls.
+    pub secrets_lock: Arc<Mutex<()>>,
+    /// In-flight OAuth handshakes keyed by provider; replaces the transient keychain items that the
+    /// connect flow used to write for the CSRF state and PKCE verifier.
+    pub pending_oauth: Arc<Mutex<HashMap<String, PendingOAuth>>>,
     /// Serializes cloud sync passes. Separate from `book` so no UI command contends on it;
     /// `try_lock()` gives "only one sync at a time, coalesce overlaps" for free.
     pub sync_lock: Arc<Mutex<()>>,
@@ -70,6 +85,8 @@ impl AppState {
             cloud_llm_models: Arc::new(Mutex::new(HashMap::new())),
             cloud_llm_credentials: Arc::new(Mutex::new(HashMap::new())),
             cloud_sync_credentials: Arc::new(Mutex::new(HashMap::new())),
+            secrets_lock: Arc::new(Mutex::new(())),
+            pending_oauth: Arc::new(Mutex::new(HashMap::new())),
             sync_lock: Arc::new(Mutex::new(())),
         }
     }

@@ -29,14 +29,9 @@ use syllepsis_core::sync::{
     SyncActivitySummary, SyncEngine, SyncProvider, SyncProviderDescriptor, SyncReport,
 };
 
-use crate::state::{AppState, CachedCloudSyncCredentials};
+use crate::secrets::{self, KeyringVaultStore, SyncTokens, VaultStore};
+use crate::state::{AppState, CachedCloudSyncCredentials, PendingOAuth};
 
-const SYNC_KEYCHAIN_SERVICE: &str = "syllepsis.sync";
-const DEVELOPMENT_SYNC_KEYCHAIN_SERVICE: &str = "syllepsis.sync.dev";
-const ACCESS_TOKEN_FIELD: &str = "access-token";
-const REFRESH_TOKEN_FIELD: &str = "refresh-token";
-const OAUTH_STATE_FIELD: &str = "oauth-state";
-const CODE_VERIFIER_FIELD: &str = "code-verifier";
 const OAUTH_CALLBACK_PATH: &str = "/oauth-callback";
 const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 const OAUTH_CLIENT_IDS_LOCAL_FILE: &str = "oauth-client-ids.local.json";
@@ -459,24 +454,35 @@ pub fn connect_cloud_sync_provider(
     let verifier = pkce_verifier();
     let challenge = pkce_challenge(&verifier);
     let auth_url = oauth_url(&provider, &state, &challenge, &redirect_uri)?;
-    let mut store = KeyringSyncCredentialStore;
-    store.set(&account(&provider, OAUTH_STATE_FIELD), &state)?;
-    store.set(&account(&provider, CODE_VERIFIER_FIELD), &verifier)?;
+    // The CSRF state and PKCE verifier only need to survive the seconds-long handshake within this
+    // session, so they live in memory instead of creating their own keychain items.
+    app.state::<AppState>()
+        .pending_oauth
+        .lock()
+        .unwrap()
+        .insert(
+            provider.clone(),
+            PendingOAuth {
+                state: state.clone(),
+                verifier,
+            },
+        );
 
     let callback_provider = provider.clone();
     let callback_redirect_uri = redirect_uri.clone();
     thread::spawn(move || {
         let result = receive_oauth_callback(listener).and_then(|callback_url| {
+            let app_state = app.state::<AppState>();
             complete_cloud_sync_oauth_callback(
+                &app_state,
                 &callback_provider,
                 &callback_url,
                 &callback_redirect_uri,
             )
             .and_then(|completion| {
                 mark_cloud_sync_provider_connected(&app, &completion.status.provider, true)?;
-                let state = app.state::<AppState>();
                 cache_sync_credentials(
-                    &state,
+                    &app_state,
                     &completion.status.provider,
                     &completion.credentials,
                 );
@@ -502,24 +508,27 @@ pub fn connect_cloud_sync_provider(
 }
 
 fn complete_cloud_sync_oauth_callback(
+    state: &AppState,
     provider: &str,
     callback_url: &str,
     redirect_uri: &str,
 ) -> Result<CloudSyncOAuthCompletion, String> {
     let params = parse_query_params(callback_url);
-    let mut store = KeyringSyncCredentialStore;
     let descriptor = descriptor_for(provider)?;
 
-    let expected_state = store
-        .get(&account(provider, OAUTH_STATE_FIELD))?
+    let pending = state
+        .pending_oauth
+        .lock()
+        .unwrap()
+        .get(provider)
+        .cloned()
         .ok_or_else(|| "no pending OAuth request for this provider".to_string())?;
     let callback_state = params
         .get("state")
         .ok_or_else(|| "OAuth callback did not include state".to_string())?;
-    if callback_state != &expected_state {
+    if callback_state != &pending.state {
         return Err("OAuth callback state did not match the pending request".to_string());
     }
-    store.delete(&account(provider, OAUTH_STATE_FIELD))?;
 
     if let Some(error) = params.get("error") {
         let description = params
@@ -533,25 +542,32 @@ fn complete_cloud_sync_oauth_callback(
         params.get("refresh_token").or_else(|| params.get("token"))
     {
         // Some providers (or manual testing) may deliver a token directly.
-        store.set(&account(provider, REFRESH_TOKEN_FIELD), token)?;
+        write_sync_tokens_locked(
+            state,
+            provider,
+            SyncTokens {
+                access_token: None,
+                refresh_token: Some(token.clone()),
+            },
+        )?;
         cloud_credentials_for_tokens(provider, None, None, Some(token.clone()))?
     } else if let Some(code) = params.get("code") {
         // Standard authorization-code + PKCE flow: exchange the code for tokens.
-        let verifier = store
-            .get(&account(provider, CODE_VERIFIER_FIELD))?
-            .ok_or_else(|| "no PKCE code verifier found; restart the connect flow".to_string())?;
-        store.delete(&account(provider, CODE_VERIFIER_FIELD))?;
-        let credentials = exchange_code_for_tokens(provider, code, &verifier, redirect_uri)?;
-        if let Some(access) = credentials.access_token.as_ref() {
-            store.set(&account(provider, ACCESS_TOKEN_FIELD), access)?;
-        }
-        if let Some(refresh) = credentials.refresh_token.as_ref() {
-            store.set(&account(provider, REFRESH_TOKEN_FIELD), refresh)?;
-        }
+        let credentials = exchange_code_for_tokens(provider, code, &pending.verifier, redirect_uri)?;
+        write_sync_tokens_locked(
+            state,
+            provider,
+            SyncTokens {
+                access_token: credentials.access_token.clone(),
+                refresh_token: credentials.refresh_token.clone(),
+            },
+        )?;
         credentials
     } else {
         return Err("OAuth callback did not include a token or code".to_string());
     };
+    // The handshake is finished; drop the in-memory PKCE state.
+    state.pending_oauth.lock().unwrap().remove(provider);
     Ok(CloudSyncOAuthCompletion {
         status: CloudSyncProviderStatus {
             provider: descriptor.provider,
@@ -571,11 +587,12 @@ pub fn disconnect_cloud_sync_provider(
     provider: String,
 ) -> Result<CloudSyncProviderStatus, String> {
     let descriptor = descriptor_for(&provider)?;
-    let mut store = KeyringSyncCredentialStore;
-    store.delete(&account(&provider, ACCESS_TOKEN_FIELD))?;
-    store.delete(&account(&provider, REFRESH_TOKEN_FIELD))?;
-    store.delete(&account(&provider, OAUTH_STATE_FIELD))?;
-    store.delete(&account(&provider, CODE_VERIFIER_FIELD))?;
+    {
+        let _guard = state.secrets_lock.lock().unwrap();
+        let mut store = KeyringVaultStore::new();
+        secrets::delete_sync_tokens(&mut store, &provider)?;
+    }
+    state.pending_oauth.lock().unwrap().remove(&provider);
     remove_cached_sync_credentials(&state, &provider);
     mark_cloud_sync_provider_connected(&app, &provider, false)?;
     clear_active_cloud_provider_if_matches_current_book(&state, &provider)?;
@@ -1143,49 +1160,15 @@ fn operator_root_from_remote_root(remote_root: &str) -> String {
     format!("/{}", remote_root.trim_start_matches('/'))
 }
 
-struct KeyringSyncCredentialStore;
-
-trait SyncCredentialStore {
-    fn get(&mut self, account: &str) -> Result<Option<String>, String>;
-    fn set(&mut self, account: &str, secret: &str) -> Result<(), String>;
-    fn delete(&mut self, account: &str) -> Result<(), String>;
-}
-
-impl SyncCredentialStore for KeyringSyncCredentialStore {
-    fn get(&mut self, account: &str) -> Result<Option<String>, String> {
-        let entry = keyring::Entry::new(sync_keychain_service(), account)
-            .map_err(|e| format!("open keychain entry: {e}"))?;
-        match entry.get_password() {
-            Ok(secret) => Ok(Some(secret)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(format!("read keychain entry: {e}")),
-        }
-    }
-
-    fn set(&mut self, account: &str, secret: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(sync_keychain_service(), account)
-            .map_err(|e| format!("open keychain entry: {e}"))?;
-        entry
-            .set_password(secret)
-            .map_err(|e| format!("write keychain entry: {e}"))
-    }
-
-    fn delete(&mut self, account: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(sync_keychain_service(), account)
-            .map_err(|e| format!("open keychain entry: {e}"))?;
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("delete keychain entry: {e}")),
-        }
-    }
-}
-
-fn sync_keychain_service() -> &'static str {
-    if cfg!(debug_assertions) {
-        DEVELOPMENT_SYNC_KEYCHAIN_SERVICE
-    } else {
-        SYNC_KEYCHAIN_SERVICE
-    }
+/// Persist freshly minted sync tokens into the shared secrets vault under the serializing lock.
+fn write_sync_tokens_locked(
+    state: &AppState,
+    provider: &str,
+    tokens: SyncTokens,
+) -> Result<(), String> {
+    let _guard = state.secrets_lock.lock().unwrap();
+    let mut store = KeyringVaultStore::new();
+    secrets::write_sync_tokens(&mut store, provider, tokens)
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -1706,14 +1689,14 @@ struct CloudAccessToken {
 }
 
 fn credentials_for(state: &AppState, provider: &str) -> Result<CloudCredentials, String> {
-    let mut store = KeyringSyncCredentialStore;
+    let mut store = KeyringVaultStore::new();
     let mut refresh_access_token = refresh_google_drive_access_token;
     credentials_for_with_store_and_refresh(state, &mut store, provider, &mut refresh_access_token)
 }
 
 fn credentials_for_with_store_and_refresh(
     state: &AppState,
-    store: &mut impl SyncCredentialStore,
+    store: &mut impl VaultStore,
     provider: &str,
     refresh_access_token: &mut impl FnMut(&str, Option<&str>, &str) -> Result<CloudAccessToken, String>,
 ) -> Result<CloudCredentials, String> {
@@ -1727,6 +1710,14 @@ fn credentials_for_with_store_and_refresh(
         cache_sync_credentials(state, provider, &credentials);
         return Ok(credentials);
     }
+    // Cold cache: read the one vault item under the shared lock, then release before any refresh
+    // network call. The in-memory cache absorbs subsequent reads within this process.
+    let tokens = {
+        let _guard = state.secrets_lock.lock().unwrap();
+        secrets::read_sync_tokens(store, provider)?.unwrap_or_default()
+    };
+    let access_token = trimmed_token(tokens.access_token);
+    let refresh_token = trimmed_token(tokens.refresh_token);
     let oauth_client_config = oauth_client_config(provider)?;
     let mut credentials = CloudCredentials {
         client_id: oauth_client_config.client_id.trim().to_string(),
@@ -1734,9 +1725,9 @@ fn credentials_for_with_store_and_refresh(
             .client_secret
             .map(|secret| secret.trim().to_string())
             .filter(|secret| !secret.is_empty()),
-        access_token: token_for_field(store, provider, ACCESS_TOKEN_FIELD)?,
+        access_token,
         access_token_expires_at: None,
-        refresh_token: token_for_field(store, provider, REFRESH_TOKEN_FIELD)?,
+        refresh_token,
     };
     if credentials.access_token.is_none() && credentials.refresh_token.is_none() {
         return Err(format!("{provider} is not connected"));
@@ -1832,15 +1823,10 @@ fn remove_cached_sync_credentials(state: &AppState, provider: &str) {
         .remove(provider);
 }
 
-fn token_for_field(
-    store: &mut impl SyncCredentialStore,
-    provider: &str,
-    field: &str,
-) -> Result<Option<String>, String> {
-    Ok(store
-        .get(&account(provider, field))?
+fn trimmed_token(token: Option<String>) -> Option<String> {
+    token
         .map(|token| token.trim().to_string())
-        .filter(|token| !token.is_empty()))
+        .filter(|token| !token.is_empty())
 }
 
 fn apply_opendal_tokens_gdrive(
@@ -2291,10 +2277,6 @@ fn parse_query_params(url: &str) -> std::collections::BTreeMap<String, String> {
         .collect()
 }
 
-fn account(provider: &str, field: &str) -> String {
-    format!("{provider}:{field}")
-}
-
 fn percent_encode(value: &str) -> String {
     value
         .bytes()
@@ -2406,50 +2388,25 @@ fn safe_book_folder_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secrets::test_support::MemoryVaultStore;
     use std::cell::Cell;
-    use std::collections::HashMap;
     use std::fs::{create_dir_all, write};
     use tempfile::tempdir;
-
-    #[derive(Default)]
-    struct FakeSyncCredentialStore {
-        values: HashMap<String, String>,
-        get_count: usize,
-        set_count: usize,
-        delete_count: usize,
-    }
-
-    impl SyncCredentialStore for FakeSyncCredentialStore {
-        fn get(&mut self, account: &str) -> Result<Option<String>, String> {
-            self.get_count += 1;
-            Ok(self.values.get(account).cloned())
-        }
-
-        fn set(&mut self, account: &str, secret: &str) -> Result<(), String> {
-            self.set_count += 1;
-            self.values.insert(account.to_string(), secret.to_string());
-            Ok(())
-        }
-
-        fn delete(&mut self, account: &str) -> Result<(), String> {
-            self.delete_count += 1;
-            self.values.remove(account);
-            Ok(())
-        }
-    }
 
     #[test]
     fn sync_credentials_cache_prevents_repeated_store_reads() {
         let state = AppState::new();
-        let mut store = FakeSyncCredentialStore::default();
-        store.values.insert(
-            account("dropbox", ACCESS_TOKEN_FIELD),
-            "access-token".to_string(),
-        );
-        store.values.insert(
-            account("dropbox", REFRESH_TOKEN_FIELD),
-            "refresh-token".to_string(),
-        );
+        let mut store = MemoryVaultStore::default();
+        secrets::write_sync_tokens(
+            &mut store,
+            "dropbox",
+            SyncTokens {
+                access_token: Some("access-token".to_string()),
+                refresh_token: Some("refresh-token".to_string()),
+            },
+        )
+        .unwrap();
+        let reads_before = store.vault_get_count();
         let mut refresh_access_token = |_: &str, _: Option<&str>, _: &str| {
             panic!("dropbox should not refresh Google access tokens")
         };
@@ -2463,7 +2420,8 @@ mod tests {
         .unwrap();
         assert_eq!(first.access_token.as_deref(), Some("access-token"));
         assert_eq!(first.refresh_token.as_deref(), Some("refresh-token"));
-        assert_eq!(store.get_count, 2);
+        // The cold read touches the single vault item exactly once.
+        assert_eq!(store.vault_get_count() - reads_before, 1);
 
         let second = credentials_for_with_store_and_refresh(
             &state,
@@ -2473,7 +2431,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(second.access_token.as_deref(), Some("access-token"));
-        assert_eq!(store.get_count, 2);
+        // The in-memory cache serves the second read without re-touching the vault.
+        assert_eq!(store.vault_get_count() - reads_before, 1);
     }
 
     #[test]
@@ -2505,7 +2464,7 @@ mod tests {
         )
         .unwrap();
         cache_sync_credentials(&state, "google_drive", &valid_credentials);
-        let mut store = FakeSyncCredentialStore::default();
+        let mut store = MemoryVaultStore::default();
         let refresh_count = Cell::new(0_usize);
         let mut refresh_access_token = |_: &str, _: Option<&str>, _: &str| {
             refresh_count.set(refresh_count.get() + 1);
@@ -2566,7 +2525,7 @@ mod tests {
         )
         .unwrap();
         cache_sync_credentials(&state, "google_drive", &missing_access_credentials);
-        let mut store = FakeSyncCredentialStore::default();
+        let mut store = MemoryVaultStore::default();
         let refresh_count = Cell::new(0_usize);
         let mut refresh_access_token = |_: &str, _: Option<&str>, _: &str| {
             refresh_count.set(refresh_count.get() + 1);
