@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { api } from '../lib/api';
 import { sanitizeHtml } from '../lib/sanitize';
+import { findLiteralMatches } from '../editor/find';
 
 interface Props {
   markdown: string;
@@ -23,42 +24,23 @@ export function MarkdownRenderer({ markdown, className, findPattern, findMatchIn
     return () => { cancelled = true; };
   }, [markdown]);
 
-  const { highlightedHtml, matchCount } = useMemo(() => {
-    const pattern = findPattern ?? '';
-    if (!pattern.trim()) {
-      onMatchCount?.(0);
-      return { highlightedHtml: html, matchCount: 0 };
-    }
-    try {
-      const regex = new RegExp(pattern, 'g');
-      let index = 0;
-      const highlighted = html.replace(regex, (match) => {
-        const active = index === findMatchIndex;
-        index += 1;
-        return `<mark class="${active ? 'note-find-hit active' : 'note-find-hit'}">${match}</mark>`;
-      });
-      onMatchCount?.(index);
-      return { highlightedHtml: highlighted, matchCount: index };
-    } catch {
-      onMatchCount?.(0);
-      return { highlightedHtml: html, matchCount: 0 };
-    }
-    // onMatchCount is excluded intentionally — it's a callback ref, not reactive data
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [html, findPattern, findMatchIndex]);
-
-  // Scroll the active match into view whenever it changes
   useEffect(() => {
-    if (!matchCount || !containerRef.current) return;
-    const active = containerRef.current.querySelector<HTMLElement>('.note-find-hit.active');
-    active?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [highlightedHtml, matchCount]);
+    const container = containerRef.current;
+    if (!container) return;
+
+    container.innerHTML = html;
+    const matchCount = highlightLiteralMatches(container, findPattern ?? '', findMatchIndex);
+    onMatchCount?.(matchCount);
+    if (!matchCount) return;
+
+    const active = container.querySelector<HTMLElement>('.note-find-hit.active');
+    active?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+  }, [findMatchIndex, findPattern, html, onMatchCount]);
 
   return (
     <div
       ref={containerRef}
       className={className}
-      dangerouslySetInnerHTML={{ __html: highlightedHtml }}
       onClick={(event) => {
         const target = event.target as HTMLElement | null;
         const cloze = target?.closest<HTMLButtonElement>('.syl-cloze');
@@ -79,4 +61,72 @@ export function MarkdownRenderer({ markdown, className, findPattern, findMatchIn
       }}
     />
   );
+}
+
+function highlightLiteralMatches(container: HTMLElement, pattern: string, activeIndex: number): number {
+  const textNodes = collectTextNodes(container);
+  const fullText = textNodes.map((node) => node.data).join('');
+  const matches = findLiteralMatches(fullText, pattern);
+  if (matches.length === 0) return 0;
+
+  const textNodeRanges: Array<{ node: Text; start: number; end: number }> = [];
+  let cursor = 0;
+  for (const node of textNodes) {
+    const start = cursor;
+    const end = start + node.data.length;
+    textNodeRanges.push({ node, start, end });
+    cursor = end;
+  }
+
+  for (let rangeIndex = textNodeRanges.length - 1; rangeIndex >= 0; rangeIndex--) {
+    const range = textNodeRanges[rangeIndex];
+    const segments = matches
+      .map((match, index) => ({ match, index }))
+      .filter(({ match }) => range.end > match.start && range.start < match.end)
+      .map(({ match, index }) => ({
+        start: Math.max(0, match.start - range.start),
+        end: Math.min(range.node.data.length, match.end - range.start),
+        active: index === activeIndex,
+      }));
+    wrapTextNodeRanges(range.node, segments);
+  }
+
+  return matches.length;
+}
+
+function collectTextNodes(root: HTMLElement): Text[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => node.textContent ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+  });
+  const nodes: Text[] = [];
+  let node = walker.nextNode();
+  while (node) {
+    nodes.push(node as Text);
+    node = walker.nextNode();
+  }
+  return nodes;
+}
+
+function wrapTextNodeRanges(node: Text, segments: Array<{ start: number; end: number; active: boolean }>) {
+  if (segments.length === 0 || !node.parentNode) return;
+
+  const text = node.data;
+  const fragment = document.createDocumentFragment();
+  let cursor = 0;
+
+  for (const segment of segments) {
+    if (segment.start >= segment.end) continue;
+    if (segment.start > cursor) {
+      fragment.append(document.createTextNode(text.slice(cursor, segment.start)));
+    }
+
+    const mark = document.createElement('mark');
+    mark.className = segment.active ? 'note-find-hit active' : 'note-find-hit';
+    mark.textContent = text.slice(segment.start, segment.end);
+    fragment.append(mark);
+    cursor = segment.end;
+  }
+
+  if (cursor < text.length) fragment.append(document.createTextNode(text.slice(cursor)));
+  node.parentNode.replaceChild(fragment, node);
 }

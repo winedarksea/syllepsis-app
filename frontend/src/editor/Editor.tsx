@@ -18,7 +18,7 @@ import { HeadingNode, QuoteNode } from '@lexical/rich-text';
 import { ListNode, ListItemNode } from '@lexical/list';
 import { CodeNode, CodeHighlightNode } from '@lexical/code-core';
 import { LinkNode } from '@lexical/link';
-import { $getSelection, $isRangeSelection } from 'lexical';
+import { $createRangeSelection, $getRoot, $getSelection, $isRangeSelection, $setSelection } from 'lexical';
 import type { EditorState, LexicalEditor } from 'lexical';
 import { CategoryNode } from './nodes/CategoryNode';
 import { ClozeNode } from './nodes/ClozeNode';
@@ -35,6 +35,7 @@ import { RelatedCarousel } from '../components/RelatedCarousel';
 import { MetaPanel } from './MetaPanel';
 import { LlmToolsMenu } from './LlmToolsMenu';
 import { CommentaryPanel } from './CommentaryPanel';
+import { clampFindIndex, findLiteralMatches, type EditorFindMatch } from './find';
 import './Editor.css';
 
 // ── CSV helpers for table raw mode ────────────────────────────────────────────
@@ -142,6 +143,60 @@ function SaveShortcutPlugin({ onSave }: { onSave: () => void }) {
     editor.getRootElement()?.addEventListener('keydown', handler);
     return () => editor.getRootElement()?.removeEventListener('keydown', handler);
   }, [editor, onSave]);
+  return null;
+}
+
+function LexicalFindPlugin({
+  activeMatch,
+  enabled,
+  navigationRequest,
+}: {
+  activeMatch: EditorFindMatch | null;
+  enabled: boolean;
+  navigationRequest: number;
+}) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    if (!enabled || !activeMatch) return;
+
+    editor.update(() => {
+      const textNodes = $getRoot().getAllTextNodes();
+      let cursor = 0;
+      let anchor: { node: (typeof textNodes)[number]; offset: number } | null = null;
+      let focus: { node: (typeof textNodes)[number]; offset: number } | null = null;
+
+      for (const node of textNodes) {
+        const text = node.getTextContent();
+        const start = cursor;
+        const end = start + text.length;
+        if (!anchor && activeMatch.start >= start && activeMatch.start <= end) {
+          anchor = { node, offset: activeMatch.start - start };
+        }
+        if (!focus && activeMatch.end >= start && activeMatch.end <= end) {
+          focus = { node, offset: activeMatch.end - start };
+        }
+        cursor = end;
+        if (anchor && focus) break;
+      }
+
+      if (!anchor || !focus) return;
+      const selection = $createRangeSelection();
+      selection.setTextNodeRange(anchor.node, anchor.offset, focus.node, focus.offset);
+      $setSelection(selection);
+    }, { tag: 'find-navigation' });
+
+    requestAnimationFrame(() => {
+      editor.focus();
+      const selection = window.getSelection();
+      const selectedNode = selection?.rangeCount ? selection.getRangeAt(0).startContainer : null;
+      const element = selectedNode instanceof Element
+        ? selectedNode
+        : selectedNode?.parentElement ?? editor.getRootElement();
+      element?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    });
+  }, [activeMatch, editor, enabled, navigationRequest]);
+
   return null;
 }
 
@@ -290,7 +345,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const [findOpen, setFindOpen] = useState(false);
   const [findPattern, setFindPattern] = useState('');
   const [findIndex, setFindIndex] = useState(0);
-  const [readModeMatchCount, setReadModeMatchCount] = useState(0);
+  const [editModeSearchText, setEditModeSearchText] = useState('');
+  const [findHasNavigated, setFindHasNavigated] = useState(false);
+  const [findNavigationRequest, setFindNavigationRequest] = useState(0);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const [commentaryOpen, setCommentaryOpen] = useState(false);
@@ -312,6 +369,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         setTitle(n.title);
         setSummary(n.summary);
         setBody(n.body);
+        setEditModeSearchText(n.body);
         if (initialMode === 'source') setRawText(n.body);
         if (n.type === 'table') {
           const data = await api.readTableData(noteId);
@@ -373,7 +431,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const handleEditorChange = useCallback((state: EditorState, _editor: LexicalEditor, tags: Set<string>) => {
     state.read(() => {
       const markdown = $convertToMarkdownString(transformersRef.current);
+      const editorPlainText = $getRoot().getAllTextNodes().map((node) => node.getTextContent()).join('');
       getCurrentBody.current = () => markdown;
+      setEditModeSearchText(editorPlainText);
       if (!tags.has('init-body')) {
         if (isLockedRef.current) {
           // Body edits on locked notes are held as drafts — don't trigger autosave.
@@ -604,61 +664,50 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     setCharCount(text.length);
   }, [mode, rawText, revision]);
 
-  // Read mode: count comes from MarkdownRenderer via onMatchCount callback (DOM-accurate).
-  // Other modes: count against the raw text.
-  const findMatchCount = useMemo(() => {
-    if (!findPattern.trim()) return 0;
-    if (mode === 'read') return readModeMatchCount;
-    try {
-      return [...bodyForRead.matchAll(new RegExp(findPattern, 'g'))].length;
-    } catch {
-      return 0;
-    }
-  }, [bodyForRead, findPattern, mode, readModeMatchCount]);
+  const findSearchText = useMemo(() => {
+    if (mode === 'source') return rawText;
+    if (mode === 'edit') return editModeSearchText;
+    return bodyForRead;
+  }, [bodyForRead, editModeSearchText, mode, rawText]);
 
-  const findError = useMemo(() => {
-    if (!findPattern.trim()) return null;
-    try {
-      new RegExp(findPattern, 'g');
-      return null;
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
-    }
-  }, [findPattern]);
+  const findMatches = useMemo(
+    () => findLiteralMatches(findSearchText, findPattern),
+    [findPattern, findSearchText],
+  );
+  const findMatchCount = findMatches.length;
+  const activeFindMatch = findMatches[findIndex] ?? null;
 
   const moveFind = useCallback((direction: 1 | -1) => {
     if (findMatchCount === 0) return;
     setFindIndex((current) => {
-      const next = (current + direction + findMatchCount) % findMatchCount;
-      if (mode === 'source') {
-        const regex = new RegExp(findPattern, 'g');
-        let index = 0;
-        let match: RegExpExecArray | null;
-        while ((match = regex.exec(rawTextRef.current)) !== null) {
-          if (index === next) {
-            requestAnimationFrame(() => {
-              const el = rawTextareaRef.current;
-              if (!el) return;
-              el.focus();
-              el.setSelectionRange(match!.index, match!.index + match![0].length);
-              // Scroll so the selection is visible
-              const lineHeight = parseInt(getComputedStyle(el).lineHeight || '20', 10);
-              const linesBefore = rawTextRef.current.slice(0, match!.index).split('\n').length - 1;
-              el.scrollTop = Math.max(0, linesBefore * lineHeight - el.clientHeight / 2);
-            });
-            break;
-          }
-          index += 1;
-          if (match[0].length === 0) regex.lastIndex += 1;
-        }
-      }
+      const next = findHasNavigated
+        ? (current + direction + findMatchCount) % findMatchCount
+        : direction === 1 ? 0 : findMatchCount - 1;
       return next;
     });
-  }, [findMatchCount, findPattern, mode]);
+    setFindHasNavigated(true);
+    setFindNavigationRequest((request) => request + 1);
+  }, [findHasNavigated, findMatchCount]);
 
   useEffect(() => {
     setFindIndex(0);
-  }, [findPattern, noteId]);
+    setFindHasNavigated(false);
+  }, [findPattern, mode, noteId]);
+
+  useEffect(() => {
+    setFindIndex((current) => clampFindIndex(current, findMatchCount));
+  }, [findMatchCount]);
+
+  useEffect(() => {
+    if (mode !== 'source' || !activeFindMatch || !findHasNavigated) return;
+    requestAnimationFrame(() => {
+      const el = rawTextareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(activeFindMatch.start, activeFindMatch.end);
+      centerTextareaSelection(el, rawTextRef.current, activeFindMatch.start);
+    });
+  }, [activeFindMatch, findHasNavigated, findNavigationRequest, mode]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -874,7 +923,6 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           pattern={findPattern}
           matchCount={findMatchCount}
           matchIndex={findIndex}
-          error={findError}
           onPatternChange={setFindPattern}
           onNext={() => moveFind(1)}
           onPrevious={() => moveFind(-1)}
@@ -981,9 +1029,8 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           <MarkdownRenderer
             markdown={bodyForRead}
             className="editor-read-body"
-            findPattern={findError ? '' : findPattern}
+            findPattern={findPattern}
             findMatchIndex={findIndex}
-            onMatchCount={setReadModeMatchCount}
           />
         </div>
       ) : isTable && mode !== 'source' ? (
@@ -1053,6 +1100,11 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           <OnChangePlugin onChange={handleEditorChange} />
           <InitBodyPlugin body={body} transformers={transformers} />
           <SaveShortcutPlugin onSave={save} />
+          <LexicalFindPlugin
+            activeMatch={activeFindMatch}
+            enabled={findOpen && mode === 'edit' && findHasNavigated}
+            navigationRequest={findNavigationRequest}
+          />
         </LexicalComposer>
       )}
 
@@ -1112,6 +1164,16 @@ function displayNeighbor(neighbor: { title: string; summary: string }) {
   return neighbor.title || neighbor.summary || '(untitled)';
 }
 
+function centerTextareaSelection(textarea: HTMLTextAreaElement, text: string, offset: number) {
+  const style = getComputedStyle(textarea);
+  const lineHeight = Number.parseFloat(style.lineHeight) || 20;
+  const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+  const linesBefore = text.slice(0, offset).split('\n').length - 1;
+  const targetTop = paddingTop + linesBefore * lineHeight;
+  textarea.scrollTop = Math.max(0, targetTop - textarea.clientHeight / 2);
+  textarea.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+}
+
 function NoteModeSwitcher({
   mode,
   disabled,
@@ -1143,7 +1205,6 @@ function FindBar({
   pattern,
   matchCount,
   matchIndex,
-  error,
   onPatternChange,
   onNext,
   onPrevious,
@@ -1152,7 +1213,6 @@ function FindBar({
   pattern: string;
   matchCount: number;
   matchIndex: number;
-  error: string | null;
   onPatternChange: (pattern: string) => void;
   onNext: () => void;
   onPrevious: () => void;
@@ -1164,15 +1224,15 @@ function FindBar({
         autoFocus
         value={pattern}
         onChange={(event) => onPatternChange(event.target.value)}
-        placeholder="Regex find"
+        placeholder="Find in note"
       />
-      <span className={error ? 'editor-find-error' : 'editor-find-count'}>
-        {error ? 'Invalid regex' : matchCount > 0 ? `${matchIndex + 1}/${matchCount}` : '0/0'}
+      <span className="editor-find-count">
+        {matchCount > 0 ? `${matchIndex + 1}/${matchCount}` : '0/0'}
       </span>
-      <button onClick={onPrevious} disabled={!!error || matchCount === 0} title="Previous match">
+      <button onClick={onPrevious} disabled={matchCount === 0} title="Previous match">
         <Icon name="keyboard_arrow_up" size={16} />
       </button>
-      <button onClick={onNext} disabled={!!error || matchCount === 0} title="Next match">
+      <button onClick={onNext} disabled={matchCount === 0} title="Next match">
         <Icon name="keyboard_arrow_down" size={16} />
       </button>
       <button onClick={onClose} title="Close find">
