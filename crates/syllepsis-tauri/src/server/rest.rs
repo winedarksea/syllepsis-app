@@ -43,7 +43,7 @@ impl ApiSearchHit {
             summary: hit.summary.clone(),
             relevance: hit.relevance(),
             score: hit.score,
-            object_type: serde_json::to_value(&hit.object_type)
+            object_type: serde_json::to_value(hit.object_type)
                 .ok()
                 .and_then(|v| v.as_str().map(String::from))
                 .unwrap_or_default(),

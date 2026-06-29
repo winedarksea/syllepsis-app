@@ -33,14 +33,12 @@ export function WorldView() {
 
   useEffect(() => {
     // Initial asynchronous load for the selected book.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     reloadWorlds().catch((caught) => setError(String(caught)));
   }, [reloadWorlds]);
 
   useEffect(() => {
     if (!activeWorld) return;
     // Clear stale geometry before the new world arrives.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOverlay(null);
     Promise.all([api.worldOverlay(activeWorld), api.worldBackdrop(activeWorld)])
       .then(([loadedOverlay, loadedBackdrop]) => {
@@ -58,7 +56,6 @@ export function WorldView() {
   const [showGrid, setShowGrid] = useState(false);
   useEffect(() => {
     // Grid preference is external persisted state keyed by book/world.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setShowGrid(gridStorageKey ? localStorage.getItem(gridStorageKey) === 'true' : false);
   }, [gridStorageKey]);
 
@@ -169,7 +166,6 @@ function CreateWorldDialog({ onCancel, onCreated }: {
 
   useEffect(() => {
     // Initial asynchronous load for the dialog.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     reloadImages().catch((caught) => setError(String(caught)));
   }, [reloadImages]);
 
@@ -180,7 +176,6 @@ function CreateWorldDialog({ onCancel, onCreated }: {
 
   useEffect(() => {
     // Avoid showing the previously selected asset while the next preview loads.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPreview(null);
     if (!selectedAssetUuid) return;
     api.assetData(selectedAssetUuid).then(setPreview).catch((caught) => setError(String(caught)));

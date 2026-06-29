@@ -5,10 +5,8 @@
 // When a `slot` is provided and the active theme's icon set resolves path-data for that slot,
 // a controlled <svg><path> is rendered instead — inheriting currentColor, no markup risk.
 
-import { useMemo } from 'react';
-import { useStore } from '../lib/store';
-import { resolveThemeIcons, resolveThemeStyle, SLOT_FALLBACK, type SignatureSlot, type ThemeIcon } from '../theme/themes';
-import { getIconSet } from '../theme/icons/sets';
+import { SLOT_FALLBACK, type SignatureSlot, type ThemeIcon } from '../theme/themes';
+import { useThemeIcons } from './useThemeIcons';
 
 interface IconProps {
   name: string;
@@ -20,23 +18,6 @@ interface IconProps {
   title?: string;
   /** Signature slot: resolves theme icon-set override before falling back to `name` ligature. */
   slot?: SignatureSlot;
-}
-
-/** Returns the active theme's merged icon overrides (set + per-slot). Memoized by themeId. */
-export function useThemeIcons(): Partial<Record<SignatureSlot, ThemeIcon>> {
-  const { themeId, customThemes } = useStore();
-  return useMemo(() => {
-    const style = resolveThemeStyle(themeId, customThemes);
-    const set = getIconSet(style.iconSet);
-    const overrides = resolveThemeIcons(themeId, customThemes);
-    return { ...set, ...overrides };
-  }, [themeId, customThemes]);
-}
-
-/** Returns the active theme's resolved ThemeStyle. Memoized by themeId. */
-export function useThemeStyle() {
-  const { themeId, customThemes } = useStore();
-  return useMemo(() => resolveThemeStyle(themeId, customThemes), [themeId, customThemes]);
 }
 
 function SvgIcon({ icon, size, className, title }: { icon: ThemeIcon; size?: number; className?: string; title?: string }) {

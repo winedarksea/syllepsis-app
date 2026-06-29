@@ -197,7 +197,6 @@ export function CommentaryPanel({
 
     if (lockMode === 'unlock_delay' && item.metadata.status === 'locked') {
       const unlockMs = unlockAtMs(item, unlockDelayHours);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
       void tick; // depend on tick so this re-evaluates each minute
       if (Date.now() < unlockMs) {
         const unlockDate = new Date(unlockMs).toLocaleString();

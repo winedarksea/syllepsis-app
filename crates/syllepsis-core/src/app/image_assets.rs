@@ -192,7 +192,7 @@ fn delete_orphaned_assets_as_of(book: &Book, now: std::time::SystemTime) -> Core
         .store
         .read_all_notes()?
         .into_iter()
-        .chain(book.read_all_commentary_notes()?.into_iter());
+        .chain(book.read_all_commentary_notes()?);
     for note in all_notes {
         if let Some(asset) = &note.asset {
             referenced.insert(asset.uuid.clone());

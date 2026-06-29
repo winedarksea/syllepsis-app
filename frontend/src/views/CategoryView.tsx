@@ -118,7 +118,7 @@ export function CategoryView() {
 
   const loading = !!activeCategory && loadedForCategory !== activeCategory;
 
-  const handleSave = useCallback(async (_updated: Category) => {
+  const handleSave = useCallback(async () => {
     const cats = await api.allCategories();
     setCategories(cats);
     setEditing(false);

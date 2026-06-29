@@ -25,7 +25,8 @@ import {
   resolveThemeStyle, type Theme,
 } from '../theme/themes';
 import { getIconSet } from '../theme/icons/sets';
-import { Icon, useThemeStyle } from '../components/Icon';
+import { Icon } from '../components/Icon';
+import { useThemeStyle } from '../components/useThemeIcons';
 import { PageHeader } from '../components/PageHeader';
 import { CloudLlmModelPicker } from '../components/CloudLlmModelPicker';
 import './SettingsView.css';

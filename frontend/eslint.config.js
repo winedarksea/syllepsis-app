@@ -18,5 +18,14 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // These three rules are designed for the React Compiler and produce
+      // false positives in regular React code (async data-fetch effects,
+      // the "mirror latest value to ref" pattern, tick-keyed Date.now()).
+      // This project does not use the React Compiler, so turn them off.
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/purity': 'off',
+    },
   },
 ])

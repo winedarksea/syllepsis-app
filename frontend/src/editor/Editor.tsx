@@ -408,7 +408,6 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
 
   useEffect(() => {
     // Reset stale preview immediately while the replacement asset loads.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setImageData(null);
     if (!note?.asset) return;
     api.assetData(note.asset.uuid).then(setImageData).catch((e) => setError(String(e)));
@@ -429,6 +428,14 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const getCurrentBody = useRef<() => string>(() => body);
   useEffect(() => { getCurrentBody.current = () => body; }, [body]);
 
+  // Live refs so save/autosave callbacks don't need frequent rebinding.
+  const savingRef = useRef(false);
+  const modeRef = useRef<NoteScreenMode>('read');
+  modeRef.current = mode;
+  // Tracks lock state so handleEditorChange can check it without stale closures.
+  const isLockedRef = useRef(false);
+  isLockedRef.current = !!(note?.metadata.lifecycle?.lock && note.metadata.lifecycle.lock !== 'none');
+
   const handleEditorChange = useCallback((state: EditorState, _editor: LexicalEditor, tags: Set<string>) => {
     state.read(() => {
       const markdown = $convertToMarkdownString(transformersRef.current);
@@ -445,13 +452,6 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       }
     });
   }, [markDirty, setProposalDraftDirty]);
-
-  // Live refs so save/autosave callbacks don't need frequent rebinding.
-  const savingRef = useRef(false);
-  const modeRef = useRef<NoteScreenMode>('read');
-  modeRef.current = mode;
-  // Tracks lock state so handleEditorChange can check it without stale closures.
-  const isLockedRef = useRef(false);
   const rawTextRef = useRef('');
   rawTextRef.current = rawText;
   const rowsRef = useRef<string[][]>([]);
@@ -848,7 +848,6 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const isTable = note.type === 'table';
   const isImageObject = note.type === 'picture' || note.type === 'drawing';
   const isLocked = !!(note.metadata.lifecycle?.lock && note.metadata.lifecycle.lock !== 'none');
-  isLockedRef.current = isLocked;
   const colCount = rows[0]?.length ?? 0;
 
   const editorConfig: InitialConfigType = {

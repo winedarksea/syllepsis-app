@@ -622,7 +622,7 @@ function Workspace() {
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [mobileSidebarOpen]);
+  }, [mobileSidebarOpen, setMobileSidebarOpen]);
 
   // Load the set of code languages that render plugins claim (once per workspace).
   // setPluginsLoaded(true) on both success and error so the editor never waits forever.

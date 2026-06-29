@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
-import { Icon, useThemeStyle } from '../components/Icon';
+import { Icon } from '../components/Icon';
+import { useThemeStyle } from '../components/useThemeIcons';
 import type {
   GraphAnalysisNode, GraphAnalysisResult, GraphSemanticEdge,
 } from '../types';

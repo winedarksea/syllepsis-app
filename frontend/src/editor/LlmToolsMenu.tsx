@@ -113,26 +113,23 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
     }
   }, [styleCardId, styleCards]);
 
-  const buildStyleOverrides = (): string | null => {
-    const parts: string[] = [];
-    if (overrideVerbosity) parts.push(`verbosity: ${overrideVerbosity}`);
-    if (overridePerspective) parts.push(`perspective: ${overridePerspective}`);
-    if (overrideReadingLevel) parts.push(`reading_level: ${overrideReadingLevel}`);
-    if (overrideVoice) parts.push(`voice: ${overrideVoice}`);
-    if (overrideNotes.trim()) parts.push(overrideNotes.trim());
-    return parts.length > 0 ? parts.join('\n') : null;
-  };
-
   const enqueue = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
+      const parts: string[] = [];
+      if (overrideVerbosity) parts.push(`verbosity: ${overrideVerbosity}`);
+      if (overridePerspective) parts.push(`perspective: ${overridePerspective}`);
+      if (overrideReadingLevel) parts.push(`reading_level: ${overrideReadingLevel}`);
+      if (overrideVoice) parts.push(`voice: ${overrideVoice}`);
+      if (overrideNotes.trim()) parts.push(overrideNotes.trim());
+      const styleOverrides = parts.length > 0 ? parts.join('\n') : null;
       const job = await api.enqueueLlmJob({
         target_note_id: noteId,
         task,
         model_override: modelOverride,
         style_card_id: supportsStyleOptions && styleCardId ? styleCardId : null,
-        style_overrides: supportsStyleOptions ? buildStyleOverrides() : null,
+        style_overrides: supportsStyleOptions ? styleOverrides : null,
         summary_variant: supportsSummaryOptions ? summaryVariant : 'plain',
         rewrite_mode: supportsStyleOptions ? rewriteMode : 'standard',
         store_result_as_commentary: storeResultAsCommentary,
@@ -148,6 +145,11 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
     modelOverride,
     noteId,
     onQueued,
+    overrideNotes,
+    overridePerspective,
+    overrideReadingLevel,
+    overrideVerbosity,
+    overrideVoice,
     rewriteMode,
     storeResultAsCommentary,
     styleCardId,
@@ -155,12 +157,6 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
     supportsStyleOptions,
     supportsSummaryOptions,
     task,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    overrideVerbosity,
-    overridePerspective,
-    overrideReadingLevel,
-    overrideVoice,
-    overrideNotes,
   ]);
 
   return (

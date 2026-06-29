@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- Lexical node file: mixes a class, helper fns, and an internal React component by design */
 // A fenced code block whose language is claimed by a code-block-renderer plugin. Instead of plain
 // `<pre><code>`, it asks the backend plugin to render the block and shows the (sanitized) HTML.
 // Round-trips back to a ```lang fenced block on export (see createPluginCodeTransformer).
