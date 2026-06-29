@@ -295,6 +295,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const [commentaryOpen, setCommentaryOpen] = useState(false);
   const [commentaryCount, setCommentaryCount] = useState(0);
+  const [proposalDraftDirty, setProposalDraftDirty] = useState(false);
+  const [submittingProposal, setSubmittingProposal] = useState(false);
+  const [unlockDelayHours, setUnlockDelayHours] = useState(24);
 
   useEffect(() => {
     setNote(null);
@@ -302,6 +305,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     setMode(initialMode);
     setRawText('');
     setDirty(false);
+    setProposalDraftDirty(false);
     api.getNote(noteId)
       .then(async (n) => {
         setNote(n);
@@ -331,6 +335,12 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     if (!commentaryFocusId) return;
     setCommentaryOpen(true);
   }, [commentaryFocusId]);
+
+  // Fetch configured unlock delay when the note is locked so CommentaryPanel can show accurate times.
+  useEffect(() => {
+    if (!note?.metadata.lifecycle?.lock || note.metadata.lifecycle.lock === 'none') return;
+    api.policyOverview().then((p) => setUnlockDelayHours(p.unlock_delay_hours)).catch(() => {});
+  }, [note?.metadata.lifecycle?.lock]);
 
   useEffect(() => {
     setNoteActivity(null);
@@ -364,14 +374,23 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     state.read(() => {
       const markdown = $convertToMarkdownString(transformersRef.current);
       getCurrentBody.current = () => markdown;
-      if (!tags.has('init-body')) markDirty();
+      if (!tags.has('init-body')) {
+        if (isLockedRef.current) {
+          // Body edits on locked notes are held as drafts — don't trigger autosave.
+          setProposalDraftDirty(true);
+        } else {
+          markDirty();
+        }
+      }
     });
-  }, [markDirty]);
+  }, [markDirty, setProposalDraftDirty]);
 
   // Live refs so save/autosave callbacks don't need frequent rebinding.
   const savingRef = useRef(false);
   const modeRef = useRef<NoteScreenMode>('read');
   modeRef.current = mode;
+  // Tracks lock state so handleEditorChange can check it without stale closures.
+  const isLockedRef = useRef(false);
   const rawTextRef = useRef('');
   rawTextRef.current = rawText;
   const rowsRef = useRef<string[][]>([]);
@@ -390,7 +409,11 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         const updated = await api.updateNote({ ...note, title, summary, body: '' });
         setNote(updated);
       } else {
-        const nextBody = modeRef.current === 'source' ? rawTextRef.current : getCurrentBody.current();
+        // Locked notes: send back the stored body so the draft stays local.
+        const isNoteLocked = !!(note.metadata.lifecycle?.lock && note.metadata.lifecycle.lock !== 'none');
+        const nextBody = isNoteLocked
+          ? note.body
+          : (modeRef.current === 'source' ? rawTextRef.current : getCurrentBody.current());
         const updated = await api.updateNote({
           ...note,
           title,
@@ -398,7 +421,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           body: nextBody,
         });
         setNote(updated);
-        if (updated.body !== nextBody) {
+        if (!isNoteLocked && updated.body !== nextBody) {
           setBody(updated.body);
           setRawText(updated.body);
           getCurrentBody.current = () => updated.body;
@@ -702,9 +725,44 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     getCurrentBody.current = () => updated.body;
     setReloadKey((key) => key + 1);
     setDirty(false);
+    setProposalDraftDirty(false);
     setMode('read');
     api.listCommentary(updated.id).then((items) => setCommentaryCount(items.length)).catch(() => {});
   }, []);
+
+  const discardDraft = useCallback(() => {
+    if (!note) return;
+    setBody(note.body);
+    setRawText(note.body);
+    getCurrentBody.current = () => note.body;
+    setReloadKey((k) => k + 1);
+    setProposalDraftDirty(false);
+  }, [note]);
+
+  const submitProposal = useCallback(async () => {
+    if (!note) return;
+    const draftBody = getCurrentBody.current();
+    setSubmittingProposal(true);
+    setError(null);
+    try {
+      const commentary = await api.createCommentary(noteId, 'proposal', draftBody);
+      if (note.metadata.lifecycle?.lock === 'fact_check_gate') {
+        void api.enqueueLlmJob({
+          target_note_id: noteId,
+          task: 'fact_check',
+          store_result_as_commentary: true,
+          for_proposal_id: commentary.id,
+        });
+      }
+      discardDraft();
+      setCommentaryOpen(true);
+      api.listCommentary(noteId).then((items) => setCommentaryCount(items.length)).catch(() => {});
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmittingProposal(false);
+    }
+  }, [note, noteId, discardDraft]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -718,6 +776,8 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
 
   const isTable = note.type === 'table';
   const isImageObject = note.type === 'picture' || note.type === 'drawing';
+  const isLocked = !!(note.metadata.lifecycle?.lock && note.metadata.lifecycle.lock !== 'none');
+  isLockedRef.current = isLocked;
   const colCount = rows[0]?.length ?? 0;
 
   const editorConfig: InitialConfigType = {
@@ -870,6 +930,26 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         </div>
       )}
 
+      {isLocked && !isImageObject && (
+        <div className={`editor-locked-banner${proposalDraftDirty ? ' editor-locked-banner--draft' : ''}`}>
+          {proposalDraftDirty ? (
+            <>
+              <span>Draft changes won't be saved automatically on this locked note.</span>
+              <div className="editor-locked-actions">
+                <button onClick={() => void submitProposal()} disabled={submittingProposal}>
+                  {submittingProposal ? 'Submitting…' : 'Submit proposal'}
+                </button>
+                <button onClick={discardDraft} disabled={submittingProposal}>
+                  Discard draft
+                </button>
+              </div>
+            </>
+          ) : (
+            <span>This note is locked — edits will be staged as a proposal before applying.</span>
+          )}
+        </div>
+      )}
+
       {isImageObject ? (
         <div className="editor-image-object">
           <div className="editor-image-preview">
@@ -987,6 +1067,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           }}
           onApplied={handleCommentaryApplied}
           onCountChange={setCommentaryCount}
+          unlockDelayHours={unlockDelayHours}
         />
       )}
       {!commentaryOpen && <RelatedCarousel noteId={noteId} />}

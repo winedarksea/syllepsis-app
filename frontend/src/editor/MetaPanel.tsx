@@ -5,9 +5,10 @@
 
 import { useMemo, useState } from 'react';
 import { useStore } from '../lib/store';
+import { api } from '../lib/api';
 import { WorldLocationHelper } from '../components/WorldLocationHelper';
 import type {
-  NoteDto, Category, PriorKind, PriorRef, StatementType, Priority, FlexDate, NoteStatus,
+  NoteDto, Category, LockMode, PriorKind, PriorRef, StatementType, Priority, FlexDate, NoteStatus,
   NoteEmbeddingDetails,
 } from '../types';
 
@@ -258,6 +259,18 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
                   Archived
                 </label>
               )}
+              <select
+                value={note.metadata.lifecycle?.lock ?? 'none'}
+                onChange={(e) => {
+                  api.setNoteLock(note.id, e.target.value as LockMode)
+                    .then((updated) => onChange(updated))
+                    .catch(() => {});
+                }}
+              >
+                <option value="none">No lock</option>
+                <option value="unlock_delay">Unlock delay (24 h)</option>
+                <option value="fact_check_gate">Fact-check gate</option>
+              </select>
               <select
                 value={note.metadata.status ?? ''}
                 onChange={(e) => patchMeta({

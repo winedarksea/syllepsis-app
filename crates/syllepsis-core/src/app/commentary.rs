@@ -151,6 +151,7 @@ pub fn create_proposal_commentary(
     book: &Book,
     proposal: &Proposal,
     job_id: Option<&str>,
+    approves_commentary_id: Option<&NoteId>,
 ) -> CoreResult<NoteDto> {
     let parent = book.store.read_note(&proposal.target)?;
     let mut metadata = CommentaryMetadata::new(
@@ -163,6 +164,7 @@ pub fn create_proposal_commentary(
     metadata.task = Some(proposal.task.as_str().to_string());
     metadata.provider = Some(proposal.provider.clone());
     metadata.model = Some(proposal.model.clone());
+    metadata.approves_commentary_id = approves_commentary_id.cloned();
     if proposal.task.replaces_body() {
         attach_merge_base(book, &parent, &mut metadata)?;
         if parent.metadata.lifecycle.lock == LockMode::UnlockDelay {

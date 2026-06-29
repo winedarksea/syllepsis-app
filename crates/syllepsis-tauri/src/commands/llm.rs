@@ -258,9 +258,19 @@ async fn run_queued_llm_job(
                     let guard = state.book.lock().unwrap();
                     match guard.as_ref() {
                         Some(book) => {
-                            app::create_proposal_commentary(book, &proposal, &job_id, &options)
-                                .map(|commentary| commentary.id)
-                                .map_err(|error| error.to_string())
+                            let approves_id = request
+                                .for_proposal_id
+                                .as_deref()
+                                .and_then(|id| syllepsis_core::id::NoteId::parse(id).ok());
+                            app::create_proposal_commentary(
+                                book,
+                                &proposal,
+                                &job_id,
+                                &options,
+                                approves_id.as_ref(),
+                            )
+                            .map(|commentary| commentary.id)
+                            .map_err(|error| error.to_string())
                         }
                         None => Err("no book is open".to_string()),
                     }

@@ -63,6 +63,7 @@ pub struct PolicyOverview {
     pub locked_notes: Vec<LockedNote>,
     pub pending_deletion: Vec<PendingDeletion>,
     pub private_categories: Vec<String>,
+    pub unlock_delay_hours: u32,
 }
 
 /// Load a note, apply `mutate`, stamp `updated`, persist, and return the API shape. The shared
@@ -228,6 +229,7 @@ pub fn policy_overview(book: &Book) -> CoreResult<PolicyOverview> {
         locked_notes: Vec::new(),
         pending_deletion: Vec::new(),
         private_categories: Vec::new(),
+        unlock_delay_hours: book.config.privacy.unlock_delay_hours,
     };
 
     for note in book

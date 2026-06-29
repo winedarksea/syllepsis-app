@@ -212,6 +212,7 @@ export interface QueuedLlmJobRequest {
   summary_variant?: SummaryVariant;
   rewrite_mode?: RewriteMode;
   store_result_as_commentary: boolean;
+  for_proposal_id?: string | null;
 }
 
 export type QueuedLlmJobStatus = 'queued' | 'running' | 'complete' | 'failed';
@@ -1018,6 +1019,7 @@ export interface PolicyOverview {
   locked_notes: LockedNote[];
   pending_deletion: PendingDeletion[];
   private_categories: string[];
+  unlock_delay_hours: number;
 }
 
 // ── Knowledge packs (mirrors syllepsis_core::app::pack and ::pack) ──

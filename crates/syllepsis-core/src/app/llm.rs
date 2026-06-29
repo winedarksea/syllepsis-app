@@ -97,6 +97,10 @@ pub struct QueuedLlmJobRequest {
     pub rewrite_mode: crate::llm::prompts::RewriteMode,
     #[serde(default)]
     pub store_result_as_commentary: bool,
+    /// When set, the stored commentary result will have `approves_commentary_id` pointing at this
+    /// proposal. Used to auto-link a fact-check to the proposal it evaluates.
+    #[serde(default)]
+    pub for_proposal_id: Option<String>,
 }
 
 impl QueuedLlmJobRequest {
@@ -411,7 +415,7 @@ pub fn accept_proposal(
             }
         }
         LlmTask::FactCheck | LlmTask::DevilsAdvocate => {
-            crate::app::commentary::create_proposal_commentary(book, proposal, None)?;
+            crate::app::commentary::create_proposal_commentary(book, proposal, None, None)?;
         }
     }
 
@@ -425,8 +429,9 @@ pub fn create_proposal_commentary(
     proposal: &Proposal,
     job_id: &str,
     _options: &LlmTaskOptions,
+    approves_commentary_id: Option<&crate::id::NoteId>,
 ) -> CoreResult<NoteDto> {
-    crate::app::commentary::create_proposal_commentary(book, proposal, Some(job_id))
+    crate::app::commentary::create_proposal_commentary(book, proposal, Some(job_id), approves_commentary_id)
 }
 
 #[cfg(test)]
@@ -656,6 +661,7 @@ mod tests {
             summary_variant: crate::llm::prompts::SummaryVariant::Mnemonic,
             rewrite_mode: crate::llm::prompts::RewriteMode::Simplify,
             store_result_as_commentary: true,
+            for_proposal_id: None,
         };
 
         let json = serde_json::to_value(&request).unwrap();
@@ -698,7 +704,7 @@ mod tests {
             ..Default::default()
         };
 
-        let commentary = create_proposal_commentary(&book, &proposal, "job-123", &options).unwrap();
+        let commentary = create_proposal_commentary(&book, &proposal, "job-123", &options, None).unwrap();
 
         assert_eq!(commentary.object_type, ObjectType::Commentary);
         assert!(commentary.body.contains("Turn off the breaker first."));

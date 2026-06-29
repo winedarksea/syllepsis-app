@@ -257,6 +257,27 @@
   color: var(--color-text-tertiary);
 }
 
+.commentary-lock-badge {
+  display: inline-block;
+  margin-left: var(--sp-2);
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+  color: var(--color-accent);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+
+.commentary-gate-notice {
+  margin: var(--sp-2) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
 .commentary-card-body {
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -994,6 +1015,54 @@
   background: var(--color-surface-raised);
 }
 .editor-read-body a { color: var(--color-accent); text-decoration: underline; }
+
+.editor-locked-banner {
+  margin: 0 var(--sp-6) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface));
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.editor-locked-banner--draft {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+}
+
+.editor-locked-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.editor-locked-actions button {
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+  background: var(--color-surface);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.editor-locked-actions button:first-child {
+  border-color: var(--color-accent);
+}
+
+.editor-locked-actions button:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface));
+}
+
+.editor-locked-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .editor-repair-banner {
   margin: 0 var(--sp-6) var(--sp-3);
