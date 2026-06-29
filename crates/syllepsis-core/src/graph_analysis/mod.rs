@@ -23,8 +23,8 @@ use layout::{
 pub use types::{
     GraphAnalysisNode, GraphAnalysisRequest, GraphAnalysisResult, GraphAnalysisSummary,
     GraphCluster, GraphMode, GraphPriorEdge, GraphProviderMetadata, GraphSemanticEdge,
-    GraphTimelineMeta, GraphTimelineNodeDate, GraphTimelineTick, TimelineColorBy,
-    TimelineDateField, TimelineGranularity,
+    GraphTimelineMeta, GraphTimelineNodeDate, GraphTimelineNodeRange, GraphTimelineTick,
+    TimelineColorBy, TimelineDateField, TimelineGranularity,
 };
 
 const MAX_SEMANTIC_NEIGHBORS: usize = 30;
@@ -236,6 +236,7 @@ impl SemanticGraphCorpus {
                 outlier: full_outliers[index],
                 no_semantic_signal: self.centroids[index].magnitude() <= f32::EPSILON,
                 timeline_date: None,
+                timeline_range: None,
             })
             .collect();
         let outlier_count = full_outliers.iter().filter(|outlier| **outlier).count();
@@ -284,6 +285,7 @@ impl SemanticGraphCorpus {
                 outlier: outliers[index],
                 no_semantic_signal: self.centroids[index].magnitude() <= f32::EPSILON,
                 timeline_date: None,
+                timeline_range: None,
             })
             .collect();
         let semantic_edges =
@@ -323,13 +325,38 @@ impl SemanticGraphCorpus {
             .iter()
             .map(|resolved| resolved.as_ref().map(|date| date.at_ms))
             .collect();
+        let range_end_dates: Vec<Option<GraphTimelineNodeDate>> =
+            match request.timeline_range_end_date {
+                Some(end_field) => self
+                    .notes
+                    .iter()
+                    .map(|note| resolve_timeline_range_end_date(note, end_field))
+                    .collect(),
+                None => vec![None; note_count],
+            };
         let undated_count = resolved_ms.iter().filter(|ms| ms.is_none()).count();
-        let dated: Vec<i64> = resolved_ms.iter().filter_map(|ms| *ms).collect();
+        let dated: Vec<i64> = resolved_ms
+            .iter()
+            .enumerate()
+            .filter_map(|(index, ms)| {
+                let start_ms = (*ms)?;
+                Some(
+                    std::iter::once(start_ms).chain(
+                        range_end_dates[index]
+                            .as_ref()
+                            .map(|end| end.at_ms)
+                            .into_iter(),
+                    ),
+                )
+            })
+            .flatten()
+            .collect();
 
         let (labels, clusters) = self.timeline_cluster_labels(request);
 
         let mut xs = vec![0.0_f32; note_count];
         let mut ys = vec![0.0_f32; note_count];
+        let mut range_end_xs = vec![None; note_count];
 
         // Reserve a left lane for undated notes only when some exist.
         let time_x_start: f32 = if undated_count > 0 { 0.10 } else { 0.0 };
@@ -363,28 +390,47 @@ impl SemanticGraphCorpus {
                     .clamp(0.0, 1.0)
             };
 
-            // Group dated notes by bucket so same-bucket notes share an x and stack vertically.
-            let mut buckets: BTreeMap<i64, Vec<usize>> = BTreeMap::new();
-            for (index, ms) in resolved_ms.iter().enumerate() {
-                if let Some(ms) = ms {
-                    buckets
-                        .entry(floor_to_bucket(*ms, granularity))
-                        .or_default()
-                        .push(index);
+            for (index, end_date) in range_end_dates.iter().enumerate() {
+                if resolved_ms[index].is_some() {
+                    range_end_xs[index] = end_date.as_ref().map(|end| map_x(end.at_ms));
                 }
             }
-            for (bucket_start, mut members) in buckets {
-                members.sort_by(|a, b| {
-                    resolved_ms[*a].cmp(&resolved_ms[*b]).then_with(|| {
-                        self.notes[*a]
-                            .id
-                            .to_string()
-                            .cmp(&self.notes[*b].id.to_string())
-                    })
-                });
-                let bucket_center =
-                    bucket_start + (next_bucket(bucket_start, granularity) - bucket_start) / 2;
-                place_stack(&mut xs, &mut ys, map_x(bucket_center), members);
+
+            if request.timeline_range_end_date.is_some() {
+                place_timeline_collision_lanes(
+                    &mut xs,
+                    &mut ys,
+                    &resolved_ms,
+                    &range_end_dates,
+                    &self.notes,
+                    start_ms,
+                    end_ms,
+                    |ms| map_x(ms),
+                );
+            } else {
+                // Group dated notes by bucket so same-bucket notes share an x and stack vertically.
+                let mut buckets: BTreeMap<i64, Vec<usize>> = BTreeMap::new();
+                for (index, ms) in resolved_ms.iter().enumerate() {
+                    if let Some(ms) = ms {
+                        buckets
+                            .entry(floor_to_bucket(*ms, granularity))
+                            .or_default()
+                            .push(index);
+                    }
+                }
+                for (bucket_start, mut members) in buckets {
+                    members.sort_by(|a, b| {
+                        resolved_ms[*a].cmp(&resolved_ms[*b]).then_with(|| {
+                            self.notes[*a]
+                                .id
+                                .to_string()
+                                .cmp(&self.notes[*b].id.to_string())
+                        })
+                    });
+                    let bucket_center =
+                        bucket_start + (next_bucket(bucket_start, granularity) - bucket_start) / 2;
+                    place_stack(&mut xs, &mut ys, map_x(bucket_center), members);
+                }
             }
 
             // Undated lane stacked at the far left.
@@ -479,6 +525,18 @@ impl SemanticGraphCorpus {
                 // Reuse the "no signal" flag/styling to mark notes parked in the undated lane.
                 no_semantic_signal: resolved_ms[index].is_none(),
                 timeline_date: resolved_dates[index].clone(),
+                timeline_range: match (
+                    &resolved_dates[index],
+                    &range_end_dates[index],
+                    range_end_xs[index],
+                ) {
+                    (Some(start), Some(end_date), Some(end_x)) => Some(GraphTimelineNodeRange {
+                        end_date: end_date.clone(),
+                        end_x,
+                        end_before_start: end_date.at_ms < start.at_ms,
+                    }),
+                    _ => None,
+                },
             })
             .collect();
 
@@ -763,6 +821,8 @@ fn resolve_note_ms(note: &Note, field: TimelineDateField) -> Option<i64> {
         TimelineDateField::Created => Some(dates.created.timestamp_millis()),
         TimelineDateField::Updated => Some(dates.updated.timestamp_millis()),
         TimelineDateField::Scheduled => flex_date_ms(dates.scheduled.as_ref()),
+        TimelineDateField::Started => flex_date_ms(dates.started.as_ref()),
+        TimelineDateField::Due => flex_date_ms(dates.due.as_ref()),
         TimelineDateField::Completed => flex_date_ms(dates.completed.as_ref()),
     }
 }
@@ -789,10 +849,26 @@ fn resolve_timeline_date(
     })
 }
 
+fn resolve_timeline_range_end_date(
+    note: &Note,
+    source_field: TimelineDateField,
+) -> Option<GraphTimelineNodeDate> {
+    let at_ms = resolve_note_ms(note, source_field)?;
+    Some(GraphTimelineNodeDate {
+        at_ms,
+        source_field,
+        used_fallback: false,
+        date_only: is_date_only_field(source_field),
+    })
+}
+
 fn is_date_only_field(field: TimelineDateField) -> bool {
     matches!(
         field,
-        TimelineDateField::Scheduled | TimelineDateField::Completed
+        TimelineDateField::Scheduled
+            | TimelineDateField::Started
+            | TimelineDateField::Due
+            | TimelineDateField::Completed
     )
 }
 
@@ -817,6 +893,74 @@ fn place_stack(xs: &mut [f32], ys: &mut [f32], x: f32, members: Vec<usize>) {
     for (offset, index) in members.into_iter().enumerate() {
         xs[index] = x;
         ys[index] = Y_TOP + offset as f32 * step;
+    }
+}
+
+fn place_timeline_collision_lanes(
+    xs: &mut [f32],
+    ys: &mut [f32],
+    resolved_ms: &[Option<i64>],
+    range_end_dates: &[Option<GraphTimelineNodeDate>],
+    notes: &[Note],
+    axis_start_ms: i64,
+    axis_end_ms: i64,
+    map_x: impl Fn(i64) -> f32,
+) {
+    const Y_TOP: f32 = 0.08;
+    const Y_BOTTOM: f32 = 0.95;
+    const MINIMUM_LANE_GAP_DIVISOR: i64 = 250;
+
+    let axis_span = (axis_end_ms - axis_start_ms).max(1);
+    let minimum_lane_gap_ms = (axis_span / MINIMUM_LANE_GAP_DIVISOR).max(MS_PER_HOUR);
+    let mut intervals: Vec<(usize, i64, i64)> = resolved_ms
+        .iter()
+        .enumerate()
+        .filter_map(|(index, start)| {
+            let start = (*start)?;
+            let end = range_end_dates[index]
+                .as_ref()
+                .map(|range| range.at_ms)
+                .unwrap_or(start);
+            Some((index, start.min(end), start.max(end)))
+        })
+        .collect();
+    intervals.sort_by(|left, right| {
+        left.1
+            .cmp(&right.1)
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| {
+                notes[left.0]
+                    .id
+                    .to_string()
+                    .cmp(&notes[right.0].id.to_string())
+            })
+    });
+
+    let mut lane_available_after: Vec<i64> = Vec::new();
+    let mut lane_by_index = vec![0_usize; resolved_ms.len()];
+    for (index, visual_start, visual_end) in intervals {
+        let lane = lane_available_after
+            .iter()
+            .position(|available_after| *available_after <= visual_start)
+            .unwrap_or_else(|| {
+                lane_available_after.push(i64::MIN);
+                lane_available_after.len() - 1
+            });
+        lane_available_after[lane] = visual_end + minimum_lane_gap_ms;
+        lane_by_index[index] = lane;
+        xs[index] = map_x(resolved_ms[index].unwrap());
+    }
+
+    let lane_count = lane_available_after.len().max(1);
+    let lane_step = if lane_count <= 1 {
+        0.0
+    } else {
+        (Y_BOTTOM - Y_TOP) / (lane_count as f32 - 1.0)
+    };
+    for (index, start) in resolved_ms.iter().enumerate() {
+        if start.is_some() {
+            ys[index] = Y_TOP + lane_by_index[index] as f32 * lane_step;
+        }
     }
 }
 

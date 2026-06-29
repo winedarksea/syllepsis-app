@@ -65,6 +65,8 @@ export interface DateMetadata {
   created: string;
   updated: string;
   scheduled?: FlexDate;
+  started?: FlexDate;
+  due?: FlexDate;
   completed?: FlexDate;
 }
 
@@ -484,7 +486,13 @@ export interface EmbeddingDiagnostics {
 
 export type GraphMode = 'categories' | 'pillars' | 'communities' | 'density' | 'timeline';
 
-export type TimelineDateField = 'created' | 'updated' | 'scheduled' | 'completed';
+export type TimelineDateField =
+  | 'created'
+  | 'updated'
+  | 'scheduled'
+  | 'started'
+  | 'due'
+  | 'completed';
 export type TimelineGranularity = 'auto' | 'hour' | 'day' | 'month' | 'year';
 export type TimelineColorBy = 'category' | 'cluster';
 
@@ -497,6 +505,7 @@ export interface GraphAnalysisRequest {
   hdbscan_min_cluster_size: number;
   timeline_primary_date: TimelineDateField;
   timeline_fallback_date: TimelineDateField | null;
+  timeline_range_end_date: TimelineDateField | null;
   timeline_granularity: TimelineGranularity;
   timeline_color_by: TimelineColorBy;
 }
@@ -511,6 +520,7 @@ export interface GraphAnalysisNode {
   outlier: boolean;
   no_semantic_signal: boolean;
   timeline_date?: GraphTimelineNodeDate;
+  timeline_range?: GraphTimelineNodeRange;
 }
 
 export interface GraphTimelineNodeDate {
@@ -518,6 +528,12 @@ export interface GraphTimelineNodeDate {
   source_field: TimelineDateField;
   used_fallback: boolean;
   date_only: boolean;
+}
+
+export interface GraphTimelineNodeRange {
+  end_date: GraphTimelineNodeDate;
+  end_x: number;
+  end_before_start: boolean;
 }
 
 export interface GraphCluster {

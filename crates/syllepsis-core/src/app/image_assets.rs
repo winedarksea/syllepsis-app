@@ -124,10 +124,21 @@ pub fn import_image_object(
 /// The note's body is empty; callers may populate it later (e.g., with linked-note references).
 pub fn create_drawing_object(book: &Book, title: &str) -> CoreResult<NoteDto> {
     let blank_svg = blank_drawing_svg();
-    let imported = write_asset_bytes(book, blank_svg.as_bytes(), "svg", "image/svg+xml", (800, 600), "drawing.svg")?;
+    let imported = write_asset_bytes(
+        book,
+        blank_svg.as_bytes(),
+        "svg",
+        "image/svg+xml",
+        (800, 600),
+        "drawing.svg",
+    )?;
     let note_title = {
         let t = title.trim();
-        if t.is_empty() { "Drawing".to_string() } else { t.to_string() }
+        if t.is_empty() {
+            "Drawing".to_string()
+        } else {
+            t.to_string()
+        }
     };
     let mut note = Note::new(
         ObjectType::Drawing,
@@ -779,7 +790,10 @@ mod tests {
         let rel = registry.resolve(&asset.uuid).unwrap();
         let stored_svg = std::fs::read_to_string(book.root.join(rel)).unwrap();
         assert!(stored_svg.contains("<svg"), "stored file is an SVG");
-        assert!(stored_svg.contains("excalidraw"), "SVG contains embedded scene");
+        assert!(
+            stored_svg.contains("excalidraw"),
+            "SVG contains embedded scene"
+        );
     }
 
     #[test]
@@ -798,8 +812,15 @@ mod tests {
         let new_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300"><rect width="10" height="10"/></svg>"#;
         let updated = save_drawing_svg(&book, &dto.id, new_svg).unwrap();
 
-        assert_eq!(updated.asset.as_ref().unwrap().uuid, original_uuid, "uuid unchanged");
-        assert_eq!(updated.asset.as_ref().unwrap().intrinsic_dimensions, (400, 300));
+        assert_eq!(
+            updated.asset.as_ref().unwrap().uuid,
+            original_uuid,
+            "uuid unchanged"
+        );
+        assert_eq!(
+            updated.asset.as_ref().unwrap().intrinsic_dimensions,
+            (400, 300)
+        );
     }
 
     #[test]
@@ -837,7 +858,8 @@ mod tests {
     #[test]
     fn save_drawing_svg_rejects_non_drawing_note() {
         let (_dir, book) = book();
-        let text_note = crate::app::commands::create_note(&book, ObjectType::Note, "text note", None).unwrap();
+        let text_note =
+            crate::app::commands::create_note(&book, ObjectType::Note, "text note", None).unwrap();
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"></svg>"#;
         assert!(save_drawing_svg(&book, &text_note.id, svg).is_err());
     }
@@ -854,8 +876,32 @@ mod tests {
     }
 
     #[test]
+    fn save_drawing_svg_preserves_pretty_printed_excalidraw_scene() {
+        // Mirrors what the frontend save path emits: a leading `<!-- svg-source:excalidraw -->`
+        // comment and a pretty-printed scene JSON in <metadata> (serializeAsJSON output).
+        let (_dir, book) = book();
+        let dto = create_drawing_object(&book, "round trip").unwrap();
+        let saved_svg = "<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" \
+            viewBox=\"0 0 220 140\" width=\"220\" height=\"140\">\
+            <!-- svg-source:excalidraw -->\
+            <metadata>{\n  \"type\": \"excalidraw\",\n  \"version\": 2,\n  \
+            \"elements\": [],\n  \"appState\": {},\n  \"files\": {}\n}</metadata>\
+            <rect x=\"10\" y=\"10\" width=\"200\" height=\"120\" fill=\"none\"/></svg>";
+        save_drawing_svg(&book, &dto.id, saved_svg).unwrap();
+        let read_back = read_drawing_svg(&book, &dto.id).unwrap();
+        // The embedded scene must survive the validate/normalize/write round trip intact.
+        assert!(
+            read_back.contains("\"type\": \"excalidraw\""),
+            "scene JSON preserved"
+        );
+        assert!(read_back.contains("<metadata>"), "metadata block preserved");
+    }
+
+    #[test]
     fn syllepsis_href_rule_allows_valid_ids() {
-        assert!(is_allowed_syllepsis_href("syllepsis://note/01ABCDEFGHJKLMNPQRST"));
+        assert!(is_allowed_syllepsis_href(
+            "syllepsis://note/01ABCDEFGHJKLMNPQRST"
+        ));
         assert!(is_allowed_syllepsis_href("syllepsis://note/abc-def_123"));
     }
 

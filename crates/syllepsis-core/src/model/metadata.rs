@@ -40,13 +40,19 @@ pub struct FlexDate {
 }
 
 /// System-tracked and user-optional dates. `created`/`updated` are always present and
-/// managed by the app; `scheduled`/`completed` are user-set.
+/// managed by the app. Task dates distinguish planned and actual starts/ends:
+/// `scheduled` is expected start, `started` is actual start, `due` is expected end, and
+/// `completed` is actual end.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DateMetadata {
     pub created: DateTime<Utc>,
     pub updated: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduled: Option<FlexDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started: Option<FlexDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub due: Option<FlexDate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed: Option<FlexDate>,
 }
@@ -59,6 +65,8 @@ impl DateMetadata {
             created: now,
             updated: now,
             scheduled: None,
+            started: None,
+            due: None,
             completed: None,
         }
     }
@@ -70,6 +78,8 @@ impl Default for DateMetadata {
             created: DateTime::<Utc>::UNIX_EPOCH,
             updated: DateTime::<Utc>::UNIX_EPOCH,
             scheduled: None,
+            started: None,
+            due: None,
             completed: None,
         }
     }

@@ -36,6 +36,7 @@ export function GraphView() {
     hdbscan_min_cluster_size: store.graphHdbscanMinClusterSize,
     timeline_primary_date: store.timelinePrimaryDate,
     timeline_fallback_date: store.timelineFallbackDate,
+    timeline_range_end_date: store.timelineRangeEndDate,
     timeline_granularity: store.timelineGranularity,
     timeline_color_by: store.timelineColorBy,
   }), [
@@ -49,6 +50,7 @@ export function GraphView() {
     store.graphHdbscanMinClusterSize,
     store.timelinePrimaryDate,
     store.timelineFallbackDate,
+    store.timelineRangeEndDate,
     store.timelineGranularity,
     store.timelineColorBy,
   ]);

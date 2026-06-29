@@ -14,6 +14,8 @@ const SORT_FIELDS: { id: TimelineDateField; label: string }[] = [
   { id: 'created', label: 'Created' },
   { id: 'updated', label: 'Updated' },
   { id: 'scheduled', label: 'Scheduled' },
+  { id: 'started', label: 'Started' },
+  { id: 'due', label: 'Due' },
   { id: 'completed', label: 'Completed' },
 ];
 
@@ -54,7 +56,11 @@ function noteSortKey(note: NoteDto, field: TimelineDateField): number | null {
       ? dates.updated
       : field === 'scheduled'
         ? dates.scheduled?.date
-        : dates.completed?.date;
+        : field === 'started'
+          ? dates.started?.date
+          : field === 'due'
+            ? dates.due?.date
+            : dates.completed?.date;
   if (!raw) return null;
   const parsed = Date.parse(raw);
   return Number.isNaN(parsed) ? null : parsed;

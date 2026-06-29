@@ -217,10 +217,10 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
   const catSummary = note.categories.length
     ? `${note.categories.length} ${note.categories.length === 1 ? 'category' : 'categories'}`
     : undefined;
-  const scheduledDate = note.metadata.dates.scheduled;
+  const primaryTaskDate = note.metadata.dates.due ?? note.metadata.dates.scheduled;
   const isTodo = note.metadata.classification.kind === 'todo';
-  const dateSummary = scheduledDate
-    ? `${isTodo ? 'Due' : 'Scheduled'} ${formatDateShort(scheduledDate.date)}`
+  const dateSummary = primaryTaskDate
+    ? `${note.metadata.dates.due ? 'Due' : 'Scheduled'} ${formatDateShort(primaryTaskDate.date)}`
     : undefined;
   const statusSummary = note.metadata.status ? humanize(note.metadata.status) : undefined;
 
@@ -364,7 +364,7 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
             )}
           </section>
 
-          {/* Dates: 2×2 grid */}
+          {/* Dates */}
           <section className="meta-section">
             <SectionHead
               icon="calendar_today"
@@ -375,17 +375,29 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
             />
             {openSections.has('dates') && (
               <div className="dp-section-body">
-                <div className="dp-dates-grid">
+                <div className="dp-task-dates-grid">
                   <DateField
-                    label={isTodo ? 'Due' : 'Scheduled'}
+                    label="Scheduled"
                     value={note.metadata.dates.scheduled}
                     onChange={(d) => patchMeta({ dates: { ...note.metadata.dates, scheduled: d } })}
                   />
                   <DateField
-                    label={isTodo ? 'Done' : 'Completed'}
+                    label="Started"
+                    value={note.metadata.dates.started}
+                    onChange={(d) => patchMeta({ dates: { ...note.metadata.dates, started: d } })}
+                  />
+                  <DateField
+                    label="Due"
+                    value={note.metadata.dates.due}
+                    onChange={(d) => patchMeta({ dates: { ...note.metadata.dates, due: d } })}
+                  />
+                  <DateField
+                    label="Completed"
                     value={note.metadata.dates.completed}
                     onChange={(d) => patchMeta({ dates: { ...note.metadata.dates, completed: d } })}
                   />
+                </div>
+                <div className="dp-system-dates-row">
                   <div className="meta-date-readonly">
                     Created
                     <span>{formatTimestamp(note.metadata.dates.created)}</span>

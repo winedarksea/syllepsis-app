@@ -1825,15 +1825,23 @@ pre.plugin-block {
 }
 .dp-date-clear:hover { color: var(--color-error); }
 
-/* 2×2 dates grid */
-.dp-dates-grid {
+.dp-task-dates-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: var(--sp-3);
 }
 
+.dp-system-dates-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+}
+
 @media (max-width: 480px) {
-  .dp-dates-grid { grid-template-columns: 1fr; }
+  .dp-task-dates-grid { grid-template-columns: 1fr; }
   .dp-priority-group { display: flex; width: 100%; }
   .dp-priority-btn { flex: 1; }
 }

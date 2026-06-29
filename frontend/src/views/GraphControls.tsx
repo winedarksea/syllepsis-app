@@ -22,10 +22,12 @@ const CLUSTER_PRESETS: { id: ClustersPreset; label: string; algorithm: string }[
 ];
 
 const DATE_FIELDS: { id: TimelineDateField; label: string }[] = [
-  { id: 'created', label: 'Created' },
-  { id: 'updated', label: 'Updated' },
-  { id: 'scheduled', label: 'Scheduled' },
-  { id: 'completed', label: 'Completed' },
+  { id: 'created', label: 'created' },
+  { id: 'updated', label: 'updated' },
+  { id: 'scheduled', label: 'scheduled' },
+  { id: 'started', label: 'started' },
+  { id: 'due', label: 'due' },
+  { id: 'completed', label: 'completed' },
 ];
 
 const GRANULARITIES: { id: TimelineGranularity; label: string }[] = [
@@ -71,6 +73,14 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
     : store.graphMode === 'communities'
       ? store.setGraphCommunitiesNeighbors
       : store.setGraphDensityNeighbors;
+  const timelineEndFields = [
+    ...(store.timelinePrimaryDate === 'scheduled'
+      ? DATE_FIELDS.filter((field) => field.id === 'due')
+      : []),
+    ...DATE_FIELDS.filter((field) =>
+      field.id !== store.timelinePrimaryDate
+      && !(store.timelinePrimaryDate === 'scheduled' && field.id === 'due')),
+  ];
 
   return (
     <header className="gv-toolbar">
@@ -143,9 +153,24 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
             <span>Date</span>
             <select
               value={store.timelinePrimaryDate}
-              onChange={(event) => store.setTimelinePrimaryDate(event.target.value as TimelineDateField)}
+              onChange={(event) => {
+                const nextPrimary = event.target.value as TimelineDateField;
+                store.setTimelinePrimaryDate(nextPrimary);
+                if (store.timelineRangeEndDate === nextPrimary) store.setTimelineRangeEndDate(null);
+              }}
             >
               {DATE_FIELDS.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}
+            </select>
+          </label>
+          <label className="gv-timeline-control">
+            <span>End</span>
+            <select
+              value={store.timelineRangeEndDate ?? ''}
+              onChange={(event) =>
+                store.setTimelineRangeEndDate(event.target.value === '' ? null : event.target.value as TimelineDateField)}
+            >
+              <option value="">(none)</option>
+              {timelineEndFields.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}
             </select>
           </label>
           <label className="gv-timeline-control">

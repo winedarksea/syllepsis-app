@@ -32,5 +32,5 @@ test('fallback source is identified', () => {
     source_field: 'created',
     used_fallback: true,
     date_only: false,
-  }), 'Created fallback');
+  }), 'created fallback');
 });

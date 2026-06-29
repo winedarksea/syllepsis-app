@@ -54,8 +54,11 @@ function extractSceneFromSvg(svg: string): string | null {
   for (const m of content.matchAll(/<!--([\s\S]*?)-->/g)) {
     candidates.push(m[1].trim());
   }
+  // Whitespace-tolerant: serializeAsJSON pretty-prints (`"type": "excalidraw"`), while the
+  // backend's blank scene is compact (`"type":"excalidraw"`).
+  const sceneMarker = /"type"\s*:\s*"excalidraw"/;
   for (const candidate of candidates) {
-    if (candidate.includes('"type":"excalidraw"')) {
+    if (sceneMarker.test(candidate)) {
       return decodeXmlEntities(candidate);
     }
   }

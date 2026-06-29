@@ -533,6 +533,42 @@
   pointer-events: none;
 }
 
+.tl-range {
+  cursor: pointer;
+}
+
+.tl-range-bar {
+  fill: color-mix(in srgb, var(--color-text-secondary) 14%, var(--color-surface-raised));
+  stroke: color-mix(in srgb, var(--color-text-secondary) 62%, transparent);
+  stroke-width: 1.2;
+  transition: fill var(--transition-fast), stroke-width var(--transition-fast);
+}
+
+.tl-range-end-cap {
+  stroke: color-mix(in srgb, var(--color-text-secondary) 70%, transparent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.tl-range.gv-node--0 .tl-range-bar { fill: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface-raised)); stroke: var(--color-accent); }
+.tl-range.gv-node--1 .tl-range-bar { fill: color-mix(in srgb, var(--color-secondary) 14%, var(--color-surface-raised)); stroke: var(--color-secondary); }
+.tl-range.gv-node--2 .tl-range-bar { fill: color-mix(in srgb, var(--color-text-secondary) 12%, var(--color-surface-raised)); stroke: var(--color-text-secondary); }
+.tl-range.gv-node--3 .tl-range-bar { fill: color-mix(in srgb, var(--color-accent-hover) 13%, var(--color-surface-raised)); stroke: var(--color-accent-hover); }
+.tl-range.gv-node--4 .tl-range-bar { fill: color-mix(in srgb, var(--color-tertiary) 14%, var(--color-surface-raised)); stroke: var(--color-tertiary); }
+
+.tl-range.active .tl-range-bar {
+  stroke-width: 2;
+}
+
+.tl-range.reversed .tl-range-bar {
+  stroke-dasharray: 4 3;
+}
+
+.tl-range.reversed .tl-range-end-cap {
+  stroke-dasharray: 2 2;
+}
+
 .tl-svg .gv-prior-edge {
   pointer-events: none;
 }

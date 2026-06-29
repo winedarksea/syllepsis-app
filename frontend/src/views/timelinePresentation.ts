@@ -1,10 +1,12 @@
 import type { GraphTimelineNodeDate, TimelineDateField } from '../types';
 
 const TIMELINE_DATE_FIELD_LABELS: Record<TimelineDateField, string> = {
-  created: 'Created',
-  updated: 'Updated',
-  scheduled: 'Scheduled',
-  completed: 'Completed',
+  created: 'created',
+  updated: 'updated',
+  scheduled: 'scheduled',
+  started: 'started',
+  due: 'due',
+  completed: 'completed',
 };
 
 export function formatTimelineNodeDate(

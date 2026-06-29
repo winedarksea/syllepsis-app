@@ -12,7 +12,7 @@ import {
 } from './timelinePresentation';
 import { useGraphCamera, type Camera2D } from './useGraphCamera';
 import {
-  findNearestActivatablePoint, SvgActivationTracker, svgUserPointToClient,
+  findNearestActivatablePoint, SvgActivationTracker, svgClientPoint, svgUserPointToClient,
 } from './graphInteraction';
 
 const MIN_ZOOM = 0.25;
@@ -21,7 +21,9 @@ const TIMELINE_AXIS_SCREEN_Y = GRAPH_HEIGHT - 82;
 const TIMELINE_STACK_TOP = 24;
 const TIMELINE_STACK_BOTTOM = TIMELINE_AXIS_SCREEN_Y - 24;
 const TIMELINE_TOOLTIP_WIDTH = 250;
-const TIMELINE_TOOLTIP_HEIGHT = 76;
+const TIMELINE_TOOLTIP_HEIGHT = 96;
+const TIMELINE_RANGE_BAR_HEIGHT = 8;
+const TIMELINE_RANGE_HIT_RADIUS = 12;
 
 interface TimelineCanvasProps {
   result: GraphAnalysisResult;
@@ -90,6 +92,30 @@ export function TimelineCanvas({
     const svg = svgRef.current;
     const screenPoint = { x: clientX, y: clientY };
     if (!svg) return null;
+    const svgPoint = svgClientPoint(svg, clientX, clientY);
+    if (svgPoint) {
+      let nearestRangeId: string | null = null;
+      let nearestRangeDistance = TIMELINE_RANGE_HIT_RADIUS;
+      for (const node of result.nodes) {
+        if (!node.timeline_range) continue;
+        const startPoint = pointsById.get(node.id);
+        if (!startPoint) continue;
+        const startX = projectX(startPoint.x);
+        const endX = projectX(normalizedXToWorld(node.timeline_range.end_x));
+        const y = projectY(startPoint.y);
+        const left = Math.min(startX, endX);
+        const right = Math.max(startX, endX);
+        if (svgPoint.x < left - TIMELINE_RANGE_HIT_RADIUS || svgPoint.x > right + TIMELINE_RANGE_HIT_RADIUS) {
+          continue;
+        }
+        const distance = Math.abs(svgPoint.y - y);
+        if (distance <= nearestRangeDistance) {
+          nearestRangeId = node.id;
+          nearestRangeDistance = distance;
+        }
+      }
+      if (nearestRangeId) return nearestRangeId;
+    }
     const rect = svg.getBoundingClientRect();
     const points = result.nodes.map((node) => {
       const worldPoint = pointsById.get(node.id)!;
@@ -151,6 +177,7 @@ export function TimelineCanvas({
   const hoveredPoint = hoveredNode ? pointsById.get(hoveredNode.id) : undefined;
   const undatedCount = timeline?.undated_count ?? 0;
   const dividerWorldX = normalizedXToWorld(0.075);
+  const rangeMode = result.nodes.some((node) => node.timeline_range);
 
   return (
     <div className={`gv-canvas tl-canvas${loading ? ' loading' : ''}`}>
@@ -235,6 +262,47 @@ export function TimelineCanvas({
             </g>
           )}
 
+          <g className="tl-ranges">
+            {result.nodes.map((node) => {
+              if (!node.timeline_date || !node.timeline_range) return null;
+              const startPoint = pointsById.get(node.id)!;
+              const startX = projectX(startPoint.x);
+              const endX = projectX(normalizedXToWorld(node.timeline_range.end_x));
+              const y = projectY(startPoint.y);
+              const left = Math.min(startX, endX);
+              const width = Math.max(2, Math.abs(endX - startX));
+              const active = hoveredNodeId === node.id;
+              const clusterClass = node.cluster_id === undefined
+                ? ''
+                : ` gv-node--${node.cluster_id % 5}`;
+              return (
+                <g
+                  key={node.id}
+                  className={`tl-range${clusterClass}${active ? ' active' : ''}${node.timeline_range.end_before_start ? ' reversed' : ''}`}
+                  onMouseEnter={() => setHoveredNodeId(node.id)}
+                  onMouseLeave={() =>
+                    setHoveredNodeId((current) => current === node.id ? null : current)}
+                >
+                  <rect
+                    x={left}
+                    y={y - TIMELINE_RANGE_BAR_HEIGHT / 2}
+                    width={width}
+                    height={TIMELINE_RANGE_BAR_HEIGHT}
+                    rx={TIMELINE_RANGE_BAR_HEIGHT / 2}
+                    className="tl-range-bar"
+                  />
+                  <line
+                    x1={endX}
+                    y1={y - 6}
+                    x2={endX}
+                    y2={y + 6}
+                    className="tl-range-end-cap"
+                  />
+                </g>
+              );
+            })}
+          </g>
+
           <g className="gv-nodes">
             {result.nodes.map((node) => {
               const worldPoint = pointsById.get(node.id)!;
@@ -313,7 +381,7 @@ export function TimelineCanvas({
       </div>
 
       <div className="gv-legend">
-        <span><i className="tl-legend-stem" />Note date</span>
+        <span><i className="tl-legend-stem" />{rangeMode ? 'Date range' : 'Date'}</span>
         {showPriorRelationships && (
           <span><i className="gv-legend-line prior" />Prior relationship</span>
         )}
@@ -375,12 +443,17 @@ function TimelineHoverCard({ node, x, y }: {
     Math.max(12, y - TIMELINE_TOOLTIP_HEIGHT / 2),
   );
   const title = node.title.length > 34 ? `${node.title.slice(0, 33)}…` : node.title;
+  const hasRange = Boolean(node.timeline_range);
   const dateText = node.timeline_date
-    ? formatTimelineNodeDate(node.timeline_date)
+    ? `${hasRange ? 'Start ' : ''}${formatTimelineNodeDate(node.timeline_date)}`
     : 'No resolvable date';
   const sourceText = node.timeline_date
     ? formatTimelineDateSource(node.timeline_date)
     : 'Undated';
+  const endText = node.timeline_range
+    ? `End ${formatTimelineNodeDate(node.timeline_range.end_date)}`
+    : null;
+  const rangeWarning = node.timeline_range?.end_before_start ? 'End is before start' : sourceText;
 
   return (
     <g
@@ -391,7 +464,8 @@ function TimelineHoverCard({ node, x, y }: {
       <rect width={TIMELINE_TOOLTIP_WIDTH} height={TIMELINE_TOOLTIP_HEIGHT} rx={8} />
       <text x={12} y={22} className="tl-hover-title">{title}</text>
       <text x={12} y={45} className="tl-hover-date">{dateText}</text>
-      <text x={12} y={63} className="tl-hover-source">{sourceText}</text>
+      {endText && <text x={12} y={63} className="tl-hover-date">{endText}</text>}
+      <text x={12} y={endText ? 82 : 63} className="tl-hover-source">{rangeWarning}</text>
     </g>
   );
 }

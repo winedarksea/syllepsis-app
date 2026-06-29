@@ -17,6 +17,8 @@ pub enum TimelineDateField {
     Created,
     Updated,
     Scheduled,
+    Started,
+    Due,
     Completed,
 }
 
@@ -50,6 +52,7 @@ pub struct GraphAnalysisRequest {
     pub hdbscan_min_cluster_size: usize,
     pub timeline_primary_date: TimelineDateField,
     pub timeline_fallback_date: Option<TimelineDateField>,
+    pub timeline_range_end_date: Option<TimelineDateField>,
     pub timeline_granularity: TimelineGranularity,
     pub timeline_color_by: TimelineColorBy,
 }
@@ -65,6 +68,7 @@ impl Default for GraphAnalysisRequest {
             hdbscan_min_cluster_size: 5,
             timeline_primary_date: TimelineDateField::Created,
             timeline_fallback_date: Some(TimelineDateField::Created),
+            timeline_range_end_date: None,
             timeline_granularity: TimelineGranularity::Auto,
             timeline_color_by: TimelineColorBy::Category,
         }
@@ -83,6 +87,8 @@ pub struct GraphAnalysisNode {
     pub no_semantic_signal: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeline_date: Option<GraphTimelineNodeDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline_range: Option<GraphTimelineNodeRange>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +97,14 @@ pub struct GraphTimelineNodeDate {
     pub source_field: TimelineDateField,
     pub used_fallback: bool,
     pub date_only: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GraphTimelineNodeRange {
+    pub end_date: GraphTimelineNodeDate,
+    /// Normalized x on the same scale as `node.x`.
+    pub end_x: f32,
+    pub end_before_start: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

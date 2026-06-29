@@ -130,6 +130,7 @@ fn request_and_result_shapes_serialize() {
     assert!(request_json.contains("\"mode\":\"categories\""));
     assert!(request_json.contains("\"automatic_cluster_defaults\":true"));
     assert!(request_json.contains("\"timeline_primary_date\":\"created\""));
+    assert!(request_json.contains("\"timeline_range_end_date\":null"));
 
     let result = empty_result(GraphMode::Density, "hashing-bow");
     let result_json = serde_json::to_string(&result).unwrap();
@@ -318,6 +319,103 @@ fn timeline_falls_back_and_parks_undated_notes() {
         .unwrap();
     assert!(open_node.no_semantic_signal);
     assert!(open_node.timeline_date.is_none());
+}
+
+#[test]
+fn timeline_range_mode_uses_due_dates_and_collision_lanes() {
+    use chrono::NaiveDate;
+    let (_directory, book) = test_book();
+
+    let mut planned = book.new_note(ObjectType::Note, "Planned").unwrap();
+    planned.metadata.dates.scheduled = Some(crate::model::FlexDate {
+        date: Some(NaiveDate::from_ymd_opt(2024, 5, 1).unwrap()),
+        ..Default::default()
+    });
+    planned.metadata.dates.due = Some(crate::model::FlexDate {
+        date: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
+        ..Default::default()
+    });
+    book.save_note(&planned).unwrap();
+
+    let mut overlap = book.new_note(ObjectType::Note, "Overlap").unwrap();
+    overlap.metadata.dates.scheduled = Some(crate::model::FlexDate {
+        date: Some(NaiveDate::from_ymd_opt(2024, 5, 15).unwrap()),
+        ..Default::default()
+    });
+    overlap.metadata.dates.due = Some(crate::model::FlexDate {
+        date: Some(NaiveDate::from_ymd_opt(2024, 6, 15).unwrap()),
+        ..Default::default()
+    });
+    book.save_note(&overlap).unwrap();
+
+    let mut missing_end = book.new_note(ObjectType::Note, "Missing end").unwrap();
+    missing_end.metadata.dates.scheduled = Some(crate::model::FlexDate {
+        date: Some(NaiveDate::from_ymd_opt(2024, 5, 10).unwrap()),
+        ..Default::default()
+    });
+    book.save_note(&missing_end).unwrap();
+
+    let mut reversed = book.new_note(ObjectType::Note, "Reversed").unwrap();
+    reversed.metadata.dates.scheduled = Some(crate::model::FlexDate {
+        date: Some(NaiveDate::from_ymd_opt(2024, 7, 1).unwrap()),
+        ..Default::default()
+    });
+    reversed.metadata.dates.due = Some(crate::model::FlexDate {
+        date: Some(NaiveDate::from_ymd_opt(2024, 6, 20).unwrap()),
+        ..Default::default()
+    });
+    book.save_note(&reversed).unwrap();
+
+    let corpus = SemanticGraphCorpus::build(&book).unwrap();
+    let result = corpus
+        .analyze(&GraphAnalysisRequest {
+            mode: GraphMode::Timeline,
+            timeline_primary_date: TimelineDateField::Scheduled,
+            timeline_fallback_date: None,
+            timeline_range_end_date: Some(TimelineDateField::Due),
+            timeline_granularity: TimelineGranularity::Day,
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(result.timeline.as_ref().unwrap().undated_count, 0);
+    let planned_node = result
+        .nodes
+        .iter()
+        .find(|node| node.title == "Planned")
+        .unwrap();
+    let planned_range = planned_node.timeline_range.as_ref().unwrap();
+    assert_eq!(planned_range.end_date.source_field, TimelineDateField::Due);
+    assert!(planned_range.end_date.date_only);
+    assert!(planned_range.end_x > planned_node.x);
+
+    let overlap_node = result
+        .nodes
+        .iter()
+        .find(|node| node.title == "Overlap")
+        .unwrap();
+    assert_ne!(
+        (planned_node.y * 1_000.0).round() as i32,
+        (overlap_node.y * 1_000.0).round() as i32,
+        "overlapping ranges should use different collision lanes"
+    );
+
+    let missing_end_node = result
+        .nodes
+        .iter()
+        .find(|node| node.title == "Missing end")
+        .unwrap();
+    assert!(missing_end_node.timeline_date.is_some());
+    assert!(missing_end_node.timeline_range.is_none());
+
+    let reversed_node = result
+        .nodes
+        .iter()
+        .find(|node| node.title == "Reversed")
+        .unwrap();
+    let reversed_range = reversed_node.timeline_range.as_ref().unwrap();
+    assert!(reversed_range.end_before_start);
+    assert!(reversed_range.end_x < reversed_node.x);
 }
 
 #[test]

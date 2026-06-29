@@ -139,6 +139,8 @@ interface AppStore {
   setTimelinePrimaryDate: (field: TimelineDateField) => void;
   timelineFallbackDate: TimelineDateField | null;
   setTimelineFallbackDate: (field: TimelineDateField | null) => void;
+  timelineRangeEndDate: TimelineDateField | null;
+  setTimelineRangeEndDate: (field: TimelineDateField | null) => void;
   timelineGranularity: TimelineGranularity;
   setTimelineGranularity: (granularity: TimelineGranularity) => void;
   timelineColorBy: TimelineColorBy;
@@ -289,6 +291,8 @@ export const useStore = create<AppStore>((set) => ({
   setTimelinePrimaryDate: (timelinePrimaryDate) => set({ timelinePrimaryDate }),
   timelineFallbackDate: 'created',
   setTimelineFallbackDate: (timelineFallbackDate) => set({ timelineFallbackDate }),
+  timelineRangeEndDate: null,
+  setTimelineRangeEndDate: (timelineRangeEndDate) => set({ timelineRangeEndDate }),
   timelineGranularity: 'auto',
   setTimelineGranularity: (timelineGranularity) => set({ timelineGranularity }),
   timelineColorBy: 'category',

@@ -48,6 +48,11 @@ describe('editor return navigation', () => {
     expect(useStore.getState().graphMode).toBe('timeline');
   });
 
+  it('keeps timeline ranges off by default', () => {
+    expect(useStore.getState().timelinePrimaryDate).toBe('created');
+    expect(useStore.getState().timelineRangeEndDate).toBeNull();
+  });
+
   it('returns to the same world map after opening a note from worlds', () => {
     useStore.getState().setActiveWorld('map-1');
     useStore.getState().setView('worlds');
