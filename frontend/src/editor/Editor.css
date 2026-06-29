@@ -803,6 +803,14 @@
 }
 .meta-date { flex-direction: column; align-items: flex-start; gap: 2px; }
 
+/* Privacy section: "Private" preset styled more prominently than the granular checkboxes. */
+.meta-privacy-preset { font-weight: 500; color: var(--color-text); }
+.meta-privacy-sep {
+  color: var(--color-text-tertiary);
+  user-select: none;
+  margin: 0 var(--sp-1);
+}
+
 .meta-date input[type='date'] {
   color-scheme: var(--color-scheme, light);
   background: var(--color-bg);

@@ -22,7 +22,7 @@ fn hidden_notes_are_excluded_from_the_corpus() {
     add_note(&book, "Visible", "garden compost soil", "garden");
     let mut hidden = book.new_note(ObjectType::Note, "Hidden").unwrap();
     hidden.body = "private electrical breaker".into();
-    hidden.metadata.lifecycle.private = true;
+    hidden.metadata.lifecycle.hidden = true;
     book.save_note(&hidden).unwrap();
 
     let corpus = SemanticGraphCorpus::build(&book).unwrap();

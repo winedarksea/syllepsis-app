@@ -40,9 +40,19 @@ pub struct Category {
     /// filtered-sorted view for this category. `location` still supplies the world + anchor point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<SpatialRegion>,
-    /// Excluded from the GitHub publish and from RAG/default views when private.
+    /// Notes in this category are not shown in the main UI / default views / exports.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub private: bool,
+    pub hidden: bool,
+    /// Notes in this category are excluded from search + RAG retrieval.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exclude_from_search: bool,
+    /// This category file and its notes are added to `.gitignore` and excluded from the publish.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exclude_from_publish: bool,
+    /// Deserialize-only capture of the legacy single `private` flag. Never written back
+    /// (`skip_serializing`); [`Self::normalize`] fans it out to the three flags above at load.
+    #[serde(default, skip_serializing, rename = "private")]
+    legacy_private: bool,
 }
 
 fn default_heading_level() -> u8 {
@@ -61,7 +71,10 @@ impl Category {
             parent: None,
             location: None,
             region: None,
-            private: false,
+            hidden: false,
+            exclude_from_search: false,
+            exclude_from_publish: false,
+            legacy_private: false,
         }
     }
 
@@ -71,6 +84,18 @@ impl Category {
             &self.name
         } else {
             &self.long_name
+        }
+    }
+
+    /// Migrate a legacy `private: true` category to the three independent capability flags. Called
+    /// at the category load boundary (`store::parse_category`) so the legacy key is never written
+    /// back. Mirrors [`crate::model::metadata::Lifecycle::normalize`].
+    pub fn normalize(&mut self) {
+        if self.legacy_private {
+            self.hidden = true;
+            self.exclude_from_search = true;
+            self.exclude_from_publish = true;
+            self.legacy_private = false;
         }
     }
 }
@@ -94,5 +119,22 @@ mod tests {
         let yaml = serde_yaml::to_string(&c).unwrap();
         let back: Category = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(c, back);
+    }
+
+    #[test]
+    fn legacy_private_category_migrates_to_three_capabilities() {
+        let mut c: Category =
+            serde_yaml::from_str("name: secret\nlong_name: Secret\nheading_level: 2\nprivate: true")
+                .unwrap();
+        assert!(!c.hidden && !c.exclude_from_search && !c.exclude_from_publish);
+
+        c.normalize();
+        assert!(c.hidden && c.exclude_from_search && c.exclude_from_publish);
+
+        let yaml = serde_yaml::to_string(&c).unwrap();
+        assert!(yaml.contains("hidden: true"));
+        assert!(yaml.contains("exclude_from_search: true"));
+        assert!(yaml.contains("exclude_from_publish: true"));
+        assert!(!yaml.contains("private"));
     }
 }

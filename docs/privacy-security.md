@@ -3,17 +3,26 @@
 ## Centralized Policy View
 
 A dedicated UI panel provides a single place to manage:
-- Tagging categories as **private** (excluded from GitHub publish; see [sync-backup.md](sync-backup.md))
+- Tagging notes or categories with any of the three **privacy capabilities** below (or the **Private** preset that sets all three; see [sync-backup.md](sync-backup.md))
 - Setting files or categories as **locked**
 - Viewing and adjusting access control across the book
 - Generally we want to expose as many settings as possible to the user, to give them full control (but many of these somewhat hidden to prevent overwhelming the user).
 
-## Private Notes
+## Privacy capabilities
 
-Notes and categories can be tagged as private. Private content:
-- Is excluded from the GitHub publish (via gitignore)
-- Is included in the full Google Drive backup
-- Does not appear in RAG retrieval or default views unless the user explicitly toggles them on
+Privacy is split into three **independent** capabilities, so a note can (say) stay out of the public publish while remaining locally searchable. Both notes and categories carry all three:
+
+- **Hidden** — kept out of the main UI, default views, and exports. Still searchable and publishable unless also flagged otherwise.
+- **Excluded from search** — left out of search and RAG retrieval. May still appear in default views.
+- **Excluded from publish** — added to `.gitignore` and withheld from the static-site / GitHub publish. Still visible and searchable locally. Always included in the full Google Drive backup — this capability only governs the *public* release surface.
+
+### The `private` preset
+
+`private` is a convenience **preset**, not a separate flag: turning it on sets all three capabilities at once (hidden + excluded-from-search + excluded-from-publish), and turning it off clears all three. This is the one-click "make this fully private" action; the three capabilities remain individually toggleable for finer control.
+
+### Legacy migration
+
+Books written before the split stored a single `private: true` flag on a note's `lifecycle` or on a category. On load, that legacy flag is transparently expanded into all three capabilities (matching its old meaning) and the legacy key is never written back. No user action is required, and a legacy private note keeps behaving exactly as before. (Cloud-sync behavior is intentionally untouched by this migration — see [sync-backup.md](sync-backup.md).)
 
 ## Locked Files
 

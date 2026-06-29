@@ -1,10 +1,13 @@
 //! Application command surface for publishing & serving (platform-infra.md): export the book as a
 //! read-only static site and keep private content out of a GitHub publish.
 //!
-//! Both operations enforce the privacy policy (privacy-security.md): a private note **or** a note
-//! in a private category is excluded from the published site, and the same set is written into the
-//! managed `.gitignore` block so a `git push`-style publish never carries it. The full Google Drive
-//! backup is unaffected — privacy here is specifically about the *public* release surface.
+//! Both operations enforce the publish-exclusion capability (privacy-security.md): a note flagged
+//! `exclude_from_publish` **or** a note in a category flagged `exclude_from_publish` is withheld
+//! from the published site, and the same set is written into the managed `.gitignore` block so a
+//! `git push`-style publish never carries it. (The `private` preset turns this capability on along
+//! with hiding and search-exclusion, but each is independently controllable.) Being merely `hidden`
+//! from the local UI does not withhold a note from the publish. The full Google Drive backup is
+//! unaffected — this is specifically about the *public* release surface.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -23,7 +26,7 @@ pub struct PublishReport {
     pub index_path: String,
     /// Notes included in the published manuscript.
     pub published_notes: usize,
-    /// Notes withheld because they (or their category) are private.
+    /// Notes withheld because they (or their category) are excluded from publish.
     pub excluded_private: usize,
 }
 
@@ -34,8 +37,9 @@ pub struct GitignoreReport {
     pub excluded_paths: Vec<String>,
 }
 
-/// Render the book's **public** view (private notes and notes in private categories removed) to a
-/// single read-only `index.html` under `out_dir`. Returns what was published and what was withheld.
+/// Render the book's **public** view (publish-excluded notes and notes in publish-excluded
+/// categories removed) to a single read-only `index.html` under `out_dir`. Returns what was
+/// published and what was withheld.
 /// `render_code_block(language, code) -> Option<html>` is called for each fenced code block; pass
 /// `&|_, _| None` for a plain export with no plugin rendering.
 pub fn publish_site(
@@ -43,10 +47,11 @@ pub fn publish_site(
     out_dir: &Path,
     render_code_block: &dyn Fn(&str, &str) -> Option<String>,
 ) -> CoreResult<PublishReport> {
-    let private_categories = private_category_names(book)?;
+    let publish_excluded_categories = publish_excluded_category_names(book)?;
     // The "active" corpus a publish considers: everything except archived and pending-deletion
-    // notes. Each active note is then either published or withheld for privacy, so the two counts
-    // partition it exactly.
+    // notes. Each active note is then either published or withheld for publish-exclusion, so the two
+    // counts partition it exactly. A merely-`hidden` note still publishes — hiding from the local
+    // UI is independent from public release.
     let active: Vec<Note> = book
         .store
         .read_all_notes()?
@@ -61,7 +66,7 @@ pub fn publish_site(
 
     let public: Vec<Note> = active
         .into_iter()
-        .filter(|n| is_publishable(n, &private_categories))
+        .filter(|n| is_publishable(n, &publish_excluded_categories))
         .collect();
     let published_notes = public.len();
 
@@ -69,7 +74,7 @@ pub fn publish_site(
         .store
         .categories()?
         .into_iter()
-        .filter(|c| !c.private)
+        .filter(|c| !c.exclude_from_publish)
         .collect();
 
     let items = sort::render(public, categories);
@@ -88,22 +93,23 @@ pub fn publish_site(
     })
 }
 
-/// Rewrite the managed block of the book's `.gitignore` to exclude every private note file and
-/// private category file from a git publish. Idempotent; clearing all private flags removes the
-/// block. Returns the excluded paths for display.
+/// Rewrite the managed block of the book's `.gitignore` to exclude every publish-excluded note file
+/// and publish-excluded category file from a git publish. Idempotent; clearing all
+/// `exclude_from_publish` flags removes the block. Returns the excluded paths for display.
 pub fn refresh_private_gitignore(book: &Book) -> CoreResult<GitignoreReport> {
-    let private_categories = private_category_names(book)?;
+    let publish_excluded_categories = publish_excluded_category_names(book)?;
 
     let mut excluded: Vec<String> = Vec::new();
     for note in book.store.read_all_notes()? {
         if note.object_type != ObjectType::Commentary
-            && (note.metadata.lifecycle.private || in_private_category(&note, &private_categories))
+            && (note.metadata.lifecycle.exclude_from_publish
+                || in_publish_excluded_category(&note, &publish_excluded_categories))
         {
             // Phase-1 flat layout: a note's file is `{id}.md` at the book root.
             excluded.push(layout::note_filename(&note.id));
         }
     }
-    for name in &private_categories {
+    for name in &publish_excluded_categories {
         excluded.push(format!(
             "{}/{}",
             layout::CATEGORIES_DIR,
@@ -123,36 +129,43 @@ pub fn refresh_private_gitignore(book: &Book) -> CoreResult<GitignoreReport> {
     })
 }
 
-/// Names of categories flagged private.
-fn private_category_names(book: &Book) -> CoreResult<BTreeSet<String>> {
+/// Names of categories excluded from the publish.
+fn publish_excluded_category_names(book: &Book) -> CoreResult<BTreeSet<String>> {
     Ok(book
         .store
         .categories()?
         .into_iter()
-        .filter(|c| c.private)
+        .filter(|c| c.exclude_from_publish)
         .map(|c| c.name)
         .collect())
 }
 
-/// A note is publishable if it is visible by default (not private/archived/pending-deletion) and
-/// none of its categories are private.
-fn is_publishable(note: &Note, private_categories: &BTreeSet<String>) -> bool {
-    note.metadata.is_visible_in_default_views()
-        && !in_private_category(note, private_categories)
+/// A note is publishable if it is not itself publish-excluded, none of its categories are
+/// publish-excluded, it is not pending deletion, and it is not commentary. Being merely `hidden`
+/// (out of the local default views) does **not** withhold it from the publish.
+fn is_publishable(note: &Note, publish_excluded_categories: &BTreeSet<String>) -> bool {
+    !note.metadata.lifecycle.exclude_from_publish
+        && note.metadata.lifecycle.marked_for_deletion_at.is_none()
+        && !in_publish_excluded_category(note, publish_excluded_categories)
         && note.object_type != ObjectType::Commentary
 }
 
-fn in_private_category(note: &Note, private_categories: &BTreeSet<String>) -> bool {
+fn in_publish_excluded_category(
+    note: &Note,
+    publish_excluded_categories: &BTreeSet<String>,
+) -> bool {
     note.categories
         .iter()
-        .any(|c| private_categories.contains(c))
+        .any(|c| publish_excluded_categories.contains(c))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app::commands::{create_note, update_note};
-    use crate::app::lifecycle::{set_category_private, set_note_private};
+    use crate::app::lifecycle::{
+        set_category_private, set_note_exclude_from_publish, set_note_hidden, set_note_private,
+    };
     use crate::model::{Category, ObjectType, PriorEdge};
     use crate::publish::GITIGNORE_BLOCK_START;
 
@@ -193,6 +206,29 @@ mod tests {
         assert!(html.contains("public knowledge"));
         assert!(!html.contains("classified text"));
         assert!(!html.contains("in a private category"));
+    }
+
+    #[test]
+    fn hidden_note_still_publishes_but_publish_excluded_note_does_not() {
+        let (dir, book) = book();
+        book.store.write_category(&Category::new("public")).unwrap();
+        sorted_note(&book, "Open", "public knowledge", &["public"]);
+        // Hidden from the local UI, but not publish-excluded → still appears on the public site.
+        let hidden = sorted_note(&book, "Tucked", "still public text", &["public"]);
+        set_note_hidden(&book, &hidden, true).unwrap();
+        // Publish-excluded but otherwise visible → withheld from the public site.
+        let withheld = sorted_note(&book, "Withheld", "release-blocked text", &["public"]);
+        set_note_exclude_from_publish(&book, &withheld, true).unwrap();
+
+        let out = dir.path().join("site");
+        let report = publish_site(&book, &out, &|_, _| None).unwrap();
+
+        assert_eq!(report.published_notes, 2);
+        assert_eq!(report.excluded_private, 1);
+        let html = std::fs::read_to_string(out.join("index.html")).unwrap();
+        assert!(html.contains("public knowledge"));
+        assert!(html.contains("still public text"));
+        assert!(!html.contains("release-blocked text"));
     }
 
     #[test]

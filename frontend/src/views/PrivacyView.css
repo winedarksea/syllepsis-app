@@ -126,3 +126,28 @@
 .pv-link-btn--danger { color: var(--color-danger, #c0392b); }
 .pv-link-btn:hover:not(:disabled) { text-decoration: underline; }
 .pv-link-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Capability chips in merged privacy sections */
+.pv-caps {
+  display: flex;
+  gap: var(--sp-1);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.pv-cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-tag-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--sp-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pv-cap:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
+.pv-cap:disabled { opacity: 0.5; cursor: default; }

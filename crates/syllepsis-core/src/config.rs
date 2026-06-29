@@ -245,7 +245,7 @@ impl Default for LlmConfig {
             enabled: true,
             provider: crate::llm::selection::LOCAL_PROVIDER.to_string(),
             local_model: crate::onnx::manifest::BUNDLED_LLM_ID.to_string(),
-            max_new_tokens: 1024,
+            max_new_tokens: 2048,
             auto_accept: false,
             routing: LlmRouting::default(),
         }

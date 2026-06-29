@@ -112,12 +112,28 @@ pub enum LockMode {
 }
 
 /// Privacy, locking, archival, and deletion lifecycle.
+///
+/// Privacy is split into three independent capabilities ([`Self::hidden`],
+/// [`Self::exclude_from_search`], [`Self::exclude_from_publish`]) so a note can, say, stay out of
+/// the public publish while remaining locally searchable. The legacy single `private` flag is a
+/// convenience preset that turns all three on at once (see [`crate::app::lifecycle::set_note_private`]);
+/// legacy notes carrying `private: true` are migrated by [`Self::normalize`] at the load boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Lifecycle {
-    /// Excluded from the GitHub publish (gitignore) and from RAG/default views.
+    /// Not shown in the main UI / default views / exports.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub private: bool,
+    pub hidden: bool,
+    /// Excluded from search + RAG retrieval.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub exclude_from_search: bool,
+    /// Added to `.gitignore` and excluded from the static-site publish.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub exclude_from_publish: bool,
+    /// Deserialize-only capture of the legacy single `private` flag. Never written back
+    /// (`skip_serializing`); [`Self::normalize`] fans it out to the three flags above at load.
+    #[serde(default, skip_serializing, rename = "private")]
+    legacy_private: bool,
     #[serde(skip_serializing_if = "is_default")]
     pub lock: LockMode,
     /// Hidden from RAG and default views, but toggleable back on.
@@ -129,6 +145,21 @@ pub struct Lifecycle {
     /// Start of the deletion-delay window ("mark for deletion").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub marked_for_deletion_at: Option<DateTime<Utc>>,
+}
+
+impl Lifecycle {
+    /// Migrate a legacy `private: true` note to the three independent capability flags. Called at
+    /// the single storage read boundary ([`crate::markdown::frontmatter::parse_note`]) so every
+    /// downstream feature sees expanded flags and the legacy key is never written back. Must **not**
+    /// touch any cloud-sync flag — legacy private notes keep syncing exactly as before.
+    pub fn normalize(&mut self) {
+        if self.legacy_private {
+            self.hidden = true;
+            self.exclude_from_search = true;
+            self.exclude_from_publish = true;
+            self.legacy_private = false;
+        }
+    }
 }
 
 /// Knowledge-pack membership. A note may belong to multiple packs; `locally_modified`
@@ -235,17 +266,25 @@ impl Metadata {
         }
     }
 
-    /// Whether the note is currently hidden from RAG/default views (private or archived).
+    /// Whether the note is currently hidden from default views (explicitly hidden or archived).
     pub fn is_hidden_from_default_views(&self) -> bool {
-        self.lifecycle.private || self.lifecycle.archived
+        self.lifecycle.hidden || self.lifecycle.archived
     }
 
-    /// Whether the note should appear in default views and RAG retrieval: not hidden (private or
-    /// archived) and not pending deletion. This is the single predicate the read paths
-    /// (unsorted queue, note list, search, overlays) share so "what the user sees by default"
-    /// has one definition (privacy-security.md).
+    /// Whether the note should appear in default views: not hidden (explicitly hidden or archived)
+    /// and not pending deletion. This is the single predicate the read paths (unsorted queue, note
+    /// list, overlays) share so "what the user sees by default" has one definition
+    /// (privacy-security.md).
     pub fn is_visible_in_default_views(&self) -> bool {
         !self.is_hidden_from_default_views() && self.lifecycle.marked_for_deletion_at.is_none()
+    }
+
+    /// Whether the note participates in search + RAG retrieval. Independent from visibility now that
+    /// search-exclusion is its own capability: a note can be visible in default views but excluded
+    /// from search, or vice versa. Still requires the note be visible by default (a hidden/archived/
+    /// pending-deletion note never surfaces in default search results).
+    pub fn is_searchable(&self) -> bool {
+        self.is_visible_in_default_views() && !self.lifecycle.exclude_from_search
     }
 }
 
@@ -268,7 +307,9 @@ mod tests {
     #[test]
     fn round_trips_with_lifecycle_and_fork() {
         let mut meta = Metadata::now();
-        meta.lifecycle.private = true;
+        meta.lifecycle.hidden = true;
+        meta.lifecycle.exclude_from_search = true;
+        meta.lifecycle.exclude_from_publish = true;
         meta.lifecycle.lock = LockMode::UnlockDelay;
         meta.fork = Some(ForkInfo {
             forked_from: NoteId::generate("note", "parent"),
@@ -278,6 +319,32 @@ mod tests {
         let back: Metadata = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(meta, back);
         assert!(back.is_hidden_from_default_views());
+        assert!(!back.is_searchable());
+    }
+
+    #[test]
+    fn legacy_private_flag_migrates_to_three_capabilities() {
+        // A legacy note frontmatter carrying the single `private: true` flag.
+        let mut life: Lifecycle = serde_yaml::from_str("private: true").unwrap();
+        // Before normalize the legacy flag is captured but the new flags are untouched.
+        assert!(!life.hidden && !life.exclude_from_search && !life.exclude_from_publish);
+
+        life.normalize();
+        assert!(life.hidden);
+        assert!(life.exclude_from_search);
+        assert!(life.exclude_from_publish);
+
+        // Re-serialization emits the three new keys and never the legacy `private` key.
+        let yaml = serde_yaml::to_string(&life).unwrap();
+        assert!(yaml.contains("hidden: true"));
+        assert!(yaml.contains("exclude_from_search: true"));
+        assert!(yaml.contains("exclude_from_publish: true"));
+        assert!(!yaml.contains("private"));
+
+        // Idempotent: re-parsing the new form and normalizing is a no-op.
+        let mut reparsed: Lifecycle = serde_yaml::from_str(&yaml).unwrap();
+        reparsed.normalize();
+        assert_eq!(life, reparsed);
     }
 
     #[test]

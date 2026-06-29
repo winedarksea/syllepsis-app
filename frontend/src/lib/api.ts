@@ -209,11 +209,23 @@ export const api = {
   policyOverview: () => invoke<PolicyOverview>('policy_overview'),
   setNotePrivate: (id: string, isPrivate: boolean) =>
     invoke<NoteDto>('set_note_private', { id, private: isPrivate }),
+  setNoteHidden: (id: string, hidden: boolean) =>
+    invoke<NoteDto>('set_note_hidden', { id, hidden }),
+  setNoteExcludeFromSearch: (id: string, exclude: boolean) =>
+    invoke<NoteDto>('set_note_exclude_from_search', { id, exclude }),
+  setNoteExcludeFromPublish: (id: string, exclude: boolean) =>
+    invoke<NoteDto>('set_note_exclude_from_publish', { id, exclude }),
   setNoteArchived: (id: string, archived: boolean) =>
     invoke<NoteDto>('set_note_archived', { id, archived }),
   setNoteLock: (id: string, mode: LockMode) => invoke<NoteDto>('set_note_lock', { id, mode }),
   setCategoryPrivate: (name: string, isPrivate: boolean) =>
     invoke<void>('set_category_private', { name, private: isPrivate }),
+  setCategoryHidden: (name: string, hidden: boolean) =>
+    invoke<void>('set_category_hidden', { name, hidden }),
+  setCategoryExcludeFromSearch: (name: string, exclude: boolean) =>
+    invoke<void>('set_category_exclude_from_search', { name, exclude }),
+  setCategoryExcludeFromPublish: (name: string, exclude: boolean) =>
+    invoke<void>('set_category_exclude_from_publish', { name, exclude }),
   requestDeletion: (id: string) => invoke<NoteDto>('request_deletion', { id }),
   restoreNote: (id: string) => invoke<NoteDto>('restore_note', { id }),
   purgeExpired: () => invoke<string[]>('purge_expired'),

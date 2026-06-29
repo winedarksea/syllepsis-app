@@ -3,7 +3,7 @@
 // Edits are applied to a NoteDto copy via `onChange`; the parent editor persists them
 // through the normal updateNote save path.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../lib/store';
 import { api } from '../lib/api';
 import { WorldLocationHelper } from '../components/WorldLocationHelper';
@@ -93,6 +93,17 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
   const patch = (partial: Partial<NoteDto>) => onChange({ ...note, ...partial });
   const patchMeta = (partial: Partial<NoteDto['metadata']>) =>
     onChange({ ...note, metadata: { ...note.metadata, ...partial } });
+
+  // Privacy preset — show indeterminate (−) when some but not all caps are set.
+  const privacyPresetRef = useRef<HTMLInputElement>(null);
+  const { hidden: lcHidden, exclude_from_search: lcNoSearch, exclude_from_publish: lcNoPublish } =
+    note.metadata.lifecycle ?? {};
+  const privacyCount = [lcHidden, lcNoSearch, lcNoPublish].filter(Boolean).length;
+  const allPrivate = privacyCount === 3;
+  const somePrivate = privacyCount > 0 && !allPrivate;
+  useEffect(() => {
+    if (privacyPresetRef.current) privacyPresetRef.current.indeterminate = somePrivate;
+  }, [somePrivate]);
 
   const addCategory = () => {
     const name = newCategory.trim().replace(/^#/, '');
@@ -237,16 +248,6 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
                 />
                 Starred
               </label>
-              <label className="meta-checkbox">
-                <input
-                  type="checkbox"
-                  checked={note.metadata.lifecycle?.private ?? false}
-                  onChange={(e) => patchMeta({
-                    lifecycle: { ...note.metadata.lifecycle, private: e.target.checked },
-                  })}
-                />
-                Private
-              </label>
               {!['picture', 'drawing'].includes(note.type) && (
                 <label className="meta-checkbox">
                   <input
@@ -282,6 +283,60 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
                   <option key={status} value={status}>{humanize(status)}</option>
                 ))}
               </select>
+            </div>
+          </section>
+
+          {/* Privacy: "Private" is a preset (all three at once); each cap is also toggleable independently. */}
+          <section className="meta-section">
+            <label className="meta-label">Privacy</label>
+            <div className="meta-row">
+              <label className="meta-checkbox meta-privacy-preset" title="Set all three — hidden, no search, no publish">
+                <input
+                  ref={privacyPresetRef}
+                  type="checkbox"
+                  checked={allPrivate}
+                  onChange={(e) => patchMeta({
+                    lifecycle: {
+                      ...note.metadata.lifecycle,
+                      hidden: e.target.checked,
+                      exclude_from_search: e.target.checked,
+                      exclude_from_publish: e.target.checked,
+                    },
+                  })}
+                />
+                Private
+              </label>
+              <span className="meta-privacy-sep" aria-hidden>·</span>
+              <label className="meta-checkbox" title="Not shown in default views or exports">
+                <input
+                  type="checkbox"
+                  checked={lcHidden ?? false}
+                  onChange={(e) => patchMeta({
+                    lifecycle: { ...note.metadata.lifecycle, hidden: e.target.checked },
+                  })}
+                />
+                Hidden
+              </label>
+              <label className="meta-checkbox" title="Excluded from search and AI retrieval">
+                <input
+                  type="checkbox"
+                  checked={lcNoSearch ?? false}
+                  onChange={(e) => patchMeta({
+                    lifecycle: { ...note.metadata.lifecycle, exclude_from_search: e.target.checked },
+                  })}
+                />
+                No search
+              </label>
+              <label className="meta-checkbox" title="Withheld from the published site (gitignored)">
+                <input
+                  type="checkbox"
+                  checked={lcNoPublish ?? false}
+                  onChange={(e) => patchMeta({
+                    lifecycle: { ...note.metadata.lifecycle, exclude_from_publish: e.target.checked },
+                  })}
+                />
+                No publish
+              </label>
             </div>
           </section>
 

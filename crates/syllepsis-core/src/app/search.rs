@@ -22,9 +22,11 @@ use crate::search::{
 use crate::storage::layout;
 use crate::storage::{Book, NoteStore};
 
-/// Build a search engine over the book's *visible* notes (hidden — archived/private — and
-/// pending-deletion notes are excluded so they never surface in RAG results), using the
-/// configured embedding provider.
+/// Build a search engine over the book's *searchable* notes, using the configured embedding
+/// provider. For the default `Active` corpus this excludes hidden/archived/pending-deletion notes
+/// *and* notes flagged `exclude_from_search` (now an independent capability from hiding), so none of
+/// them surface in RAG results. The explicit `Archived`/`Trash` retrieval modes keep their existing
+/// scope (search-exclusion only governs the default corpus).
 fn engine_for(
     book: &Book,
     visibility: NoteVisibility,
@@ -33,7 +35,7 @@ fn engine_for(
         .store
         .read_all_notes()?
         .into_iter()
-        .filter(|n| note_matches_visibility(n, visibility))
+        .filter(|n| note_matches_searchable(n, visibility))
         .collect();
     notes.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
     let loaded = load_embedding_corpus(book, &notes)?;
@@ -41,6 +43,18 @@ fn engine_for(
         SearchEngine::build_from_vectors(notes, loaded.vectors, &book.config),
         loaded.coverage,
     ))
+}
+
+/// A note belongs in the search engine for `visibility`. Layers the `exclude_from_search` capability
+/// on top of plain visibility for the default `Active` corpus; the explicit `Archived`/`Trash` modes
+/// are unaffected (a user searching those modes wants everything in them).
+fn note_matches_searchable(note: &Note, visibility: NoteVisibility) -> bool {
+    match visibility {
+        NoteVisibility::Active => {
+            note_matches_visibility(note, visibility) && note.metadata.is_searchable()
+        }
+        other => note_matches_visibility(note, other),
+    }
 }
 
 /// Full search: exact + BM25 + vector fused with RRF, optionally narrowed by `filter`.
@@ -186,6 +200,24 @@ mod tests {
             .unwrap()
             .hits
             .is_empty());
+    }
+
+    #[test]
+    fn search_excluded_note_is_absent_but_stays_visible_in_lists() {
+        let (_d, book) = book();
+        let mut n = create_note(&book, ObjectType::Note, "Unsearchable", None).unwrap();
+        n.body = "breaker panel hidden from search".into();
+        n.metadata.lifecycle.exclude_from_search = true;
+        let n = update_note(&book, n).unwrap();
+
+        // Absent from search results...
+        assert!(search(&book, "breaker panel", &SearchFilter::default())
+            .unwrap()
+            .hits
+            .is_empty());
+        // ...but still listed in default views (not hidden).
+        let listed = crate::app::commands::list_notes(&book).unwrap();
+        assert!(listed.iter().any(|note| note.id == n.id));
     }
 
     #[test]

@@ -16,7 +16,16 @@ Example configuration:
 - **GitHub**: public-facing publish of non-private notes (private notes excluded via gitignore). The GitHub repo is the public version of the book.
 - **File Watching with File Sync and Share**: Users can chose to create a book in a folder that is already cloud managed (ie by Google Drive Desktop App, Apple Cloud, etc). In this case, we don't push or pull anything from the app, however we track with notify updates to the local folder, and use Loro to manage the conflicts, automatically cleaning them up. We will still have a UI view here that should track and show external updates and conflicts, so users can be aware of what is happening here.
 
-Notes marked as **private** are excluded from the GitHub publish but included in the Google Drive backup.
+Notes flagged **excluded from publish** (including via the **Private** preset; see [privacy-security.md](privacy-security.md)) are excluded from the GitHub publish but included in the Google Drive backup.
+
+### Deferred: `exclude_from_cloud_sync`
+
+A fourth capability — opting a note out of the managed cloud sync entirely — is **not yet implemented**. The privacy split intentionally leaves cloud sync untouched: the legacy-`private` migration does **not** set any cloud-sync flag, so legacy private notes keep syncing exactly as they did before.
+
+Full support needs both sync engines to become metadata-aware plus a cloud cleanup pass, neither of which exists today:
+
+1. The **managed** `ManagedCloudSyncEngine` ([`sync/managed.rs`](../crates/syllepsis-core/src/sync/managed.rs)) could cheaply read per-note metadata on its upload loops, but the **path-based folder** `SyncEngine` ([`sync/engine.rs`](../crates/syllepsis-core/src/sync/engine.rs)) filters only by file-category and would still push the `.md`.
+2. A note already uploaded and *then* flagged would leave stranded cloud patches / snapshots / manifest entries that mere upload-time filtering cannot delete — a cleanup pass would be required to retract already-synced state.
 
 ### Managed cloud OAuth application setup
 

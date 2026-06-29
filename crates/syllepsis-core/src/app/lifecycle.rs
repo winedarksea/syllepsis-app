@@ -4,9 +4,11 @@
 //! settings panel.
 //!
 //! The on-disk fields these act on ([`Lifecycle`](crate::model::metadata::Lifecycle),
-//! [`LockMode`], `Category::private`) shipped in Phase 1; this is the behavior layer that finally
-//! reads them. Like the rest of [`crate::app`], every function is a framework-agnostic operation
-//! over a [`Book`] the Tauri shell wraps as a command.
+//! [`LockMode`], and the per-category capability flags) shipped in Phase 1; this is the behavior
+//! layer that finally reads them. Privacy is three independent capabilities (hidden /
+//! exclude-from-search / exclude-from-publish) with `private` retained as a preset that sets all
+//! three. Like the rest of [`crate::app`], every function is a framework-agnostic operation over a
+//! [`Book`] the Tauri shell wraps as a command.
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -58,11 +60,21 @@ pub struct LockedNote {
 /// (privacy-security.md "Centralized Policy View").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PolicyOverview {
-    pub private_notes: Vec<NoteRef>,
+    /// Notes hidden from the main UI / default views / exports.
+    pub hidden_notes: Vec<NoteRef>,
+    /// Notes excluded from search + RAG retrieval.
+    pub search_excluded_notes: Vec<NoteRef>,
+    /// Notes excluded from the git publish + static-site publish.
+    pub publish_excluded_notes: Vec<NoteRef>,
     pub archived_notes: Vec<NoteRef>,
     pub locked_notes: Vec<LockedNote>,
     pub pending_deletion: Vec<PendingDeletion>,
-    pub private_categories: Vec<String>,
+    /// Categories whose notes are hidden from default views.
+    pub hidden_categories: Vec<String>,
+    /// Categories whose notes are excluded from search + RAG.
+    pub search_excluded_categories: Vec<String>,
+    /// Categories (and their notes) excluded from the publish.
+    pub publish_excluded_categories: Vec<String>,
     pub unlock_delay_hours: u32,
 }
 
@@ -76,10 +88,35 @@ fn edit_note(book: &Book, id: &str, mutate: impl FnOnce(&mut Note)) -> CoreResul
     Ok(NoteDto::from_note(&note))
 }
 
-/// Toggle a note's `private` flag. Private notes drop out of default views and RAG retrieval and
-/// are excluded from the git publish (see [`crate::app::publish`]).
+/// Toggle a note's `private` **preset**: a convenience that turns on (or off) all three independent
+/// capabilities at once — hidden from default views, excluded from search/RAG, and excluded from the
+/// git publish (see [`crate::app::publish`]). Use the granular setters below to control each
+/// capability independently.
 pub fn set_note_private(book: &Book, id: &str, private: bool) -> CoreResult<NoteDto> {
-    edit_note(book, id, |note| note.metadata.lifecycle.private = private)
+    edit_note(book, id, |note| {
+        note.metadata.lifecycle.hidden = private;
+        note.metadata.lifecycle.exclude_from_search = private;
+        note.metadata.lifecycle.exclude_from_publish = private;
+    })
+}
+
+/// Toggle a note's `hidden` flag (kept out of the main UI / default views / exports).
+pub fn set_note_hidden(book: &Book, id: &str, hidden: bool) -> CoreResult<NoteDto> {
+    edit_note(book, id, |note| note.metadata.lifecycle.hidden = hidden)
+}
+
+/// Toggle a note's `exclude_from_search` flag (kept out of search + RAG retrieval).
+pub fn set_note_exclude_from_search(book: &Book, id: &str, exclude: bool) -> CoreResult<NoteDto> {
+    edit_note(book, id, |note| {
+        note.metadata.lifecycle.exclude_from_search = exclude
+    })
+}
+
+/// Toggle a note's `exclude_from_publish` flag (gitignored + withheld from the static-site publish).
+pub fn set_note_exclude_from_publish(book: &Book, id: &str, exclude: bool) -> CoreResult<NoteDto> {
+    edit_note(book, id, |note| {
+        note.metadata.lifecycle.exclude_from_publish = exclude
+    })
 }
 
 /// Toggle a note's `archived` flag (hidden from default views but kept and reversible).
@@ -98,13 +135,49 @@ pub fn set_note_lock(book: &Book, id: &str, mode: LockMode) -> CoreResult<NoteDt
     edit_note(book, id, |note| note.metadata.lifecycle.lock = mode)
 }
 
-/// Toggle a category's `private` flag (excluded from publish; its notes drop from default views).
+/// Toggle a category's `private` **preset**: turns on (or off) all three independent capabilities at
+/// once for the category — its notes are hidden from default views, excluded from search/RAG, and the
+/// category file plus its notes are excluded from the git publish.
 pub fn set_category_private(book: &Book, name: &str, private: bool) -> CoreResult<()> {
+    edit_category(book, name, |category| {
+        category.hidden = private;
+        category.exclude_from_search = private;
+        category.exclude_from_publish = private;
+    })
+}
+
+/// Toggle a category's `hidden` flag (its notes drop out of the main UI / default views).
+pub fn set_category_hidden(book: &Book, name: &str, hidden: bool) -> CoreResult<()> {
+    edit_category(book, name, |category| category.hidden = hidden)
+}
+
+/// Toggle a category's `exclude_from_search` flag (its notes drop out of search + RAG).
+pub fn set_category_exclude_from_search(book: &Book, name: &str, exclude: bool) -> CoreResult<()> {
+    edit_category(book, name, |category| {
+        category.exclude_from_search = exclude
+    })
+}
+
+/// Toggle a category's `exclude_from_publish` flag (the category file + its notes are gitignored and
+/// withheld from the publish).
+pub fn set_category_exclude_from_publish(book: &Book, name: &str, exclude: bool) -> CoreResult<()> {
+    edit_category(book, name, |category| {
+        category.exclude_from_publish = exclude
+    })
+}
+
+/// Load a category (or synthesize a default one), apply `mutate`, and persist. The category
+/// counterpart of [`edit_note`].
+fn edit_category(
+    book: &Book,
+    name: &str,
+    mutate: impl FnOnce(&mut crate::model::Category),
+) -> CoreResult<()> {
     let mut category = book
         .store
         .read_category(name)
         .unwrap_or_else(|_| crate::model::Category::new(name.to_string()));
-    category.private = private;
+    mutate(&mut category);
     book.store.write_category(&category)
 }
 
@@ -224,11 +297,15 @@ fn is_due_for_purge(note: &Note, delay: Duration, now: DateTime<Utc>) -> bool {
 pub fn policy_overview(book: &Book) -> CoreResult<PolicyOverview> {
     let delay = Duration::days(book.config.cleanup.deletion_delay_days as i64);
     let mut overview = PolicyOverview {
-        private_notes: Vec::new(),
+        hidden_notes: Vec::new(),
+        search_excluded_notes: Vec::new(),
+        publish_excluded_notes: Vec::new(),
         archived_notes: Vec::new(),
         locked_notes: Vec::new(),
         pending_deletion: Vec::new(),
-        private_categories: Vec::new(),
+        hidden_categories: Vec::new(),
+        search_excluded_categories: Vec::new(),
+        publish_excluded_categories: Vec::new(),
         unlock_delay_hours: book.config.privacy.unlock_delay_hours,
     };
 
@@ -239,8 +316,14 @@ pub fn policy_overview(book: &Book) -> CoreResult<PolicyOverview> {
         .chain(book.read_all_commentary_notes()?.into_iter())
     {
         let life = &note.metadata.lifecycle;
-        if life.private {
-            overview.private_notes.push(NoteRef::of(&note));
+        if life.hidden {
+            overview.hidden_notes.push(NoteRef::of(&note));
+        }
+        if life.exclude_from_search {
+            overview.search_excluded_notes.push(NoteRef::of(&note));
+        }
+        if life.exclude_from_publish {
+            overview.publish_excluded_notes.push(NoteRef::of(&note));
         }
         if life.archived {
             overview.archived_notes.push(NoteRef::of(&note));
@@ -262,16 +345,28 @@ pub fn policy_overview(book: &Book) -> CoreResult<PolicyOverview> {
         }
     }
 
-    overview.private_categories = book
-        .store
-        .categories()?
-        .into_iter()
-        .filter(|c| c.private)
-        .map(|c| c.name)
-        .collect();
+    for category in book.store.categories()? {
+        if category.hidden {
+            overview.hidden_categories.push(category.name.clone());
+        }
+        if category.exclude_from_search {
+            overview
+                .search_excluded_categories
+                .push(category.name.clone());
+        }
+        if category.exclude_from_publish {
+            overview.publish_excluded_categories.push(category.name);
+        }
+    }
 
     // Stable ordering so the panel does not reshuffle between reads.
-    overview.private_notes.sort_by(|a, b| a.title.cmp(&b.title));
+    overview.hidden_notes.sort_by(|a, b| a.title.cmp(&b.title));
+    overview
+        .search_excluded_notes
+        .sort_by(|a, b| a.title.cmp(&b.title));
+    overview
+        .publish_excluded_notes
+        .sort_by(|a, b| a.title.cmp(&b.title));
     overview
         .archived_notes
         .sort_by(|a, b| a.title.cmp(&b.title));
@@ -279,7 +374,9 @@ pub fn policy_overview(book: &Book) -> CoreResult<PolicyOverview> {
     overview
         .pending_deletion
         .sort_by(|a, b| a.purge_at.cmp(&b.purge_at));
-    overview.private_categories.sort();
+    overview.hidden_categories.sort();
+    overview.search_excluded_categories.sort();
+    overview.publish_excluded_categories.sort();
     Ok(overview)
 }
 
@@ -373,12 +470,57 @@ mod tests {
         assert_eq!(crate::app::commands::list_notes(&book).unwrap().len(), 1);
 
         set_note_private(&book, &note.id, true).unwrap();
+        // The preset turns on all three capabilities.
+        let stored = book
+            .store
+            .read_note(&NoteId::parse(&note.id).unwrap())
+            .unwrap();
+        assert!(stored.metadata.lifecycle.hidden);
+        assert!(stored.metadata.lifecycle.exclude_from_search);
+        assert!(stored.metadata.lifecycle.exclude_from_publish);
         assert!(
             crate::app::commands::list_notes(&book).unwrap().is_empty(),
             "private notes are hidden from default views"
         );
         // Still directly fetchable (the editor can open it).
         assert!(crate::app::commands::get_note(&book, &note.id).is_ok());
+    }
+
+    #[test]
+    fn granular_hidden_only_keeps_note_searchable_and_publishable() {
+        let (_d, book) = book();
+        let note = create_note(&book, ObjectType::Note, "tucked away", None).unwrap();
+
+        set_note_hidden(&book, &note.id, true).unwrap();
+        let stored = book
+            .store
+            .read_note(&NoteId::parse(&note.id).unwrap())
+            .unwrap();
+        assert!(stored.metadata.lifecycle.hidden);
+        assert!(!stored.metadata.lifecycle.exclude_from_search);
+        assert!(!stored.metadata.lifecycle.exclude_from_publish);
+        // Hidden drops it from default listings...
+        assert!(crate::app::commands::list_notes(&book).unwrap().is_empty());
+        // ...but it is neither search-excluded nor publish-excluded.
+        assert!(!stored.metadata.is_searchable()); // hidden ⇒ not searchable by default
+    }
+
+    #[test]
+    fn granular_exclude_from_search_leaves_note_visible() {
+        let (_d, book) = book();
+        let note = create_note(&book, ObjectType::Note, "visible but unsearchable", None).unwrap();
+
+        set_note_exclude_from_search(&book, &note.id, true).unwrap();
+        let stored = book
+            .store
+            .read_note(&NoteId::parse(&note.id).unwrap())
+            .unwrap();
+        assert!(!stored.metadata.lifecycle.hidden);
+        assert!(stored.metadata.lifecycle.exclude_from_search);
+        // Still shown in default views, but not searchable.
+        assert_eq!(crate::app::commands::list_notes(&book).unwrap().len(), 1);
+        assert!(stored.metadata.is_visible_in_default_views());
+        assert!(!stored.metadata.is_searchable());
     }
 
     #[test]
@@ -477,23 +619,50 @@ mod tests {
         request_deletion(&book, &d.id).unwrap();
 
         let mut secret_cat = Category::new("secret");
-        secret_cat.private = true;
+        secret_cat.hidden = true;
+        secret_cat.exclude_from_search = true;
+        secret_cat.exclude_from_publish = true;
         book.store.write_category(&secret_cat).unwrap();
 
         let overview = policy_overview(&book).unwrap();
-        assert_eq!(overview.private_notes.len(), 1);
+        // The `private` preset sets all three note capabilities, so the note appears in each list.
+        assert_eq!(overview.hidden_notes.len(), 1);
+        assert_eq!(overview.search_excluded_notes.len(), 1);
+        assert_eq!(overview.publish_excluded_notes.len(), 1);
         assert_eq!(overview.locked_notes[0].mode, LockMode::UnlockDelay);
         assert_eq!(overview.pending_deletion.len(), 1);
         assert!(overview.pending_deletion[0].purge_at > overview.pending_deletion[0].marked_at);
-        assert_eq!(overview.private_categories, vec!["secret".to_string()]);
+        assert_eq!(overview.hidden_categories, vec!["secret".to_string()]);
+        assert_eq!(
+            overview.search_excluded_categories,
+            vec!["secret".to_string()]
+        );
+        assert_eq!(
+            overview.publish_excluded_categories,
+            vec!["secret".to_string()]
+        );
     }
 
     #[test]
-    fn category_private_toggle_persists() {
+    fn category_private_preset_persists_all_capabilities() {
         let (_d, book) = book();
         book.store.write_category(&Category::new("rooms")).unwrap();
         set_category_private(&book, "rooms", true).unwrap();
-        assert!(book.store.read_category("rooms").unwrap().private);
+        let stored = book.store.read_category("rooms").unwrap();
+        assert!(stored.hidden);
+        assert!(stored.exclude_from_search);
+        assert!(stored.exclude_from_publish);
+    }
+
+    #[test]
+    fn category_granular_publish_exclusion_persists() {
+        let (_d, book) = book();
+        book.store.write_category(&Category::new("drafts")).unwrap();
+        set_category_exclude_from_publish(&book, "drafts", true).unwrap();
+        let stored = book.store.read_category("drafts").unwrap();
+        assert!(!stored.hidden);
+        assert!(!stored.exclude_from_search);
+        assert!(stored.exclude_from_publish);
     }
 
     #[test]

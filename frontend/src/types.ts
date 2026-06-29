@@ -81,7 +81,12 @@ export interface ForkInfo {
 }
 
 export interface Lifecycle {
-  private?: boolean;
+  /** Not shown in the main UI / default views / exports. */
+  hidden?: boolean;
+  /** Excluded from search + RAG retrieval. */
+  exclude_from_search?: boolean;
+  /** Added to .gitignore and excluded from the static-site publish. */
+  exclude_from_publish?: boolean;
   lock?: LockMode;
   archived?: boolean;
   vanish_at?: string;
@@ -247,7 +252,12 @@ export interface Category {
   parent?: string;
   location?: string;
   region?: SpatialRegion;
-  private?: boolean;
+  /** Notes in this category are not shown in the main UI / default views / exports. */
+  hidden?: boolean;
+  /** Notes in this category are excluded from search + RAG retrieval. */
+  exclude_from_search?: boolean;
+  /** This category and its notes are added to .gitignore and excluded from the publish. */
+  exclude_from_publish?: boolean;
 }
 
 // ── Spatial worlds & overlays (mirrors syllepsis_core::model::world + ::spatial) ──
@@ -1014,11 +1024,15 @@ export interface PendingDeletion {
 }
 
 export interface PolicyOverview {
-  private_notes: NoteRef[];
+  hidden_notes: NoteRef[];
+  search_excluded_notes: NoteRef[];
+  publish_excluded_notes: NoteRef[];
   archived_notes: NoteRef[];
   locked_notes: LockedNote[];
   pending_deletion: PendingDeletion[];
-  private_categories: string[];
+  hidden_categories: string[];
+  search_excluded_categories: string[];
+  publish_excluded_categories: string[];
   unlock_delay_hours: number;
 }
 
@@ -1157,7 +1171,7 @@ export interface BookStats {
   total_notes: number;
   sorted_notes: number;
   unsorted_notes: number;
-  private_notes: number;
+  hidden_notes: number;
   archived_notes: number;
   starred_notes: number;
   notes_by_type: Record<string, number>;

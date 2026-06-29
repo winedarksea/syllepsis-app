@@ -337,7 +337,10 @@ fn serialize_category(category: &Category) -> CoreResult<String> {
 fn parse_category(content: &str) -> CoreResult<Category> {
     let (frontmatter, _body) = split_frontmatter(content)
         .ok_or_else(|| CoreError::parse("category file", "missing frontmatter"))?;
-    Ok(serde_yaml::from_str(&frontmatter)?)
+    let mut category: Category = serde_yaml::from_str(&frontmatter)?;
+    // Single migration boundary for categories (mirrors `frontmatter::parse_note`).
+    category.normalize();
+    Ok(category)
 }
 
 /// Worlds, like categories, are stored as frontmatter-only markdown files in `_worlds/`.

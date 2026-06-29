@@ -27,7 +27,8 @@ pub fn policy_overview(state: State<AppState>) -> Result<PolicyOverview, String>
     })
 }
 
-/// Toggle a note's private flag (drops it from default views, RAG, and publish).
+/// Toggle a note's `private` **preset**: turns the three independent capabilities (hidden,
+/// exclude-from-search, exclude-from-publish) on or off together.
 #[tauri::command]
 pub fn set_note_private(
     state: State<AppState>,
@@ -38,6 +39,45 @@ pub fn set_note_private(
         let updated = app::set_note_private(book, &id, private).map_err(|e| e.to_string())?;
         state.invalidate_graph_corpus();
         Ok(updated)
+    })
+}
+
+/// Toggle a note's `hidden` flag (out of the main UI / default views / exports).
+#[tauri::command]
+pub fn set_note_hidden(state: State<AppState>, id: String, hidden: bool) -> Result<NoteDto, String> {
+    with_book!(state, book, {
+        let updated = app::set_note_hidden(book, &id, hidden).map_err(|e| e.to_string())?;
+        // Hiding changes the default corpus the graph/RAG build over.
+        state.invalidate_graph_corpus();
+        Ok(updated)
+    })
+}
+
+/// Toggle a note's `exclude_from_search` flag (out of search + RAG retrieval).
+#[tauri::command]
+pub fn set_note_exclude_from_search(
+    state: State<AppState>,
+    id: String,
+    exclude: bool,
+) -> Result<NoteDto, String> {
+    with_book!(state, book, {
+        let updated =
+            app::set_note_exclude_from_search(book, &id, exclude).map_err(|e| e.to_string())?;
+        state.invalidate_graph_corpus();
+        Ok(updated)
+    })
+}
+
+/// Toggle a note's `exclude_from_publish` flag (gitignored + withheld from the publish). Publish
+/// reads from disk, so this does not invalidate the in-memory graph/RAG corpus.
+#[tauri::command]
+pub fn set_note_exclude_from_publish(
+    state: State<AppState>,
+    id: String,
+    exclude: bool,
+) -> Result<NoteDto, String> {
+    with_book!(state, book, {
+        app::set_note_exclude_from_publish(book, &id, exclude).map_err(|e| e.to_string())
     })
 }
 
@@ -67,7 +107,8 @@ pub fn set_note_lock(
     })
 }
 
-/// Toggle a category's private flag.
+/// Toggle a category's `private` **preset**: turns all three independent capabilities on or off
+/// together for the category.
 #[tauri::command]
 pub fn set_category_private(
     state: State<AppState>,
@@ -75,7 +116,49 @@ pub fn set_category_private(
     private: bool,
 ) -> Result<(), String> {
     with_book!(state, book, {
-        app::set_category_private(book, &name, private).map_err(|e| e.to_string())
+        app::set_category_private(book, &name, private).map_err(|e| e.to_string())?;
+        state.invalidate_graph_corpus();
+        Ok(())
+    })
+}
+
+/// Toggle a category's `hidden` flag.
+#[tauri::command]
+pub fn set_category_hidden(
+    state: State<AppState>,
+    name: String,
+    hidden: bool,
+) -> Result<(), String> {
+    with_book!(state, book, {
+        app::set_category_hidden(book, &name, hidden).map_err(|e| e.to_string())?;
+        state.invalidate_graph_corpus();
+        Ok(())
+    })
+}
+
+/// Toggle a category's `exclude_from_search` flag.
+#[tauri::command]
+pub fn set_category_exclude_from_search(
+    state: State<AppState>,
+    name: String,
+    exclude: bool,
+) -> Result<(), String> {
+    with_book!(state, book, {
+        app::set_category_exclude_from_search(book, &name, exclude).map_err(|e| e.to_string())?;
+        state.invalidate_graph_corpus();
+        Ok(())
+    })
+}
+
+/// Toggle a category's `exclude_from_publish` flag (publish reads from disk; no corpus invalidation).
+#[tauri::command]
+pub fn set_category_exclude_from_publish(
+    state: State<AppState>,
+    name: String,
+    exclude: bool,
+) -> Result<(), String> {
+    with_book!(state, book, {
+        app::set_category_exclude_from_publish(book, &name, exclude).map_err(|e| e.to_string())
     })
 }
 

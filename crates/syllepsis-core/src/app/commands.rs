@@ -30,7 +30,7 @@ pub struct BookStats {
     pub total_notes: usize,
     pub sorted_notes: usize,
     pub unsorted_notes: usize,
-    pub private_notes: usize,
+    pub hidden_notes: usize,
     pub archived_notes: usize,
     pub starred_notes: usize,
     pub notes_by_type: HashMap<String, usize>,
@@ -104,11 +104,11 @@ pub fn note_matches_visibility(note: &Note, visibility: NoteVisibility) -> bool 
         NoteVisibility::Active => note.metadata.is_visible_in_default_views(),
         NoteVisibility::Archived => {
             note.metadata.lifecycle.archived
-                && !note.metadata.lifecycle.private
+                && !note.metadata.lifecycle.hidden
                 && note.metadata.lifecycle.marked_for_deletion_at.is_none()
         }
         NoteVisibility::Trash => {
-            !note.metadata.lifecycle.private
+            !note.metadata.lifecycle.hidden
                 && note.metadata.lifecycle.marked_for_deletion_at.is_some()
         }
     }
@@ -235,7 +235,7 @@ pub fn book_stats(book: &Book) -> CoreResult<BookStats> {
         total_notes: 0,
         sorted_notes: 0,
         unsorted_notes: 0,
-        private_notes: 0,
+        hidden_notes: 0,
         archived_notes: 0,
         starred_notes: 0,
         notes_by_type: HashMap::new(),
@@ -257,8 +257,8 @@ pub fn book_stats(book: &Book) -> CoreResult<BookStats> {
         } else {
             stats.unsorted_notes += 1;
         }
-        if note.metadata.lifecycle.private {
-            stats.private_notes += 1;
+        if note.metadata.lifecycle.hidden {
+            stats.hidden_notes += 1;
         }
         if note.metadata.lifecycle.archived {
             stats.archived_notes += 1;
@@ -706,7 +706,9 @@ fn category_has_user_meaningful_fields(category: &Category) -> bool {
         || category.location.is_some()
         || category.region.is_some()
         || category.parent.is_some()
-        || category.private
+        || category.hidden
+        || category.exclude_from_search
+        || category.exclude_from_publish
 }
 
 struct CategoryUsage {
@@ -979,7 +981,7 @@ mod tests {
             },
             {
                 let mut category = Category::new("private");
-                category.private = true;
+                category.hidden = true;
                 category
             },
         ];
@@ -1041,7 +1043,7 @@ mod tests {
     fn delete_category_allows_protected_empty_category() {
         let (_dir, book) = book();
         let mut category = Category::new("intentional");
-        category.private = true;
+        category.exclude_from_publish = true;
         create_category(&book, category).unwrap();
 
         delete_category(&book, "intentional").unwrap();

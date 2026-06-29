@@ -131,7 +131,7 @@ export function StatsView() {
             <StatCard label="Unsorted" value={stats.unsorted_notes} sub="in inbox" />
             <StatCard label="Categories" value={stats.total_categories} />
             <StatCard label="Starred" value={stats.starred_notes} />
-            <StatCard label="Private" value={stats.private_notes} />
+            <StatCard label="Hidden" value={stats.hidden_notes} />
             <StatCard label="Archived" value={stats.archived_notes} />
             <StatCard label="With location" value={stats.notes_with_location} />
           </div>

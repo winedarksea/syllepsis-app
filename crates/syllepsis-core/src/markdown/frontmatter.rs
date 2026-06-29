@@ -38,6 +38,9 @@ pub fn parse_note(content: &str) -> CoreResult<Note> {
         CoreError::parse("note file", "missing or unterminated `---` frontmatter")
     })?;
     let mut note: Note = serde_yaml::from_str(&frontmatter)?;
+    // Single migration boundary: fan a legacy `private: true` flag out to the three capability
+    // flags so every downstream feature (search, publish, views, sync) sees expanded state.
+    note.metadata.lifecycle.normalize();
     note.body = body;
     Ok(note)
 }
