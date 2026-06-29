@@ -11,6 +11,7 @@ pub mod pack;
 pub mod plugins;
 pub mod publish;
 pub mod search;
+pub mod serve;
 pub mod spatial;
 pub mod style_cards;
 pub mod sync;

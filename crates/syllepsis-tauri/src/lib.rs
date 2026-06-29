@@ -3,13 +3,15 @@
 pub mod commands;
 pub mod local_ai;
 mod model_bootstrap;
+pub mod search_api_config;
 pub mod secrets;
+pub mod server;
 pub mod state;
 
 use commands::{
     book::*, categories::*, cloud_llm::*, commentary::*, config::*, lifecycle::*, llm::*,
-    local_ai::*, notes::*, pack::*, plugins::*, publish::*, search::*, spatial::*, style_cards::*,
-    sync::*, text_import::*,
+    local_ai::*, notes::*, pack::*, plugins::*, publish::*, search::*, serve::*, spatial::*,
+    style_cards::*, sync::*, text_import::*,
 };
 use state::AppState;
 use tauri::Manager;
@@ -60,6 +62,25 @@ pub fn run() {
             }
             commands::sync::start_managed_cloud_auto_sync(app.handle().clone());
             model_bootstrap::provision_default_embedding_model(app.handle())?;
+            // Start the search API server if it was enabled when the app was last quit.
+            if let Ok(app_data_dir) = app.path().app_data_dir() {
+                let cfg = search_api_config::SearchApiConfig::load(&app_data_dir);
+                if cfg.enabled {
+                    use std::sync::Arc;
+                    match server::start(app.handle().clone(), Arc::new(cfg)) {
+                        Ok(handle) => {
+                            app.state::<AppState>()
+                                .search_api_server
+                                .lock()
+                                .unwrap()
+                                .replace(handle);
+                        }
+                        Err(e) => {
+                            tracing::warn!("search API failed to start on boot: {e}");
+                        }
+                    }
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -219,6 +240,10 @@ pub fn run() {
             // publishing & serving (Phase 6)
             publish_site,
             refresh_private_gitignore,
+            // local search API
+            search_api_status,
+            set_search_api_enabled,
+            regenerate_search_api_token,
             // style cards
             list_style_cards,
             save_style_card,

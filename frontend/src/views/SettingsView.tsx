@@ -18,6 +18,7 @@ import type {
   EmbeddingConfig, LocalAiDevicePolicy, ModelManifest,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, PluginDescriptor,
   SyncReport, CloudSyncFinished, DeleteCurrentBookReport,
+  SearchApiStatus,
 } from '../types';
 import {
   allThemes, themeById, themeSwatches, themeToJson, normalizeImportedTheme, BUILTIN_THEMES,
@@ -39,6 +40,7 @@ const SUBTITLES = {
   advanced:   { icelandic: 'Djúpstillingar',  latin: 'Profunda' },
   book:       { icelandic: 'Bókarstillingar', latin: 'Codex' },
   plugins:    { icelandic: 'Viðbætur',        latin: 'Additamenta' },
+  api:        { icelandic: 'Leitarviðmót',   latin: 'Retrimentum' },
   about:      { icelandic: 'Um Syllepsis',    latin: 'De Syllepsi' },
   delete:     { icelandic: 'Eyða bók',        latin: 'Delere' },
 } as const;
@@ -70,6 +72,7 @@ export function SettingsView({ launchMode = false }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [localAiPolicy, setLocalAiPolicy] = useState<LocalAiDevicePolicy | null>(null);
   const [embeddingModels, setEmbeddingModels] = useState<ModelManifest[]>([]);
+  const [searchApiStatus, setSearchApiStatus] = useState<SearchApiStatus | null>(null);
 
   const reportError = useCallback((message: string) => {
     setNotice(null);
@@ -88,6 +91,7 @@ export function SettingsView({ launchMode = false }: Props) {
     api.builtinModelManifests()
       .then((manifests) => setEmbeddingModels(manifests.filter((manifest) => manifest.kind === 'embedding')))
       .catch((e) => reportError(String(e)));
+    api.searchApiStatus().then(setSearchApiStatus).catch(() => undefined);
   }, [loadCloud, reportError]);
 
   useEffect(() => {
@@ -243,6 +247,19 @@ export function SettingsView({ launchMode = false }: Props) {
             }}
             onError={reportError}
           />
+        </Section>
+
+        {/* ── Local Search API ── */}
+        <Section title="Local Search API" subtitle={SUBTITLES.api[flavorLang]}>
+          {searchApiStatus ? (
+            <SearchApiPanel
+              status={searchApiStatus}
+              onChanged={setSearchApiStatus}
+              onError={reportError}
+            />
+          ) : (
+            <p className="sv-hint">Loading…</p>
+          )}
         </Section>
 
         {/* ── About ── */}
@@ -1473,6 +1490,107 @@ function DeleteBookPanel({
           {deleting ? 'Deleting…' : 'Delete notebook'}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Local Search API ──────────────────────────────────────────────────────────
+
+function SearchApiPanel({
+  status,
+  onChanged,
+  onError,
+}: {
+  status: SearchApiStatus;
+  onChanged: (s: SearchApiStatus) => void;
+  onError: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const toggle = useCallback(async (enabled: boolean) => {
+    setBusy(true);
+    try {
+      const updated = await api.setSearchApiEnabled(enabled);
+      onChanged(updated);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [onChanged, onError]);
+
+  const regenerate = useCallback(async () => {
+    setBusy(true);
+    try {
+      const updated = await api.regenerateSearchApiToken();
+      onChanged(updated);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [onChanged, onError]);
+
+  const copy = useCallback(async (text: string) => {
+    await navigator.clipboard?.writeText(text).catch(() => undefined);
+  }, []);
+
+  const mcpConfig = status.enabled && status.token
+    ? JSON.stringify(
+        {
+          mcpServers: {
+            syllepsis: {
+              url: status.mcp_url,
+              headers: { Authorization: `Bearer ${status.token}` },
+            },
+          },
+        },
+        null,
+        2,
+      )
+    : '';
+
+  return (
+    <div className="sv-subpanel">
+      <p className="sv-hint">
+        Exposes Syllepsis search over a localhost-only HTTP server. Read-only. Bind address: 127.0.0.1:{status.port}.
+      </p>
+      <Field label="Enable API" hint="Starts the server on the port below. Off by default.">
+        <Toggle checked={status.enabled} onChange={(v) => { if (!busy) toggle(v); }} />
+      </Field>
+
+      {status.enabled && status.token && (
+        <>
+          <Field label="Bearer token" hint="Required on every request. Treat like a password.">
+            <div className="sv-token-row">
+              <code className="sv-token">{status.token}</code>
+              <button className="sv-btn sv-btn-compact" type="button" onClick={() => copy(status.token!)}>Copy</button>
+              <button className="sv-btn sv-btn-compact" type="button" disabled={busy} onClick={regenerate}>Rotate</button>
+            </div>
+          </Field>
+
+          <Field label="REST base URL" hint="All /api/* routes require the bearer token.">
+            <div className="sv-token-row">
+              <code className="sv-token">{status.rest_url}</code>
+              <button className="sv-btn sv-btn-compact" type="button" onClick={() => copy(status.rest_url)}>Copy</button>
+            </div>
+          </Field>
+
+          <Field label="MCP endpoint" hint="JSON-RPC 2.0 — tools: search, get_note, recent_notes, core_notes, notes_by_category.">
+            <div className="sv-token-row">
+              <code className="sv-token">{status.mcp_url}</code>
+              <button className="sv-btn sv-btn-compact" type="button" onClick={() => copy(status.mcp_url)}>Copy</button>
+            </div>
+          </Field>
+
+          <Field label="MCP client config" hint="Paste into your MCP client (Claude Desktop, Cursor, etc.).">
+            <div className="sv-token-row">
+              <code className="sv-token sv-token-pre">{mcpConfig}</code>
+              <button className="sv-btn sv-btn-compact" type="button" onClick={() => copy(mcpConfig)}>Copy</button>
+            </div>
+          </Field>
+        </>
+      )}
     </div>
   );
 }

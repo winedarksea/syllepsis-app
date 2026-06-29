@@ -12,6 +12,7 @@ pub mod pack;
 pub mod pack_manifest;
 pub mod plugin;
 pub mod publish;
+pub mod query;
 pub mod search;
 pub mod spatial;
 pub mod sync;

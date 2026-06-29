@@ -581,3 +581,30 @@ select.sv-input { min-width: 180px; cursor: pointer; }
   filter: brightness(0.94);
   border-color: var(--color-error);
 }
+
+/* ── Local Search API ── */
+
+.sv-token-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.sv-token {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8em;
+  background: var(--color-surface-2, var(--color-bg-2));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+}
+
+.sv-token-pre {
+  white-space: pre;
+  overflow-x: auto;
+  display: block;
+}

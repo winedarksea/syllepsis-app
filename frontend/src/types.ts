@@ -1243,3 +1243,13 @@ export interface PublishReport {
 export interface GitignoreReport {
   excluded_paths: string[];
 }
+
+// ── Local search API ──
+
+export interface SearchApiStatus {
+  enabled: boolean;
+  port: number;
+  token: string | null;
+  rest_url: string;
+  mcp_url: string;
+}

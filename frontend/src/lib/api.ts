@@ -22,6 +22,7 @@ import type {
   BookStats, StyleCard, CrossBookNote, SearchFilter, CreateNoteOptions, NoteVisibility,
   TextImportOptions, TextImportPreview, TextImportCommitRequest, TextImportReport,
   PluginDescriptor, CommentaryKind, CommentarySummary, ApplyCommentaryOptions,
+  SearchApiStatus,
 } from '../types';
 
 export const api = {
@@ -308,4 +309,10 @@ export const api = {
   listStyleCards: () => invoke<StyleCard[]>('list_style_cards'),
   saveStyleCard: (card: StyleCard) => invoke<StyleCard>('save_style_card', { card }),
   deleteStyleCard: (id: string) => invoke<void>('delete_style_card', { id }),
+
+  // Local search API
+  searchApiStatus: () => invoke<SearchApiStatus>('search_api_status'),
+  setSearchApiEnabled: (enabled: boolean) =>
+    invoke<SearchApiStatus>('set_search_api_enabled', { enabled }),
+  regenerateSearchApiToken: () => invoke<SearchApiStatus>('regenerate_search_api_token'),
 };

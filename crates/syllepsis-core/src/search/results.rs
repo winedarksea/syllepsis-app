@@ -51,6 +51,38 @@ pub struct SearchHit {
     pub marked_for_deletion_at: Option<DateTime<Utc>>,
 }
 
+impl SearchHit {
+    /// Relevance score in [0, 1] — mirrors the `searchRelevance` formula in `searchRelevance.ts`.
+    pub fn relevance(&self) -> f32 {
+        const STRONG_RRF_CHANNEL_CONTRIBUTION: f32 = 1.0 / 61.0;
+        const STRONG_LEXICAL_SIGNAL: f32 = STRONG_RRF_CHANNEL_CONTRIBUTION * 2.0;
+        const MAX_LEXICAL_RELEVANCE: f32 = 0.72;
+        const TWO_CHANNEL_AGREEMENT_BOOST: f32 = 0.04;
+        const THREE_CHANNEL_AGREEMENT_BOOST: f32 = 0.08;
+
+        fn clamp01(v: f32) -> f32 {
+            if !v.is_finite() { return 0.0; }
+            v.clamp(0.0, 1.0)
+        }
+
+        let s = &self.ranking_signals;
+        let semantic_relevance = clamp01(s.vector_similarity);
+        let lexical_signal = clamp01((s.exact + s.bm25) / STRONG_LEXICAL_SIGNAL);
+        let lexical_relevance = lexical_signal * MAX_LEXICAL_RELEVANCE;
+        let channel_count = [s.exact, s.bm25, s.vector]
+            .iter()
+            .filter(|&&v| v > 0.0)
+            .count();
+        let agreement_boost = match channel_count {
+            3.. => THREE_CHANNEL_AGREEMENT_BOOST,
+            2 => TWO_CHANNEL_AGREEMENT_BOOST,
+            _ => 0.0,
+        };
+        let primary = semantic_relevance.max(lexical_relevance);
+        clamp01(primary + (1.0 - primary) * agreement_boost)
+    }
+}
+
 /// How many results fall under a category — the facet sidebar of [`SearchResults`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FacetCount {

@@ -1,6 +1,7 @@
 //! Global application state threaded through Tauri commands via [`tauri::State`].
 
 use crate::local_ai::LocalAiWorker;
+use crate::server::ServerHandle;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -72,6 +73,8 @@ pub struct AppState {
     /// Serializes cloud sync passes. Separate from `book` so no UI command contends on it;
     /// `try_lock()` gives "only one sync at a time, coalesce overlaps" for free.
     pub sync_lock: Arc<Mutex<()>>,
+    /// Running search API server instance, if enabled. `None` when the API is off.
+    pub search_api_server: Mutex<Option<ServerHandle>>,
 }
 
 impl AppState {
@@ -88,6 +91,7 @@ impl AppState {
             secrets_lock: Arc::new(Mutex::new(())),
             pending_oauth: Arc::new(Mutex::new(HashMap::new())),
             sync_lock: Arc::new(Mutex::new(())),
+            search_api_server: Mutex::new(None),
         }
     }
 
