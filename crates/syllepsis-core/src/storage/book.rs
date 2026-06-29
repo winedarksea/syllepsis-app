@@ -295,18 +295,22 @@ impl Book {
     /// Fork a note: mint a new identity, record the lineage, and persist the copy.
     pub fn fork_note(&self, source: &NoteId) -> CoreResult<Note> {
         let mut forked = self.store.read_note(source)?;
+        let forked_title = format!("Duplicate of {}", forked.title);
         let new_id = self
             .registry
             .lock()
             .expect("registry poisoned")
-            .mint(forked.object_type.id_prefix(), &forked.title);
+            .mint(forked.object_type.id_prefix(), &forked_title);
+        let forked_at = Utc::now();
         forked.id = new_id;
+        forked.title = forked_title;
         forked.metadata.fork = Some(ForkInfo {
             forked_from: source.clone(),
-            forked_at: Utc::now(),
+            forked_at,
         });
-        forked.metadata.dates = crate::model::metadata::DateMetadata::now();
-        self.store.write_note(&forked)?;
+        forked.metadata.dates.created = forked_at;
+        forked.metadata.dates.updated = forked_at;
+        self.save_note(&forked)?;
         Ok(forked)
     }
 
@@ -534,12 +538,44 @@ mod tests {
     fn fork_creates_new_identity_with_lineage() {
         let dir = tempfile::tempdir().unwrap();
         let book = Book::create(dir.path(), "B").unwrap();
-        let original = book.new_note(ObjectType::Note, "source").unwrap();
+        let mut original = book.new_note(ObjectType::Note, "source").unwrap();
+        original.body = "source body".into();
+        original.summary = "source summary".into();
+        original.categories = vec!["topic".into()];
+        original.location = Some("earth/1,2".into());
+        original.metadata.authorship.ownership = Some("owner".into());
+        original.metadata.lifecycle.exclude_from_search = true;
+        original.metadata.kanban.magnitude = Some(3);
+        original.metadata.dates.created = chrono::DateTime::<Utc>::UNIX_EPOCH;
+        original.metadata.dates.updated = chrono::DateTime::<Utc>::UNIX_EPOCH;
+        book.save_note(&original).unwrap();
+
         let forked = book.fork_note(&original.id).unwrap();
+
         assert_ne!(forked.id.ulid(), original.id.ulid());
+        assert_eq!(forked.title, "Duplicate of source");
+        assert_eq!(forked.body, original.body);
+        assert_eq!(forked.summary, original.summary);
+        assert_eq!(forked.categories, original.categories);
+        assert_eq!(forked.location, original.location);
+        assert_eq!(
+            forked.metadata.authorship.ownership,
+            original.metadata.authorship.ownership
+        );
+        assert_eq!(
+            forked.metadata.lifecycle.exclude_from_search,
+            original.metadata.lifecycle.exclude_from_search
+        );
+        assert_eq!(forked.metadata.kanban, original.metadata.kanban);
         assert_eq!(
             forked.metadata.fork.as_ref().unwrap().forked_from,
             original.id
         );
+        assert_ne!(
+            forked.metadata.dates.created,
+            original.metadata.dates.created
+        );
+        assert_eq!(forked.metadata.dates.created, forked.metadata.dates.updated);
+        assert_eq!(book.store.read_note(&forked.id).unwrap().id, forked.id);
     }
 }

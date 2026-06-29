@@ -1194,6 +1194,22 @@ mod tests {
     }
 
     #[test]
+    fn fork_note_copies_saved_body_without_changing_source() {
+        let (_dir, book) = book();
+        let mut source = create_note(&book, ObjectType::Note, "source", None).unwrap();
+        source.body = "saved source body".into();
+        let source = update_note(&book, source).unwrap();
+
+        let forked = fork_note(&book, &source.id).unwrap();
+        let stored_source = get_note(&book, &source.id).unwrap();
+
+        assert_eq!(stored_source.body, "saved source body");
+        assert_eq!(forked.body, "saved source body");
+        assert_eq!(forked.title, "Duplicate of source");
+        assert_ne!(forked.id, source.id);
+    }
+
+    #[test]
     fn split_note_creates_second_note_after_first() {
         let (_dir, book) = book();
         let mut note = create_note(&book, ObjectType::Note, "whole", None).unwrap();

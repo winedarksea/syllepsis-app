@@ -165,6 +165,7 @@ pub fn fork_note(state: State<AppState>, id: String) -> Result<NoteDto, String> 
     with_book!(state, book, {
         let forked = app::fork_note(book, &id).map_err(|e| e.to_string())?;
         let _ = state.local_ai.enqueue_note(book, forked.id.clone(), false);
+        state.invalidate_graph_corpus();
         Ok(forked)
     })
 }

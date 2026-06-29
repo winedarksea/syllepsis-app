@@ -16,8 +16,10 @@ use crate::app::pack_manifest::{BookPackManifest, NoteBaseline};
 use crate::error::CoreResult;
 use crate::id::NoteId;
 use crate::model::metadata::Metadata;
-use crate::model::{Category, CommentaryKind, CommentaryMetadata, CommentarySource, Note, ObjectType};
 use crate::model::prior::PriorRef;
+use crate::model::{
+    Category, CommentaryKind, CommentaryMetadata, CommentarySource, Note, ObjectType,
+};
 use crate::pack::{ExportKind, Pack, PackCommentary, PackManifest, PackNote};
 use crate::storage::{layout, Book, NoteStore};
 
@@ -77,8 +79,7 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
             .collect()
     };
 
-    let selected_ids: BTreeSet<String> =
-        selected.iter().map(|n| n.id.to_string()).collect();
+    let selected_ids: BTreeSet<String> = selected.iter().map(|n| n.id.to_string()).collect();
 
     let used: BTreeSet<String> = selected
         .iter()
@@ -107,7 +108,11 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
                     PriorRef::Note(target_id) => selected_ids.contains(&target_id.to_string()),
                     PriorRef::Category(name) => used.contains(name),
                 };
-                if keep { Some(edge.clone()) } else { None }
+                if keep {
+                    Some(edge.clone())
+                } else {
+                    None
+                }
             });
             pn
         })
@@ -129,11 +134,18 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
     if spec.include_commentary {
         let parent_ids = &selected_ids;
         for commentary_note in book.read_all_commentary_notes()? {
-            let Some(meta) = &commentary_note.commentary else { continue };
+            let Some(meta) = &commentary_note.commentary else {
+                continue;
+            };
             if !parent_ids.contains(&meta.parent_note_id.to_string()) {
                 continue;
             }
-            if commentary_note.metadata.lifecycle.marked_for_deletion_at.is_some() {
+            if commentary_note
+                .metadata
+                .lifecycle
+                .marked_for_deletion_at
+                .is_some()
+            {
                 continue;
             }
             pack.commentary.push(PackCommentary {
@@ -321,7 +333,8 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
                 record_membership(&mut note.metadata, &pack.manifest);
                 note.metadata.dates.updated = chrono::Utc::now();
                 book.save_note(&note)?;
-                let baseline = capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
+                let baseline =
+                    capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
                 manifest.notes.insert(pack_note.id.clone(), baseline);
                 report.imported.push(pack_note.id.clone());
             }
@@ -336,7 +349,8 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
                 record_membership(&mut note.metadata, &pack.manifest);
                 note.metadata.dates.updated = chrono::Utc::now();
                 book.save_note(&note)?;
-                let baseline = capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
+                let baseline =
+                    capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
                 manifest.notes.insert(pack_note.id.clone(), baseline);
                 report.imported.push(pack_note.id.clone());
             }
@@ -362,20 +376,23 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
                         record_membership(&mut note.metadata, &pack.manifest);
                         note.metadata.dates.updated = chrono::Utc::now();
                         book.save_note(&note)?;
-                        let baseline = capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
+                        let baseline =
+                            capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
                         manifest.notes.insert(pack_note.id.clone(), baseline);
                         report.overwritten.push(pack_note.id.clone());
                     }
 
                     NoteResolution::Merge => {
-                        let merged_body = try_crdt_merge(book, &id, &pack_note.id, &pack_note.body, &manifest)?;
+                        let merged_body =
+                            try_crdt_merge(book, &id, &pack_note.id, &pack_note.body, &manifest)?;
                         let mut note = book.store.read_note(&id)?;
                         note.body = merged_body;
                         note.categories = mapped;
                         record_membership(&mut note.metadata, &pack.manifest);
                         note.metadata.dates.updated = chrono::Utc::now();
                         book.save_note(&note)?;
-                        let baseline = capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
+                        let baseline =
+                            capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
                         manifest.notes.insert(pack_note.id.clone(), baseline);
                         report.merged.push(pack_note.id.clone());
                     }
@@ -403,12 +420,21 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
                         record_membership(&mut dup.metadata, &pack.manifest);
                         dup.metadata.dates.updated = chrono::Utc::now();
                         book.save_note(&dup)?;
-                        let baseline = capture_baseline(book, &new_id, &pack_note.body, &pack.manifest.version)?;
+                        let baseline = capture_baseline(
+                            book,
+                            &new_id,
+                            &pack_note.body,
+                            &pack.manifest.version,
+                        )?;
                         manifest.notes.insert(new_id.to_string(), baseline);
 
                         // Remove the original note from pack membership so it becomes a fork.
                         if let Ok(mut original) = book.store.read_note(&id) {
-                            original.metadata.packs.packs.retain(|p| p != &pack.manifest.id);
+                            original
+                                .metadata
+                                .packs
+                                .packs
+                                .retain(|p| p != &pack.manifest.id);
                             original.metadata.packs.pack_version = None;
                             original.metadata.packs.locally_modified = false;
                             book.save_note(&original)?;
@@ -425,7 +451,9 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
     for pack_commentary in &pack.commentary {
         let parent_id_str = pack_commentary.commentary.parent_note_id.to_string();
         // Only recreate if the parent was imported/present.
-        let Ok(parent_id) = NoteId::parse(&parent_id_str) else { continue };
+        let Ok(parent_id) = NoteId::parse(&parent_id_str) else {
+            continue;
+        };
         if book.store.read_note(&parent_id).is_err() {
             continue;
         }
@@ -441,7 +469,9 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
             pack_commentary.commentary.kind,
             CommentarySource::User,
         );
-        if let Ok(mut commentary_note) = book.new_commentary_note(pack_commentary.title.clone(), meta) {
+        if let Ok(mut commentary_note) =
+            book.new_commentary_note(pack_commentary.title.clone(), meta)
+        {
             commentary_note.body = pack_commentary.body.clone();
             let _ = book.save_commentary_note(&commentary_note);
         }
@@ -797,7 +827,10 @@ mod tests {
         update_note(&target, edited).unwrap();
 
         // Re-import v2 with Overwrite resolution.
-        let mut v2_note = source.store.read_note(&NoteId::parse(&note_id).unwrap()).unwrap();
+        let mut v2_note = source
+            .store
+            .read_note(&NoteId::parse(&note_id).unwrap())
+            .unwrap();
         v2_note.body = "v2 body".into();
         source.save_note(&v2_note).unwrap();
         let mut v2_spec = spec();
@@ -805,7 +838,9 @@ mod tests {
         let pack_v2 = build_pack(&source, &v2_spec).unwrap();
 
         let mut overwrite_options = base_options.clone();
-        overwrite_options.resolutions.insert(note_id.clone(), NoteResolution::Overwrite);
+        overwrite_options
+            .resolutions
+            .insert(note_id.clone(), NoteResolution::Overwrite);
         let report = import_pack(&target, &pack_v2, &overwrite_options).unwrap();
         assert!(report.overwritten.contains(&note_id));
         assert_eq!(get_note(&target, &note_id).unwrap().body, "v2 body");
@@ -829,7 +864,10 @@ mod tests {
         edited.body = "my fork".into();
         update_note(&target, edited).unwrap();
 
-        let mut v2_note = source.store.read_note(&NoteId::parse(&note_id).unwrap()).unwrap();
+        let mut v2_note = source
+            .store
+            .read_note(&NoteId::parse(&note_id).unwrap())
+            .unwrap();
         v2_note.body = "v2 body".into();
         source.save_note(&v2_note).unwrap();
         let mut v2_spec = spec();
@@ -837,7 +875,9 @@ mod tests {
         let pack_v2 = build_pack(&source, &v2_spec).unwrap();
 
         let mut dup_options = base_options.clone();
-        dup_options.resolutions.insert(note_id.clone(), NoteResolution::Duplicate);
+        dup_options
+            .resolutions
+            .insert(note_id.clone(), NoteResolution::Duplicate);
         let report = import_pack(&target, &pack_v2, &dup_options).unwrap();
         assert!(report.duplicated.contains(&note_id));
         // Original note still has the user's fork body.
@@ -850,7 +890,7 @@ mod tests {
     #[test]
     fn export_keeps_in_pack_prior_drops_out_of_pack_prior() {
         use crate::app::commands::update_note;
-        use crate::model::prior::{PriorEdge, PriorRef, PriorKind};
+        use crate::model::prior::{PriorEdge, PriorKind, PriorRef};
 
         let (_d, book) = book();
         let a_id_str = add(&book, "NoteA", "body a", &["garden"]);
@@ -860,13 +900,19 @@ mod tests {
         // Set NoteB to follow NoteA (both in pack).
         let a_id = NoteId::parse(&a_id_str).unwrap();
         let mut note_b = get_note(&book, &b_id_str).unwrap();
-        note_b.prior = Some(PriorEdge { target: PriorRef::Note(a_id.clone()), kind: PriorKind::NewParagraph });
+        note_b.prior = Some(PriorEdge {
+            target: PriorRef::Note(a_id.clone()),
+            kind: PriorKind::NewParagraph,
+        });
         update_note(&book, note_b).unwrap();
 
         // Set NoteA to follow Outside (out-of-pack).
         let outside_id = NoteId::parse(&outside_id_str).unwrap();
         let mut note_a = get_note(&book, &a_id_str).unwrap();
-        note_a.prior = Some(PriorEdge { target: PriorRef::Note(outside_id.clone()), kind: PriorKind::NewParagraph });
+        note_a.prior = Some(PriorEdge {
+            target: PriorRef::Note(outside_id.clone()),
+            kind: PriorKind::NewParagraph,
+        });
         update_note(&book, note_a).unwrap();
 
         book.store.write_category(&Category::new("garden")).unwrap();
@@ -894,7 +940,10 @@ mod tests {
             "proposed edit",
         )
         .unwrap();
-        source.store.write_category(&Category::new("garden")).unwrap();
+        source
+            .store
+            .write_category(&Category::new("garden"))
+            .unwrap();
 
         let mut s = spec();
         s.include_commentary = true;

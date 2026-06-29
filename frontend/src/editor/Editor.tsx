@@ -350,6 +350,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const [findNavigationRequest, setFindNavigationRequest] = useState(0);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
+  const [forking, setForking] = useState(false);
   const [commentaryOpen, setCommentaryOpen] = useState(false);
   const [commentaryCount, setCommentaryCount] = useState(0);
   const [proposalDraftDirty, setProposalDraftDirty] = useState(false);
@@ -457,9 +458,11 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   rowsRef.current = rows;
   const noteTypeRef = useRef<string>('');
   if (note) noteTypeRef.current = note.type;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
 
   const save = useCallback(async () => {
-    if (!note || savingRef.current) return;
+    if (!note || savingRef.current) return false;
     savingRef.current = true;
     setSaving(true);
     setError(null);
@@ -493,8 +496,11 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         api.allCategories().then(setCategories).catch(() => {});
       }
       setDirty(false);
+      dirtyRef.current = false;
+      return true;
     } catch (e) {
       setError(String(e));
+      return false;
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -503,8 +509,6 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
 
   const saveRef = useRef(save);
   saveRef.current = save;
-  const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
 
   useEffect(() => {
     if (!dirty) return;
@@ -766,6 +770,24 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     }
   }, [note]);
 
+  const handleFork = useCallback(async () => {
+    if (!note || forking) return;
+    if (dirtyRef.current) {
+      const saved = await saveRef.current();
+      if (!saved) return;
+    }
+    setForking(true);
+    setError(null);
+    try {
+      const forked = await api.forkNote(note.id);
+      openEditor(forked.id, 'edit');
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      setForking(false);
+    }
+  }, [forking, note, openEditor]);
+
   const handleCommentaryApplied = useCallback((updated: NoteDto) => {
     setNote(updated);
     setTitle(updated.title);
@@ -887,6 +909,16 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             </button>
             <button className="editor-tool-btn" onClick={() => setMergeDialogOpen(true)} title="Merge another note into this note">
               Merge
+            </button>
+            <button
+              className="editor-tool-btn"
+              onClick={handleFork}
+              title="Duplicate this note"
+              disabled={forking}
+              aria-busy={forking}
+            >
+              <Icon name="content_copy" size={14} />
+              Fork
             </button>
             <button
               className="editor-tool-btn"
