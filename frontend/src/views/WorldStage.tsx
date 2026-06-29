@@ -174,6 +174,7 @@ export function WorldStage({
             width={STAGE_WIDTH}
             height={height}
             zoom={camera.zoom}
+            imageWorld={world.kind === 'image'}
           />
         ))}
         {overlay.pins.map((pin, index) => (
@@ -183,6 +184,7 @@ export function WorldStage({
             width={STAGE_WIDTH}
             height={height}
             zoom={camera.zoom}
+            imageWorld={world.kind === 'image'}
           />
         ))}
       </svg>
@@ -227,21 +229,22 @@ function isStagePointInsideRegion(
     && point.y <= top + shape.height * height;
 }
 
-function PinMark({ pin, width, height, zoom }: {
-  pin: Pin; width: number; height: number; zoom: number;
+function PinMark({ pin, width, height, zoom, imageWorld }: {
+  pin: Pin; width: number; height: number; zoom: number; imageWorld?: boolean;
 }) {
   const position = project(pin.point, width, height);
   const label = pin.target.kind === 'note' ? pin.target.title : `#${pin.target.name}`;
+  const labelSize = imageWorld ? 15 : 12;
   return (
     <g className="wv-svg-pin" transform={`translate(${position.x} ${position.y})`}>
       <circle r={7 / zoom} />
-      <text x={9 / zoom} y={-8 / zoom} fontSize={12 / zoom}>{label || '(untitled)'}</text>
+      <text x={9 / zoom} y={-8 / zoom} fontSize={labelSize / zoom}>{label || '(untitled)'}</text>
     </g>
   );
 }
 
-function RegionMark({ region, width, height, zoom }: {
-  region: OverlayRegion; width: number; height: number; zoom: number;
+function RegionMark({ region, width, height, zoom, imageWorld }: {
+  region: OverlayRegion; width: number; height: number; zoom: number; imageWorld?: boolean;
 }) {
   const shape = region.region;
   if (shape.shape === 'bounding_box') {
@@ -260,7 +263,7 @@ function RegionMark({ region, width, height, zoom }: {
   return (
     <g className="wv-svg-region-marker" transform={`translate(${position.x} ${position.y})`}>
       <rect x={-4 / zoom} y={-4 / zoom} width={8 / zoom} height={8 / zoom} />
-      <text x={7 / zoom} y={4 / zoom} fontSize={11 / zoom}>#{region.category}</text>
+      <text x={7 / zoom} y={4 / zoom} fontSize={(imageWorld ? 14 : 11) / zoom}>#{region.category}</text>
     </g>
   );
 }
