@@ -58,8 +58,8 @@ pub fn start(app_handle: AppHandle, config: Arc<SearchApiConfig>) -> Result<Serv
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     tauri::async_runtime::spawn(async move {
-        let tokio_listener = tokio::net::TcpListener::from_std(listener)
-            .expect("convert TcpListener to tokio");
+        let tokio_listener =
+            tokio::net::TcpListener::from_std(listener).expect("convert TcpListener to tokio");
         axum::serve(tokio_listener, router)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -72,11 +72,7 @@ pub fn start(app_handle: AppHandle, config: Arc<SearchApiConfig>) -> Result<Serv
 }
 
 /// Axum middleware that enforces the bearer token on `/api/*` and `/mcp`.
-async fn auth_middleware(
-    State(state): State<ApiState>,
-    req: Request,
-    next: Next,
-) -> Response {
+async fn auth_middleware(State(state): State<ApiState>, req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
     let needs_auth = path.starts_with("/api") || path == "/mcp";
     if needs_auth {
@@ -113,7 +109,10 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/notes/{id}", get(rest::note_handler))
         // MCP
         .route("/mcp", post(mcp::mcp_handler))
-        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .with_state(state)
 }
 
@@ -124,5 +123,8 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     if ab.len() != bb.len() {
         return false;
     }
-    ab.iter().zip(bb.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    ab.iter()
+        .zip(bb.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }

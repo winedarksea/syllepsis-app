@@ -52,7 +52,11 @@ pub trait EmbeddingProvider: ProviderInfo {
     }
 
     fn embed_full_note(&self, note: &Note) -> CoreResult<Option<Embedding>> {
-        let content = if note.body.trim().is_empty() { &note.summary } else { &note.body };
+        let content = if note.body.trim().is_empty() {
+            &note.summary
+        } else {
+            &note.body
+        };
         let full_text = format!("{} {}", note.title, content);
         let full_note = (!full_text.trim().is_empty()).then(|| self.embed(&full_text));
         Ok(full_note)

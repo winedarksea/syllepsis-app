@@ -100,7 +100,11 @@ pub fn summary_source_hash(note: &Note) -> [u8; 32] {
 }
 
 pub fn full_note_source_hash(note: &Note) -> [u8; 32] {
-    let content = if note.body.trim().is_empty() { note.summary.as_bytes() } else { note.body.as_bytes() };
+    let content = if note.body.trim().is_empty() {
+        note.summary.as_bytes()
+    } else {
+        note.body.as_bytes()
+    };
     hash_fields(&[note.title.as_bytes(), content])
 }
 

@@ -573,12 +573,7 @@ mod tests {
         }
         /// A human-readable engine over the fragment-aware [`IndexedLocalFolderSync`] test double,
         /// returned alongside a handle to its content-fetch counter (the bandwidth metric).
-        fn indexed_engine(
-            &self,
-        ) -> (
-            SyncEngine,
-            std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        ) {
+        fn indexed_engine(&self) -> (SyncEngine, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
             let provider = IndexedLocalFolderSync::open(&self.remote).unwrap();
             let counter = provider.get_count_handle();
             let actor = actor_id_for(self.book.root.as_path()).unwrap();
@@ -748,7 +743,11 @@ mod tests {
         let (b_engine, b_count) = b.indexed_engine();
         let report = b_engine.sync().unwrap();
         assert!(report.is_noop(), "quiet pass changes nothing");
-        assert_eq!(b_count.load(Relaxed), 0, "quiet pass fetches no file bodies");
+        assert_eq!(
+            b_count.load(Relaxed),
+            0,
+            "quiet pass fetches no file bodies"
+        );
     }
 
     #[test]
@@ -769,9 +768,21 @@ mod tests {
             crdt_backend: crate::crdt::LWW_BACKEND.to_string(),
             ..SyncConfig::default()
         };
-        let a = Device { book: a_book, remote: remote.clone(), cfg: cfg.clone() };
-        let b = Device { book: b_book, remote: remote.clone(), cfg: cfg.clone() };
-        let c = Device { book: c_book, remote, cfg };
+        let a = Device {
+            book: a_book,
+            remote: remote.clone(),
+            cfg: cfg.clone(),
+        };
+        let b = Device {
+            book: b_book,
+            remote: remote.clone(),
+            cfg: cfg.clone(),
+        };
+        let c = Device {
+            book: c_book,
+            remote,
+            cfg,
+        };
 
         let id_a = add_note(&a, "from-a", "alpha body");
         let id_b = add_note(&b, "from-b", "beta body");
@@ -790,7 +801,11 @@ mod tests {
         assert_eq!(body_of(&c.book, &id_a), "alpha body");
         assert_eq!(body_of(&c.book, &id_b), "beta body");
         // Two notes pulled; nothing hashed via the fallback (revisions all came from the index).
-        assert_eq!(c_count.load(Relaxed), 2, "only the two pulled notes are fetched");
+        assert_eq!(
+            c_count.load(Relaxed),
+            2,
+            "only the two pulled notes are fetched"
+        );
     }
 
     #[test]
@@ -827,11 +842,18 @@ mod tests {
         let (b_engine, b_count) = b.indexed_engine();
         b_engine.sync().unwrap();
         // First pass had to hash the unindexed remote files (fallback fired at least once).
-        assert!(b_count.load(Relaxed) >= 1, "first pass hashes unindexed files");
+        assert!(
+            b_count.load(Relaxed) >= 1,
+            "first pass hashes unindexed files"
+        );
 
         let (b_engine2, b_count2) = b.indexed_engine();
         assert!(b_engine2.sync().unwrap().is_noop());
-        assert_eq!(b_count2.load(Relaxed), 0, "second pass is cheap once a fragment exists");
+        assert_eq!(
+            b_count2.load(Relaxed),
+            0,
+            "second pass is cheap once a fragment exists"
+        );
     }
 
     #[test]

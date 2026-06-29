@@ -19,7 +19,7 @@ use crate::search::bm25::Bm25Index;
 use crate::search::exact::match_exact;
 use crate::search::filter::SearchFilter;
 use crate::search::results::{
-    BlindSpot, DuplicatePair, EmptyNote, EmbeddingDiagnostics, FacetCount, RelatedNote, SearchHit,
+    BlindSpot, DuplicatePair, EmbeddingDiagnostics, EmptyNote, FacetCount, RelatedNote, SearchHit,
     SearchRankingSignals, SearchResults,
 };
 use crate::search::rrf::reciprocal_rank_fusion;

@@ -208,7 +208,9 @@ pub fn import_image_object(
             title.as_deref(),
         )
         .map_err(|e| e.to_string())?;
-        let _ = state.local_ai.enqueue_note(book, imported.id.clone(), false);
+        let _ = state
+            .local_ai
+            .enqueue_note(book, imported.id.clone(), false);
         state.invalidate_graph_corpus();
         Ok(imported)
     })

@@ -344,10 +344,19 @@ mod tests {
     fn fact_check_parser_handles_each_variant() {
         for (raw, expected) in [
             ("STRONG_EVIDENCE", FactCheckAssessment::StrongEvidence),
-            ("SOME_QUESTIONABLE_POINTS", FactCheckAssessment::SomeQuestionablePoints),
-            ("MANY_QUESTIONABLE_POINTS", FactCheckAssessment::ManyQuestionablePoints),
+            (
+                "SOME_QUESTIONABLE_POINTS",
+                FactCheckAssessment::SomeQuestionablePoints,
+            ),
+            (
+                "MANY_QUESTIONABLE_POINTS",
+                FactCheckAssessment::ManyQuestionablePoints,
+            ),
             ("FULL_FAILURE", FactCheckAssessment::FullFailure),
-            ("NO_CHECKABLE_CLAIMS", FactCheckAssessment::NoCheckableClaims),
+            (
+                "NO_CHECKABLE_CLAIMS",
+                FactCheckAssessment::NoCheckableClaims,
+            ),
         ] {
             let yaml = format!("assessment: {raw}\nnotes: some notes here");
             let (assessment, notes) = parse_fact_check_response(&yaml);

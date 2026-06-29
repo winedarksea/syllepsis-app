@@ -123,9 +123,10 @@ mod tests {
 
     #[test]
     fn legacy_private_category_migrates_to_three_capabilities() {
-        let mut c: Category =
-            serde_yaml::from_str("name: secret\nlong_name: Secret\nheading_level: 2\nprivate: true")
-                .unwrap();
+        let mut c: Category = serde_yaml::from_str(
+            "name: secret\nlong_name: Secret\nheading_level: 2\nprivate: true",
+        )
+        .unwrap();
         assert!(!c.hidden && !c.exclude_from_search && !c.exclude_from_publish);
 
         c.normalize();

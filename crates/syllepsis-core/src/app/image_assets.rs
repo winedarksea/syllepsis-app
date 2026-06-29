@@ -20,6 +20,7 @@ struct InspectedImage {
     extension: &'static str,
     media_type: &'static str,
     dimensions: (u32, u32),
+    normalized_bytes: Option<Vec<u8>>,
 }
 
 type TrackedAssetInspection = (ObjectType, (u32, u32), String);
@@ -52,7 +53,11 @@ pub fn import_tracked_asset(book: &Book, source_path: &str) -> CoreResult<Import
     let final_path = assets_directory.join(&file_name);
     let temporary_path = assets_directory.join(format!(".{file_name}.importing"));
 
-    std::fs::copy(source, &temporary_path)?;
+    if let Some(bytes) = &inspected.normalized_bytes {
+        std::fs::write(&temporary_path, bytes)?;
+    } else {
+        std::fs::copy(source, &temporary_path)?;
+    }
     if let Err(error) = std::fs::rename(&temporary_path, &final_path) {
         let _ = std::fs::remove_file(&temporary_path);
         return Err(error.into());
@@ -281,13 +286,15 @@ fn inspect_image(path: &Path) -> CoreResult<InspectedImage> {
         extension,
         media_type,
         dimensions,
+        normalized_bytes: None,
     })
 }
 
 fn inspect_svg(bytes: &[u8]) -> CoreResult<InspectedImage> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| CoreError::parse("SVG", "SVG must be valid UTF-8"))?;
-    let document = roxmltree::Document::parse(text)
+    let normalized = normalize_svg_text(text)?;
+    let document = roxmltree::Document::parse(normalized)
         .map_err(|error| CoreError::parse("SVG", error.to_string()))?;
     let root = document.root_element();
     if root.tag_name().name() != "svg" {
@@ -332,7 +339,16 @@ fn inspect_svg(bytes: &[u8]) -> CoreResult<InspectedImage> {
         extension: "svg",
         media_type: "image/svg+xml",
         dimensions,
+        normalized_bytes: (normalized.as_ptr() != text.as_ptr())
+            .then(|| normalized.as_bytes().to_vec()),
     })
+}
+
+fn normalize_svg_text(text: &str) -> CoreResult<&str> {
+    let svg_start = text
+        .find("<svg")
+        .ok_or_else(|| CoreError::parse("SVG", "document root must be <svg>"))?;
+    Ok(&text[svg_start..])
 }
 
 fn svg_dimensions(root: &roxmltree::Node<'_, '_>) -> CoreResult<(u32, u32)> {
@@ -362,9 +378,12 @@ fn svg_dimensions(root: &roxmltree::Node<'_, '_>) -> CoreResult<(u32, u32)> {
 }
 
 fn parse_svg_length(value: &str) -> Option<u32> {
+    if value.trim().ends_with('%') {
+        return None;
+    }
     let numeric = value
         .trim()
-        .trim_end_matches(|character: char| character.is_ascii_alphabetic() || character == '%');
+        .trim_end_matches(|character: char| character.is_ascii_alphabetic());
     let parsed = numeric.parse::<f64>().ok()?;
     (parsed.is_finite() && parsed > 0.0).then(|| parsed.round() as u32)
 }
@@ -400,6 +419,48 @@ mod tests {
         assert_eq!(imported.object_type, ObjectType::Drawing);
         assert_eq!(imported.asset.unwrap().intrinsic_dimensions, (800, 600));
         assert_eq!(std::fs::read(source).unwrap(), original);
+    }
+
+    #[test]
+    fn imports_svg_with_xml_and_dtd_prolog_as_normalized_drawing() {
+        let (directory, book) = book();
+        let source = directory.path().join("map.svg");
+        let original = r#"<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 13334 10000" xmlns="http://www.w3.org/2000/svg">
+  <g id="coastline"><path d="M0 0L10 10"/></g>
+</svg>"#;
+        std::fs::write(&source, original).unwrap();
+
+        let imported = import_image_object(&book, source.to_str().unwrap(), None).unwrap();
+        let asset = imported.asset.unwrap();
+        assert_eq!(imported.object_type, ObjectType::Drawing);
+        assert_eq!(asset.intrinsic_dimensions, (13334, 10000));
+        assert_eq!(std::fs::read_to_string(&source).unwrap(), original);
+
+        let registry = crate::sync::AssetRegistry::scan(&book.root).unwrap();
+        let relative_path = registry.resolve(&asset.uuid).unwrap();
+        let stored = std::fs::read_to_string(book.root.join(relative_path)).unwrap();
+        assert!(stored.starts_with("<svg"));
+        assert!(!stored.contains("<!DOCTYPE"));
+    }
+
+    #[test]
+    fn rejects_svg_that_depends_on_dtd_entities() {
+        let (directory, book) = book();
+        let source = directory.path().join("entity.svg");
+        std::fs::write(
+            &source,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE svg [
+  <!ENTITY label "Kitchen">
+]>
+<svg viewBox="0 0 10 10"><text>&label;</text></svg>"#,
+        )
+        .unwrap();
+
+        assert!(import_image_object(&book, source.to_str().unwrap(), None).is_err());
+        assert!(!book.root.join(ASSETS_DIRECTORY).exists());
     }
 
     #[test]
@@ -477,12 +538,18 @@ mod tests {
         let body = format!("![image]({})", a.relative_path);
         delete_inline_assets(&book.root, &body);
 
-        assert!(!book.root.join(&a.relative_path).exists(), "referenced asset deleted");
+        assert!(
+            !book.root.join(&a.relative_path).exists(),
+            "referenced asset deleted"
+        );
         assert!(
             !book.root.join(format!("{}.uuid", a.relative_path)).exists(),
             "referenced sidecar deleted"
         );
-        assert!(book.root.join(&b.relative_path).exists(), "unreferenced asset intact");
+        assert!(
+            book.root.join(&b.relative_path).exists(),
+            "unreferenced asset intact"
+        );
         assert!(
             book.root.join(format!("{}.uuid", b.relative_path)).exists(),
             "unreferenced sidecar intact"

@@ -431,7 +431,12 @@ pub fn create_proposal_commentary(
     _options: &LlmTaskOptions,
     approves_commentary_id: Option<&crate::id::NoteId>,
 ) -> CoreResult<NoteDto> {
-    crate::app::commentary::create_proposal_commentary(book, proposal, Some(job_id), approves_commentary_id)
+    crate::app::commentary::create_proposal_commentary(
+        book,
+        proposal,
+        Some(job_id),
+        approves_commentary_id,
+    )
 }
 
 #[cfg(test)]
@@ -704,7 +709,8 @@ mod tests {
             ..Default::default()
         };
 
-        let commentary = create_proposal_commentary(&book, &proposal, "job-123", &options, None).unwrap();
+        let commentary =
+            create_proposal_commentary(&book, &proposal, "job-123", &options, None).unwrap();
 
         assert_eq!(commentary.object_type, ObjectType::Commentary);
         assert!(commentary.body.contains("Turn off the breaker first."));

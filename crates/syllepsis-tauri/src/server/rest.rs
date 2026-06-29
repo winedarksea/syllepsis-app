@@ -157,10 +157,7 @@ pub async fn core_handler(State(api): State<ApiState>) -> Response {
     .unwrap_or_else(|e| internal(format!("worker failed: {e}")))
 }
 
-pub async fn category_handler(
-    State(api): State<ApiState>,
-    Path(cat): Path<String>,
-) -> Response {
+pub async fn category_handler(State(api): State<ApiState>, Path(cat): Path<String>) -> Response {
     tauri::async_runtime::spawn_blocking(move || {
         let state = api.handle.state::<AppState>();
         let guard = state.book.lock().unwrap();

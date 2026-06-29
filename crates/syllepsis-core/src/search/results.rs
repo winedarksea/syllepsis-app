@@ -61,7 +61,9 @@ impl SearchHit {
         const THREE_CHANNEL_AGREEMENT_BOOST: f32 = 0.08;
 
         fn clamp01(v: f32) -> f32 {
-            if !v.is_finite() { return 0.0; }
+            if !v.is_finite() {
+                return 0.0;
+            }
             v.clamp(0.0, 1.0)
         }
 

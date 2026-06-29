@@ -538,34 +538,34 @@ fn complete_cloud_sync_oauth_callback(
         return Err(format!("{error}: {description}"));
     }
 
-    let credentials = if let Some(token) =
-        params.get("refresh_token").or_else(|| params.get("token"))
-    {
-        // Some providers (or manual testing) may deliver a token directly.
-        write_sync_tokens_locked(
-            state,
-            provider,
-            SyncTokens {
-                access_token: None,
-                refresh_token: Some(token.clone()),
-            },
-        )?;
-        cloud_credentials_for_tokens(provider, None, None, Some(token.clone()))?
-    } else if let Some(code) = params.get("code") {
-        // Standard authorization-code + PKCE flow: exchange the code for tokens.
-        let credentials = exchange_code_for_tokens(provider, code, &pending.verifier, redirect_uri)?;
-        write_sync_tokens_locked(
-            state,
-            provider,
-            SyncTokens {
-                access_token: credentials.access_token.clone(),
-                refresh_token: credentials.refresh_token.clone(),
-            },
-        )?;
-        credentials
-    } else {
-        return Err("OAuth callback did not include a token or code".to_string());
-    };
+    let credentials =
+        if let Some(token) = params.get("refresh_token").or_else(|| params.get("token")) {
+            // Some providers (or manual testing) may deliver a token directly.
+            write_sync_tokens_locked(
+                state,
+                provider,
+                SyncTokens {
+                    access_token: None,
+                    refresh_token: Some(token.clone()),
+                },
+            )?;
+            cloud_credentials_for_tokens(provider, None, None, Some(token.clone()))?
+        } else if let Some(code) = params.get("code") {
+            // Standard authorization-code + PKCE flow: exchange the code for tokens.
+            let credentials =
+                exchange_code_for_tokens(provider, code, &pending.verifier, redirect_uri)?;
+            write_sync_tokens_locked(
+                state,
+                provider,
+                SyncTokens {
+                    access_token: credentials.access_token.clone(),
+                    refresh_token: credentials.refresh_token.clone(),
+                },
+            )?;
+            credentials
+        } else {
+            return Err("OAuth callback did not include a token or code".to_string());
+        };
     // The handshake is finished; drop the in-memory PKCE state.
     state.pending_oauth.lock().unwrap().remove(provider);
     Ok(CloudSyncOAuthCompletion {
@@ -1475,7 +1475,9 @@ impl SyncProvider for OpenDalSyncProvider {
             });
         }
         let index = CloudIndex::merge(fragments);
-        build_remote_entries(listed, &index, |path| Ok(content_revision(&self.get(path)?)))
+        build_remote_entries(listed, &index, |path| {
+            Ok(content_revision(&self.get(path)?))
+        })
     }
 
     fn get(&self, path: &str) -> syllepsis_core::CoreResult<Vec<u8>> {

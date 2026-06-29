@@ -44,7 +44,11 @@ pub fn set_note_private(
 
 /// Toggle a note's `hidden` flag (out of the main UI / default views / exports).
 #[tauri::command]
-pub fn set_note_hidden(state: State<AppState>, id: String, hidden: bool) -> Result<NoteDto, String> {
+pub fn set_note_hidden(
+    state: State<AppState>,
+    id: String,
+    hidden: bool,
+) -> Result<NoteDto, String> {
     with_book!(state, book, {
         let updated = app::set_note_hidden(book, &id, hidden).map_err(|e| e.to_string())?;
         // Hiding changes the default corpus the graph/RAG build over.

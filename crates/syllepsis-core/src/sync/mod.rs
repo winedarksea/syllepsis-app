@@ -29,7 +29,7 @@ pub use activity::{
 };
 pub use assets::{assign as assign_asset_uuid, AssetRegistry, AssetSidecar};
 pub use cloud_index::{
-    build_remote_entries, is_cloud_index_path, fragment_path, CloudIndex, CloudIndexFragment,
+    build_remote_entries, fragment_path, is_cloud_index_path, CloudIndex, CloudIndexFragment,
     IndexEntry, ListedRemoteFile, MergedEntry, CLOUD_INDEX_DIR, CLOUD_INDEX_SCHEMA_VERSION,
 };
 pub use engine::{SyncEngine, SyncReport};

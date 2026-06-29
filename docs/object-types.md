@@ -63,10 +63,11 @@ A raster image can serve as the backdrop for an [image-backed world](spatial-wor
 A special text type. **Mermaid** diagrams (including Venn diagrams) are a special subtype that can render inline.
 
 ### Drawings (SVG)
-An object type for vector drawings, stored as an unchanged imported **SVG** plus the same Markdown
-metadata and UUID sidecar used by pictures. Imported SVG is validated before ingestion: scripts,
-active foreign content, event handlers, and external references are rejected, while safe element
-IDs are preserved for world regions.
+An object type for vector drawings, stored as imported **SVG** plus the same Markdown metadata and
+UUID sidecar used by pictures. A leading XML/DTD prolog is stripped before storage so DTD-bearing
+SVGs can be parsed without enabling DTD processing. Imported SVG is validated before ingestion:
+scripts, active foreign content, event handlers, and external references are rejected, while safe
+element IDs are preserved for world regions.
 
 **Imported SVGs are treated as drawings** — there is no separate "imported vector image" type. The future in-app drawing tool will also emit SVG, so a hand-drawn graphic and an imported one are handled identically.
 

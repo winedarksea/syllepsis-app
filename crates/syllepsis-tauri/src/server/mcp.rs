@@ -51,7 +51,13 @@ struct JsonRpcError {
 }
 
 fn rpc_ok(id: Value, result: Value) -> Response {
-    Json(JsonRpcResponse { jsonrpc: "2.0", id, result: Some(result), error: None }).into_response()
+    Json(JsonRpcResponse {
+        jsonrpc: "2.0",
+        id,
+        result: Some(result),
+        error: None,
+    })
+    .into_response()
 }
 
 fn rpc_err(id: Value, code: i32, message: impl Into<String>) -> Response {
@@ -59,7 +65,10 @@ fn rpc_err(id: Value, code: i32, message: impl Into<String>) -> Response {
         jsonrpc: "2.0",
         id,
         result: None,
-        error: Some(JsonRpcError { code, message: message.into() }),
+        error: Some(JsonRpcError {
+            code,
+            message: message.into(),
+        }),
     })
     .into_response()
 }
@@ -124,10 +133,7 @@ fn tools_list() -> Value {
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
-pub async fn mcp_handler(
-    State(api): State<ApiState>,
-    Json(req): Json<JsonRpcRequest>,
-) -> Response {
+pub async fn mcp_handler(State(api): State<ApiState>, Json(req): Json<JsonRpcRequest>) -> Response {
     let id = req.id.unwrap_or(Value::Null);
     let params = req.params.unwrap_or(Value::Object(Default::default()));
 
@@ -183,14 +189,16 @@ async fn dispatch_tool(id: Value, tool: String, args: Value, api: ApiState) -> R
                             .hits
                             .iter()
                             .take(n)
-                            .map(|hit| json!({
-                                "id": hit.note_id,
-                                "title": hit.title,
-                                "summary": hit.summary,
-                                "relevance": hit.relevance(),
-                                "categories": hit.categories,
-                                "updated": hit.updated.to_rfc3339()
-                            }))
+                            .map(|hit| {
+                                json!({
+                                    "id": hit.note_id,
+                                    "title": hit.title,
+                                    "summary": hit.summary,
+                                    "relevance": hit.relevance(),
+                                    "categories": hit.categories,
+                                    "updated": hit.updated.to_rfc3339()
+                                })
+                            })
                             .collect();
                         let text = serde_json::to_string(&items).unwrap_or_default();
                         rpc_ok(id, json!({ "content": [{ "type": "text", "text": text }] }))

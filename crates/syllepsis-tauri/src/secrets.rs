@@ -179,7 +179,8 @@ fn migrate_legacy(store: &mut impl VaultStore) -> Result<(SecretsVault, bool), S
 
     let sync_service = legacy_sync_keychain_service();
     for &provider in LEGACY_SYNC_PROVIDERS {
-        let access = trimmed(store.get_legacy(sync_service, &account(provider, ACCESS_TOKEN_FIELD))?);
+        let access =
+            trimmed(store.get_legacy(sync_service, &account(provider, ACCESS_TOKEN_FIELD))?);
         let refresh =
             trimmed(store.get_legacy(sync_service, &account(provider, REFRESH_TOKEN_FIELD))?);
         if access.is_some() || refresh.is_some() {
@@ -195,11 +196,14 @@ fn migrate_legacy(store: &mut impl VaultStore) -> Result<(SecretsVault, bool), S
     }
 
     for &provider in LEGACY_LLM_PROVIDERS {
-        let api_key =
-            trimmed(store.get_legacy(LEGACY_LLM_KEYCHAIN_SERVICE, &account(provider, API_KEY_FIELD))?);
-        let base_url = trimmed(
-            store.get_legacy(LEGACY_LLM_KEYCHAIN_SERVICE, &account(provider, BASE_URL_FIELD))?,
-        );
+        let api_key = trimmed(store.get_legacy(
+            LEGACY_LLM_KEYCHAIN_SERVICE,
+            &account(provider, API_KEY_FIELD),
+        )?);
+        let base_url = trimmed(store.get_legacy(
+            LEGACY_LLM_KEYCHAIN_SERVICE,
+            &account(provider, BASE_URL_FIELD),
+        )?);
         if api_key.is_some() || base_url.is_some() {
             vault
                 .llm
@@ -319,8 +323,10 @@ pub(crate) mod test_support {
 
         /// Seed a legacy per-field item as an older build would have written it.
         pub fn seed_legacy(&mut self, service: &str, account: &str, value: &str) {
-            self.legacy
-                .insert((service.to_string(), account.to_string()), value.to_string());
+            self.legacy.insert(
+                (service.to_string(), account.to_string()),
+                value.to_string(),
+            );
         }
 
         pub fn legacy_len(&self) -> usize {
@@ -347,7 +353,8 @@ pub(crate) mod test_support {
         }
 
         fn delete_legacy(&mut self, service: &str, account: &str) -> Result<(), String> {
-            self.legacy.remove(&(service.to_string(), account.to_string()));
+            self.legacy
+                .remove(&(service.to_string(), account.to_string()));
             Ok(())
         }
     }
@@ -413,7 +420,11 @@ mod tests {
     fn migration_builds_vault_from_legacy_items_and_deletes_them() {
         let mut store = MemoryVaultStore::default();
         let sync_service = legacy_sync_keychain_service();
-        store.seed_legacy(sync_service, &account("dropbox", ACCESS_TOKEN_FIELD), "access");
+        store.seed_legacy(
+            sync_service,
+            &account("dropbox", ACCESS_TOKEN_FIELD),
+            "access",
+        );
         store.seed_legacy(
             sync_service,
             &account("dropbox", REFRESH_TOKEN_FIELD),
@@ -436,7 +447,12 @@ mod tests {
             Some("refresh")
         );
         assert_eq!(
-            vault.llm.get("openai_compatible").unwrap().base_url.as_deref(),
+            vault
+                .llm
+                .get("openai_compatible")
+                .unwrap()
+                .base_url
+                .as_deref(),
             Some("https://example.test/v1")
         );
         // Legacy items are removed once migrated, and the migration does not run again.

@@ -250,9 +250,7 @@ impl super::provider::SyncProvider for IndexedLocalFolderSync {
                 if path.ends_with(".json") {
                     // Fragments are read out of band (not counted as a content fetch).
                     if let Ok(bytes) = std::fs::read(self.full(&path)) {
-                        if let Ok(fragment) =
-                            serde_json::from_slice::<CloudIndexFragment>(&bytes)
-                        {
+                        if let Ok(fragment) = serde_json::from_slice::<CloudIndexFragment>(&bytes) {
                             fragments.push(fragment);
                         }
                     }
@@ -369,8 +367,16 @@ mod tests {
 
     #[test]
     fn merge_keeps_the_latest_entry_per_path() {
-        let a = fragment("alice", "actor-a", &[("note.md", entry("rev-old", 10, false))]);
-        let b = fragment("bob", "actor-b", &[("note.md", entry("rev-new", 20, false))]);
+        let a = fragment(
+            "alice",
+            "actor-a",
+            &[("note.md", entry("rev-old", 10, false))],
+        );
+        let b = fragment(
+            "bob",
+            "actor-b",
+            &[("note.md", entry("rev-new", 20, false))],
+        );
         let index = CloudIndex::merge([a, b]);
         let merged = index.live("note.md").unwrap();
         assert_eq!(merged.entry.revision, "rev-new");
@@ -378,8 +384,16 @@ mod tests {
 
     #[test]
     fn merge_author_survives() {
-        let a = fragment("alice", "actor-a", &[("note.md", entry("rev-old", 10, false))]);
-        let b = fragment("bob", "actor-b", &[("note.md", entry("rev-new", 20, false))]);
+        let a = fragment(
+            "alice",
+            "actor-a",
+            &[("note.md", entry("rev-old", 10, false))],
+        );
+        let b = fragment(
+            "bob",
+            "actor-b",
+            &[("note.md", entry("rev-new", 20, false))],
+        );
         let index = CloudIndex::merge([a, b]);
         let merged = index.live("note.md").unwrap();
         assert_eq!(merged.author, "bob");

@@ -356,7 +356,11 @@ impl EmbeddingProvider for OnnxEmbedder {
     }
 
     fn embed_full_note(&self, note: &Note) -> CoreResult<Option<Embedding>> {
-        let content = if note.body.trim().is_empty() { &note.summary } else { &note.body };
+        let content = if note.body.trim().is_empty() {
+            &note.summary
+        } else {
+            &note.body
+        };
         let full_note = if note.title.trim().is_empty() && content.trim().is_empty() {
             None
         } else {
