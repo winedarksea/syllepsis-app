@@ -1056,6 +1056,7 @@ export interface ExportSpec {
   categories: string[];
   note_ids: string[];
   export_all: boolean;
+  include_commentary?: boolean;
 }
 
 export type ImportStatus = 'new' | 'update' | 'locally_modified';
@@ -1077,15 +1078,22 @@ export interface ImportPreview {
   category_suggestions: CategoryMapping[];
 }
 
+export type NoteResolution = 'overwrite' | 'merge' | 'commentary' | 'duplicate' | 'skip';
+
 export interface ImportOptions {
   selected_note_ids: string[];
   category_map: Record<string, string>;
+  resolutions?: Record<string, NoteResolution>;
 }
 
 export interface ImportReport {
   imported: string[];
   skipped_locally_modified: string[];
   created_categories: string[];
+  overwritten: string[];
+  merged: string[];
+  commentary_created: string[];
+  duplicated: string[];
 }
 
 // ── Text import (mirrors syllepsis_core::app::text_import) ──

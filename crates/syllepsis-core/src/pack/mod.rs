@@ -12,7 +12,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{Category, Note, ObjectType};
+use crate::model::{Category, CommentaryMetadata, Note, ObjectType, PriorEdge};
 
 /// Envelope format tag written into every pack file, so a reader can reject an incompatible
 /// future format instead of silently mis-parsing it.
@@ -44,7 +44,7 @@ pub struct PackManifest {
 /// One note's portable content inside a pack. Only the shareable fields travel — none of the
 /// device-local derived state (vectors, sync sidecars) and none of the privacy/lifecycle flags,
 /// which belong to the receiving book, not the pack.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PackNote {
     pub id: String,
     #[serde(rename = "type")]
@@ -57,10 +57,27 @@ pub struct PackNote {
     pub body: String,
     #[serde(default)]
     pub categories: Vec<String>,
+    /// Prior edge refined at export time: kept only if the target note/category is also in the
+    /// pack. `None` for unsorted or out-of-pack priors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior: Option<PriorEdge>,
+}
+
+/// A commentary note bundled in a pack (only included when `ExportSpec::include_commentary`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PackCommentary {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    pub commentary: CommentaryMetadata,
 }
 
 impl PackNote {
     /// Project a stored note into its portable pack form (dropping local-only state).
+    /// The `prior` field is intentionally left `None` here; `build_pack` fills it after
+    /// computing the full selected-id set so it can filter dangling priors.
     pub fn from_note(note: &Note) -> PackNote {
         PackNote {
             id: note.id.to_string(),
@@ -69,6 +86,7 @@ impl PackNote {
             summary: note.summary.clone(),
             body: note.body.clone(),
             categories: note.categories.clone(),
+            prior: None,
         }
     }
 }
@@ -85,6 +103,10 @@ pub struct Pack {
     /// (icon, heading level, …) instead of guessing from a bare name.
     #[serde(default)]
     pub categories: Vec<Category>,
+    /// Commentary children bundled with the pack (only present when the author opted in at
+    /// export time). Old readers ignore this field via `serde(default)`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commentary: Vec<PackCommentary>,
 }
 
 impl Pack {
@@ -95,6 +117,7 @@ impl Pack {
             manifest,
             notes,
             categories,
+            commentary: Vec::new(),
         }
     }
 
@@ -150,6 +173,7 @@ mod tests {
                 summary: "How to compost".into(),
                 body: "Greens and browns.".into(),
                 categories: vec!["garden".into()],
+                prior: None,
             }],
             vec![Category::new("garden")],
         )

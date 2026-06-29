@@ -1,21 +1,25 @@
 //! Application command surface for knowledge packs (core-concepts.md): exporting a curated set of
 //! notes as a distributable [`Pack`], previewing what an incoming pack would do to the current
-//! book (category mapping + per-note status), and importing it with the **local-modification
-//! protection** that a version re-import must honor.
+//! book (category mapping + per-note status), and importing it with baseline-grounded modification
+//! detection and a per-note resolution wizard for locally-modified notes.
 //!
 //! Framework-agnostic operations over a [`Book`], like the rest of [`crate::app`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
+use crate::app::pack_manifest::{BookPackManifest, NoteBaseline};
 use crate::error::CoreResult;
 use crate::id::NoteId;
 use crate::model::metadata::Metadata;
-use crate::model::{Category, Note, ObjectType};
-use crate::pack::{ExportKind, Pack, PackManifest, PackNote};
-use crate::storage::{Book, NoteStore};
+use crate::model::{Category, CommentaryKind, CommentaryMetadata, CommentarySource, Note, ObjectType};
+use crate::model::prior::PriorRef;
+use crate::pack::{ExportKind, Pack, PackCommentary, PackManifest, PackNote};
+use crate::storage::{layout, Book, NoteStore};
 
 /// What to put in an exported pack: the manifest fields plus the note selection. A note is
 /// included if it carries one of `categories` **or** is named directly in `note_ids` (so an author
@@ -34,6 +38,10 @@ pub struct ExportSpec {
     pub note_ids: Vec<String>,
     #[serde(default)]
     pub export_all: bool,
+    /// When true, commentary children of exported notes are bundled into `pack.commentary`.
+    /// Default false — commentary is private and off by default.
+    #[serde(default)]
+    pub include_commentary: bool,
 }
 
 /// Assemble (but do not write) a pack from the book per `spec`. Pending-deletion notes are never
@@ -69,6 +77,9 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
             .collect()
     };
 
+    let selected_ids: BTreeSet<String> =
+        selected.iter().map(|n| n.id.to_string()).collect();
+
     let used: BTreeSet<String> = selected
         .iter()
         .flat_map(|n| n.categories.iter().cloned())
@@ -85,8 +96,24 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
     } else {
         ExportKind::Pack
     };
-    let notes = selected.iter().map(PackNote::from_note).collect();
-    Ok(Pack::new(
+
+    // Build PackNotes with refined priors (kept only when the target is also in the pack).
+    let notes: Vec<PackNote> = selected
+        .iter()
+        .map(|note| {
+            let mut pn = PackNote::from_note(note);
+            pn.prior = note.prior.as_ref().and_then(|edge| {
+                let keep = match &edge.target {
+                    PriorRef::Note(target_id) => selected_ids.contains(&target_id.to_string()),
+                    PriorRef::Category(name) => used.contains(name),
+                };
+                if keep { Some(edge.clone()) } else { None }
+            });
+            pn
+        })
+        .collect();
+
+    let mut pack = Pack::new(
         PackManifest {
             id: spec.id.clone(),
             name: spec.name.clone(),
@@ -96,7 +123,29 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
         },
         notes,
         categories,
-    ))
+    );
+
+    // Optionally bundle commentary children of exported notes.
+    if spec.include_commentary {
+        let parent_ids = &selected_ids;
+        for commentary_note in book.read_all_commentary_notes()? {
+            let Some(meta) = &commentary_note.commentary else { continue };
+            if !parent_ids.contains(&meta.parent_note_id.to_string()) {
+                continue;
+            }
+            if commentary_note.metadata.lifecycle.marked_for_deletion_at.is_some() {
+                continue;
+            }
+            pack.commentary.push(PackCommentary {
+                id: commentary_note.id.to_string(),
+                title: commentary_note.title.clone(),
+                body: commentary_note.body.clone(),
+                commentary: meta.clone(),
+            });
+        }
+    }
+
+    Ok(pack)
 }
 
 /// Build a pack and write it to `path`, returning its manifest for a confirmation toast.
@@ -119,7 +168,7 @@ pub enum ImportStatus {
     New,
     /// Present from a previous import and unchanged locally — will be overwritten with this version.
     Update,
-    /// Present and edited locally — protected: will be skipped on import.
+    /// Present and edited locally — requires an explicit resolution from the user.
     LocallyModified,
 }
 
@@ -157,7 +206,7 @@ pub fn preview_import(book: &Book, pack: &Pack) -> CoreResult<ImportPreview> {
             Ok(ImportNotePreview {
                 id: pn.id.clone(),
                 title: pn.title.clone(),
-                status: note_import_status(book, &pn.id)?,
+                status: note_import_status(book, &pack.manifest.id, &pn.id)?,
             })
         })
         .collect::<CoreResult<Vec<_>>>()?;
@@ -189,28 +238,49 @@ pub fn preview_import(book: &Book, pack: &Pack) -> CoreResult<ImportPreview> {
     })
 }
 
-/// Choices made in the import UI: which notes to actually import, and how to rename incoming
-/// categories onto local ones (`incoming name → local name`).
+/// How to handle a locally-modified note when re-importing a pack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoteResolution {
+    /// Replace the local note's content with the pack's version and reset the baseline.
+    Overwrite,
+    /// 3-way CRDT merge (Loro): load the ancestor snapshot, apply the pack body as the remote
+    /// edit, merge into the local live sidecar. Requires Loro feature.
+    Merge,
+    /// Leave the local note untouched; create a `Proposal` commentary child with the pack body.
+    Commentary,
+    /// Create a new note from the pack content; the original note becomes the user's fork.
+    Duplicate,
+    /// Do nothing — skip this note.
+    Skip,
+}
+
+/// Choices made in the import UI: which notes to actually import, how to rename incoming
+/// categories onto local ones, and per-note resolutions for locally-modified notes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImportOptions {
     pub selected_note_ids: Vec<String>,
     #[serde(default)]
     pub category_map: BTreeMap<String, String>,
+    /// Resolution for each locally-modified note. Absent = Skip (default).
+    #[serde(default)]
+    pub resolutions: BTreeMap<String, NoteResolution>,
 }
 
-/// What an import actually did.
+/// What an import actually did — per-action counts.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportReport {
     pub imported: Vec<String>,
     pub skipped_locally_modified: Vec<String>,
     pub created_categories: Vec<String>,
+    pub overwritten: Vec<String>,
+    pub merged: Vec<String>,
+    pub commentary_created: Vec<String>,
+    pub duplicated: Vec<String>,
 }
 
 /// Import the selected notes from `pack`, applying the category mapping and honoring the
-/// local-modification protection. Existing pack notes the user has edited (`locally_modified`) are
-/// skipped; unmodified ones are overwritten with the pack's content while **preserving the user's
-/// organization** (sort position, location) and lifecycle flags. Referenced categories are created
-/// locally when absent.
+/// per-note resolution for locally-modified notes. Auto-overwrites unmodified notes.
 pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreResult<ImportReport> {
     let selected: BTreeSet<&str> = options
         .selected_note_ids
@@ -219,6 +289,12 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
         .collect();
     let mut report = ImportReport::default();
     let mut needed_categories: BTreeSet<String> = BTreeSet::new();
+
+    // Load or create the manifest for this pack.
+    let mut manifest = BookPackManifest::load(&book.root, &pack.manifest.id)?;
+    manifest.pack_id = pack.manifest.id.clone();
+    manifest.version = pack.manifest.version.clone();
+    manifest.imported_at = chrono::Utc::now().to_rfc3339();
 
     for pack_note in pack
         .notes
@@ -229,26 +305,150 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
         let mapped = map_categories(&pack_note.categories, &options.category_map);
         needed_categories.extend(mapped.iter().cloned());
 
-        let mut note = match book.store.read_note(&id) {
-            Ok(existing) => {
-                if existing.metadata.packs.locally_modified {
-                    report.skipped_locally_modified.push(pack_note.id.clone());
-                    continue;
-                }
-                existing // keep prior/location/lifecycle; content fields replaced below
-            }
-            Err(_) => new_pack_note(book, id, pack_note),
-        };
+        let status = note_import_status(book, &pack.manifest.id, &pack_note.id)?;
 
-        note.title = pack_note.title.clone();
-        note.summary = pack_note.summary.clone();
-        note.body = pack_note.body.clone();
-        note.categories = mapped;
-        record_membership(&mut note.metadata, &pack.manifest);
-        note.metadata.dates.updated = chrono::Utc::now();
-        book.save_note(&note)?;
-        report.imported.push(pack_note.id.clone());
+        match status {
+            ImportStatus::New => {
+                // Create the note and record baseline.
+                let mut note = new_pack_note(book, id.clone(), pack_note);
+                note.title = pack_note.title.clone();
+                note.summary = pack_note.summary.clone();
+                note.body = pack_note.body.clone();
+                note.categories = mapped;
+                // Apply prior if it points at an already-imported or in-this-pack note.
+                // The prior is already refined at export time; we restore it directly.
+                note.prior = pack_note.prior.clone();
+                record_membership(&mut note.metadata, &pack.manifest);
+                note.metadata.dates.updated = chrono::Utc::now();
+                book.save_note(&note)?;
+                let baseline = capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
+                manifest.notes.insert(pack_note.id.clone(), baseline);
+                report.imported.push(pack_note.id.clone());
+            }
+
+            ImportStatus::Update => {
+                // Unmodified re-import: overwrite content, refresh baseline.
+                let mut note = book.store.read_note(&id)?;
+                note.title = pack_note.title.clone();
+                note.summary = pack_note.summary.clone();
+                note.body = pack_note.body.clone();
+                note.categories = mapped;
+                record_membership(&mut note.metadata, &pack.manifest);
+                note.metadata.dates.updated = chrono::Utc::now();
+                book.save_note(&note)?;
+                let baseline = capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
+                manifest.notes.insert(pack_note.id.clone(), baseline);
+                report.imported.push(pack_note.id.clone());
+            }
+
+            ImportStatus::LocallyModified => {
+                let resolution = options
+                    .resolutions
+                    .get(&pack_note.id)
+                    .copied()
+                    .unwrap_or(NoteResolution::Skip);
+
+                match resolution {
+                    NoteResolution::Skip => {
+                        report.skipped_locally_modified.push(pack_note.id.clone());
+                    }
+
+                    NoteResolution::Overwrite => {
+                        let mut note = book.store.read_note(&id)?;
+                        note.title = pack_note.title.clone();
+                        note.summary = pack_note.summary.clone();
+                        note.body = pack_note.body.clone();
+                        note.categories = mapped;
+                        record_membership(&mut note.metadata, &pack.manifest);
+                        note.metadata.dates.updated = chrono::Utc::now();
+                        book.save_note(&note)?;
+                        let baseline = capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
+                        manifest.notes.insert(pack_note.id.clone(), baseline);
+                        report.overwritten.push(pack_note.id.clone());
+                    }
+
+                    NoteResolution::Merge => {
+                        let merged_body = try_crdt_merge(book, &id, &pack_note.id, &pack_note.body, &manifest)?;
+                        let mut note = book.store.read_note(&id)?;
+                        note.body = merged_body;
+                        note.categories = mapped;
+                        record_membership(&mut note.metadata, &pack.manifest);
+                        note.metadata.dates.updated = chrono::Utc::now();
+                        book.save_note(&note)?;
+                        let baseline = capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
+                        manifest.notes.insert(pack_note.id.clone(), baseline);
+                        report.merged.push(pack_note.id.clone());
+                    }
+
+                    NoteResolution::Commentary => {
+                        // Leave the local note untouched; surface the pack body as a Proposal.
+                        crate::app::commentary::create_commentary(
+                            book,
+                            &pack_note.id,
+                            CommentaryKind::Proposal,
+                            &pack_note.body,
+                        )?;
+                        report.commentary_created.push(pack_note.id.clone());
+                        // Baseline unchanged.
+                    }
+
+                    NoteResolution::Duplicate => {
+                        // Create a new note carrying the pack content.
+                        let new_id = NoteId::generate("note", &pack_note.title);
+                        let mut dup = new_pack_note(book, new_id.clone(), pack_note);
+                        dup.title = pack_note.title.clone();
+                        dup.summary = pack_note.summary.clone();
+                        dup.body = pack_note.body.clone();
+                        dup.categories = mapped;
+                        record_membership(&mut dup.metadata, &pack.manifest);
+                        dup.metadata.dates.updated = chrono::Utc::now();
+                        book.save_note(&dup)?;
+                        let baseline = capture_baseline(book, &new_id, &pack_note.body, &pack.manifest.version)?;
+                        manifest.notes.insert(new_id.to_string(), baseline);
+
+                        // Remove the original note from pack membership so it becomes a fork.
+                        if let Ok(mut original) = book.store.read_note(&id) {
+                            original.metadata.packs.packs.retain(|p| p != &pack.manifest.id);
+                            original.metadata.packs.pack_version = None;
+                            original.metadata.packs.locally_modified = false;
+                            book.save_note(&original)?;
+                        }
+                        manifest.notes.remove(&pack_note.id);
+                        report.duplicated.push(pack_note.id.clone());
+                    }
+                }
+            }
+        }
     }
+
+    // Import bundled commentary (if any), creating children for imported parents.
+    for pack_commentary in &pack.commentary {
+        let parent_id_str = pack_commentary.commentary.parent_note_id.to_string();
+        // Only recreate if the parent was imported/present.
+        let Ok(parent_id) = NoteId::parse(&parent_id_str) else { continue };
+        if book.store.read_note(&parent_id).is_err() {
+            continue;
+        }
+        // Skip if we already have a commentary with this id.
+        if let Ok(commentary_id) = NoteId::parse(&pack_commentary.id) {
+            if book.read_commentary_note(&commentary_id).is_ok() {
+                continue;
+            }
+        }
+        // Build a new commentary note preserving the metadata.
+        let meta = CommentaryMetadata::new(
+            pack_commentary.commentary.parent_note_id.clone(),
+            pack_commentary.commentary.kind,
+            CommentarySource::User,
+        );
+        if let Ok(mut commentary_note) = book.new_commentary_note(pack_commentary.title.clone(), meta) {
+            commentary_note.body = pack_commentary.body.clone();
+            let _ = book.save_commentary_note(&commentary_note);
+        }
+    }
+
+    // Persist the updated manifest.
+    manifest.save(&book.root)?;
 
     report.created_categories =
         ensure_categories(book, &needed_categories, pack, &options.category_map)?;
@@ -265,6 +465,7 @@ pub fn import_pack_as_new_book(root: &Path, name: &str, pack: &Pack) -> CoreResu
     let options = ImportOptions {
         selected_note_ids: all_ids,
         category_map: Default::default(),
+        resolutions: Default::default(),
     };
     import_pack(&book, pack, &options)?;
     Ok(book)
@@ -298,18 +499,107 @@ fn record_membership(metadata: &mut Metadata, manifest: &PackManifest) {
     metadata.packs.locally_modified = false;
 }
 
-/// Classify how an incoming note id lands against the book's current state.
-fn note_import_status(book: &Book, raw_id: &str) -> CoreResult<ImportStatus> {
+/// Classify how an incoming note id lands against the book's current state. Uses the
+/// `BookPackManifest` baseline hash for accurate modification detection.
+fn note_import_status(book: &Book, pack_id: &str, raw_id: &str) -> CoreResult<ImportStatus> {
     let Ok(id) = NoteId::parse(raw_id) else {
         return Ok(ImportStatus::New);
     };
-    match book.store.read_note(&id) {
-        Ok(existing) if existing.metadata.packs.locally_modified => {
-            Ok(ImportStatus::LocallyModified)
+    let Ok(existing) = book.store.read_note(&id) else {
+        return Ok(ImportStatus::New);
+    };
+    // Use manifest baseline if available; fall back to the eager flag for back-compat.
+    let manifest = BookPackManifest::load(&book.root, pack_id)?;
+    if let Some(baseline) = manifest.notes.get(raw_id) {
+        let current_hash = sha256_hex(&existing.body);
+        if current_hash != baseline.base_body_sha256 {
+            return Ok(ImportStatus::LocallyModified);
         }
-        Ok(_) => Ok(ImportStatus::Update),
-        Err(_) => Ok(ImportStatus::New),
+        return Ok(ImportStatus::Update);
     }
+    // No baseline yet — fall back to the eager flag.
+    if existing.metadata.packs.locally_modified {
+        return Ok(ImportStatus::LocallyModified);
+    }
+    if existing.metadata.packs.packs.is_empty() {
+        return Ok(ImportStatus::New);
+    }
+    Ok(ImportStatus::Update)
+}
+
+/// Capture a baseline for a note: seed a CRDT doc from `body`, write its snapshot as the note's
+/// `_crdt/{ulid}.crdt` sidecar (so the live doc descends from the baseline for clean Loro merges
+/// later), and return the `NoteBaseline` to store in the manifest.
+fn capture_baseline(
+    book: &Book,
+    id: &NoteId,
+    body: &str,
+    pack_version: &str,
+) -> CoreResult<NoteBaseline> {
+    let backend = crate::crdt::select_crdt_backend(&book.config.sync);
+    let actor = crate::sync::actor_id_for(&book.root)?;
+    let doc = backend.new_document(&actor, body);
+    let snapshot = doc.snapshot()?;
+    let sidecar = layout::crdt_sidecar_path(&book.root, id);
+    if let Some(parent) = sidecar.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(&sidecar, &snapshot)?;
+    Ok(NoteBaseline {
+        pack_version: pack_version.to_string(),
+        base_body_sha256: sha256_hex(body),
+        crdt_backend: backend.name().to_string(),
+        base_crdt_snapshot_b64: base64::engine::general_purpose::STANDARD.encode(&snapshot),
+    })
+}
+
+/// Perform a 3-way CRDT merge for a locally-modified note. Mirrors `try_crdt_merge_body` in
+/// `commentary.rs`: load the ancestor from the stored baseline snapshot, set the pack body as the
+/// remote edit, merge into the local live sidecar.
+fn try_crdt_merge(
+    book: &Book,
+    id: &NoteId,
+    raw_id: &str,
+    pack_body: &str,
+    manifest: &BookPackManifest,
+) -> CoreResult<String> {
+    // Retrieve the stored baseline for this note.
+    let baseline = match manifest.notes.get(raw_id) {
+        Some(b) if !b.base_crdt_snapshot_b64.is_empty() => b,
+        _ => {
+            // No Loro baseline — fall back to the pack body (treated as Overwrite).
+            return Ok(pack_body.to_string());
+        }
+    };
+    if baseline.crdt_backend != crate::crdt::LORO_BACKEND {
+        return Ok(pack_body.to_string());
+    }
+    let backend = crate::crdt::select_crdt_backend(&book.config.sync);
+    if backend.name() != crate::crdt::LORO_BACKEND {
+        // Loro not compiled/active — fall back to pack body.
+        return Ok(pack_body.to_string());
+    }
+    let actor = crate::sync::actor_id_for(&book.root)?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(&baseline.base_crdt_snapshot_b64)
+        .map_err(|e| crate::error::CoreError::InvalidBook(format!("decode pack baseline: {e}")))?;
+
+    // Build a "proposal" doc from the ancestor, then set it to the pack body.
+    let mut proposal_doc = backend.load_document(&actor, &decoded)?;
+    proposal_doc.set_text(pack_body);
+
+    // Load the live local sidecar and merge.
+    let sidecar = layout::crdt_sidecar_path(&book.root, id);
+    let mut current_doc = if sidecar.exists() {
+        backend.load_document(&actor, &std::fs::read(sidecar)?)?
+    } else {
+        let note = book.store.read_note(id)?;
+        backend.new_document(&actor, &note.body)
+    };
+    current_doc.merge(&proposal_doc.snapshot()?)?;
+    Ok(current_doc.text())
 }
 
 /// Rename each category through the map (`incoming → local`); unmapped names pass through.
@@ -354,6 +644,10 @@ fn nearest_category(incoming: &str, local: &[String]) -> Option<String> {
         .cloned()
 }
 
+fn sha256_hex(text: &str) -> String {
+    format!("{:x}", Sha256::digest(text.as_bytes()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,6 +677,7 @@ mod tests {
             categories: vec!["garden".into()],
             note_ids: vec![],
             export_all: false,
+            include_commentary: false,
         }
     }
 
@@ -416,6 +711,7 @@ mod tests {
         let options = ImportOptions {
             selected_note_ids: vec![pack.notes[0].id.clone()],
             category_map: BTreeMap::new(),
+            resolutions: BTreeMap::new(),
         };
         let report = import_pack(&target, &pack, &options).unwrap();
         assert_eq!(report.imported.len(), 1);
@@ -445,10 +741,11 @@ mod tests {
         let options = ImportOptions {
             selected_note_ids: vec![note_id.clone()],
             category_map: BTreeMap::new(),
+            resolutions: BTreeMap::new(),
         };
         import_pack(&target, &pack_v1, &options).unwrap();
 
-        // The user edits the imported note locally → marks it locally_modified.
+        // The user edits the imported note locally.
         let mut edited = get_note(&target, &note_id).unwrap();
         assert!(edited
             .metadata
@@ -457,14 +754,9 @@ mod tests {
             .contains(&"garden-pack".to_string()));
         edited.body = "user's own careful notes".into();
         update_note(&target, edited).unwrap();
-        assert!(
-            get_note(&target, &note_id)
-                .unwrap()
-                .metadata
-                .packs
-                .locally_modified
-        );
-
+        // The note is locally modified (hash differs from baseline).
+        let status = note_import_status(&target, "garden-pack", &note_id).unwrap();
+        assert_eq!(status, ImportStatus::LocallyModified);
         // Author ships v2 with new content for the same note.
         let mut v2_note = source
             .store
@@ -476,13 +768,143 @@ mod tests {
         v2_spec.version = "2.0.0".into();
         let pack_v2 = build_pack(&source, &v2_spec).unwrap();
 
-        // Re-import: the locally-modified note is protected (skipped), not clobbered.
+        // Re-import with default resolution (Skip) — locally-modified note is protected.
         let report = import_pack(&target, &pack_v2, &options).unwrap();
         assert_eq!(report.skipped_locally_modified, vec![note_id.clone()]);
         assert_eq!(
             get_note(&target, &note_id).unwrap().body,
             "user's own careful notes"
         );
+    }
+
+    #[test]
+    fn reimport_with_overwrite_resolution_replaces_local_edit() {
+        let (_d, source) = book();
+        let note_id = add(&source, "Compost", "v1 body", &["garden"]);
+        let pack_v1 = build_pack(&source, &spec()).unwrap();
+
+        let (_d2, target) = book();
+        let base_options = ImportOptions {
+            selected_note_ids: vec![note_id.clone()],
+            category_map: BTreeMap::new(),
+            resolutions: BTreeMap::new(),
+        };
+        import_pack(&target, &pack_v1, &base_options).unwrap();
+
+        // User edits the note.
+        let mut edited = get_note(&target, &note_id).unwrap();
+        edited.body = "local edit".into();
+        update_note(&target, edited).unwrap();
+
+        // Re-import v2 with Overwrite resolution.
+        let mut v2_note = source.store.read_note(&NoteId::parse(&note_id).unwrap()).unwrap();
+        v2_note.body = "v2 body".into();
+        source.save_note(&v2_note).unwrap();
+        let mut v2_spec = spec();
+        v2_spec.version = "2.0.0".into();
+        let pack_v2 = build_pack(&source, &v2_spec).unwrap();
+
+        let mut overwrite_options = base_options.clone();
+        overwrite_options.resolutions.insert(note_id.clone(), NoteResolution::Overwrite);
+        let report = import_pack(&target, &pack_v2, &overwrite_options).unwrap();
+        assert!(report.overwritten.contains(&note_id));
+        assert_eq!(get_note(&target, &note_id).unwrap().body, "v2 body");
+    }
+
+    #[test]
+    fn reimport_with_duplicate_resolution_creates_second_note() {
+        let (_d, source) = book();
+        let note_id = add(&source, "Compost", "v1 body", &["garden"]);
+        let pack_v1 = build_pack(&source, &spec()).unwrap();
+
+        let (_d2, target) = book();
+        let base_options = ImportOptions {
+            selected_note_ids: vec![note_id.clone()],
+            category_map: BTreeMap::new(),
+            resolutions: BTreeMap::new(),
+        };
+        import_pack(&target, &pack_v1, &base_options).unwrap();
+
+        let mut edited = get_note(&target, &note_id).unwrap();
+        edited.body = "my fork".into();
+        update_note(&target, edited).unwrap();
+
+        let mut v2_note = source.store.read_note(&NoteId::parse(&note_id).unwrap()).unwrap();
+        v2_note.body = "v2 body".into();
+        source.save_note(&v2_note).unwrap();
+        let mut v2_spec = spec();
+        v2_spec.version = "2.0.0".into();
+        let pack_v2 = build_pack(&source, &v2_spec).unwrap();
+
+        let mut dup_options = base_options.clone();
+        dup_options.resolutions.insert(note_id.clone(), NoteResolution::Duplicate);
+        let report = import_pack(&target, &pack_v2, &dup_options).unwrap();
+        assert!(report.duplicated.contains(&note_id));
+        // Original note still has the user's fork body.
+        assert_eq!(get_note(&target, &note_id).unwrap().body, "my fork");
+        // A second note now exists with the pack v2 body.
+        let all = target.store.read_all_notes().unwrap();
+        assert!(all.iter().any(|n| n.body == "v2 body"));
+    }
+
+    #[test]
+    fn export_keeps_in_pack_prior_drops_out_of_pack_prior() {
+        use crate::app::commands::update_note;
+        use crate::model::prior::{PriorEdge, PriorRef, PriorKind};
+
+        let (_d, book) = book();
+        let a_id_str = add(&book, "NoteA", "body a", &["garden"]);
+        let b_id_str = add(&book, "NoteB", "body b", &["garden"]);
+        let outside_id_str = add(&book, "Outside", "body outside", &["electrical"]);
+
+        // Set NoteB to follow NoteA (both in pack).
+        let a_id = NoteId::parse(&a_id_str).unwrap();
+        let mut note_b = get_note(&book, &b_id_str).unwrap();
+        note_b.prior = Some(PriorEdge { target: PriorRef::Note(a_id.clone()), kind: PriorKind::NewParagraph });
+        update_note(&book, note_b).unwrap();
+
+        // Set NoteA to follow Outside (out-of-pack).
+        let outside_id = NoteId::parse(&outside_id_str).unwrap();
+        let mut note_a = get_note(&book, &a_id_str).unwrap();
+        note_a.prior = Some(PriorEdge { target: PriorRef::Note(outside_id.clone()), kind: PriorKind::NewParagraph });
+        update_note(&book, note_a).unwrap();
+
+        book.store.write_category(&Category::new("garden")).unwrap();
+        let pack = build_pack(&book, &spec()).unwrap();
+        assert_eq!(pack.notes.len(), 2);
+
+        // NoteB's prior (→ NoteA, in-pack) should be preserved.
+        let pn_b = pack.notes.iter().find(|n| n.id == b_id_str).unwrap();
+        assert!(pn_b.prior.is_some(), "in-pack prior should be kept");
+
+        // NoteA's prior (→ Outside, not in pack) should be dropped.
+        let pn_a = pack.notes.iter().find(|n| n.id == a_id_str).unwrap();
+        assert!(pn_a.prior.is_none(), "out-of-pack prior should be dropped");
+    }
+
+    #[test]
+    fn include_commentary_round_trips() {
+        let (_d, source) = book();
+        let note_id = add(&source, "Compost", "body", &["garden"]);
+        // Create a commentary child.
+        crate::app::commentary::create_commentary(
+            &source,
+            &note_id,
+            CommentaryKind::Proposal,
+            "proposed edit",
+        )
+        .unwrap();
+        source.store.write_category(&Category::new("garden")).unwrap();
+
+        let mut s = spec();
+        s.include_commentary = true;
+        let pack = build_pack(&source, &s).unwrap();
+        assert_eq!(pack.commentary.len(), 1);
+        assert_eq!(pack.commentary[0].body, "proposed edit");
+
+        // A pack without include_commentary should omit it.
+        let pack_no_comm = build_pack(&source, &spec()).unwrap();
+        assert!(pack_no_comm.commentary.is_empty());
     }
 
     #[test]
@@ -580,6 +1002,7 @@ mod tests {
         let options = ImportOptions {
             selected_note_ids: vec![id.clone()],
             category_map: map,
+            resolutions: BTreeMap::new(),
         };
         import_pack(&target, &pack, &options).unwrap();
 

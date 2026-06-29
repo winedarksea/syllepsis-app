@@ -33,6 +33,9 @@ pub const CRDT_DIR: &str = "_crdt";
 /// Device-local sync bookkeeping (per-provider state, this device's actor id). Never synced and
 /// gitignored: it records *this* machine's view of the remote, which is meaningless elsewhere.
 pub const SYNC_DIR: &str = "_sync";
+/// Per-pack import manifests (baseline hashes + CRDT snapshots). Device-local: records this
+/// machine's imported baseline, not part of the shared book content.
+pub const PACKS_DIR: &str = "_packs";
 pub const BOOK_META_FILE: &str = "_book.md";
 pub const CONFIG_FILE: &str = "_config.yaml";
 /// Sidecar extension for the per-note CRDT snapshot files inside `_crdt/`.
@@ -51,6 +54,7 @@ pub const RESERVED_DIRS: &[&str] = &[
     EMBEDDINGS_DIR,
     CRDT_DIR,
     SYNC_DIR,
+    PACKS_DIR,
 ];
 
 /// `_categories/` for the given book root.
@@ -96,6 +100,16 @@ pub fn crdt_dir(root: &Path) -> PathBuf {
 /// `_sync/` for the given book root (device-local sync bookkeeping).
 pub fn sync_dir(root: &Path) -> PathBuf {
     root.join(SYNC_DIR)
+}
+
+/// `_packs/` for the given book root (per-pack import manifests, device-local).
+pub fn packs_dir(root: &Path) -> PathBuf {
+    root.join(PACKS_DIR)
+}
+
+/// The manifest file for a specific pack: `_packs/{pack_id}.json`.
+pub fn pack_manifest_path(root: &Path, pack_id: &str) -> PathBuf {
+    packs_dir(root).join(format!("{pack_id}.json"))
 }
 
 /// The CRDT sidecar path for a note: `_crdt/{ulid}.crdt`. Keyed on the ulid (not the slug-bearing

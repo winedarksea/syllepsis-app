@@ -6,7 +6,7 @@ import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialo
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { PageHeader } from '../components/PageHeader';
-import type { ImportPreview, ImportReport, BookInfo } from '../types';
+import type { ImportPreview, ImportReport, BookInfo, NoteResolution } from '../types';
 import './PacksView.css';
 
 const PACK_FILTER = [{ name: 'Syllepsis pack', extensions: ['synpack.json', 'json'] }];
@@ -14,8 +14,16 @@ const PACK_FILTER = [{ name: 'Syllepsis pack', extensions: ['synpack.json', 'jso
 const STATUS_LABEL: Record<string, string> = {
   new: 'new',
   update: 'update',
-  locally_modified: 'locally edited — will be skipped',
+  locally_modified: 'locally edited',
 };
+
+const RESOLUTION_OPTIONS: { value: NoteResolution; label: string }[] = [
+  { value: 'skip', label: 'Skip (keep mine)' },
+  { value: 'overwrite', label: 'Overwrite with pack' },
+  { value: 'merge', label: 'Merge (Loro 3-way)' },
+  { value: 'commentary', label: 'Save as commentary' },
+  { value: 'duplicate', label: 'Duplicate (fork mine)' },
+];
 
 export function PacksView() {
   const { categories } = useStore();
@@ -57,6 +65,7 @@ function ExportPanel({ categories, onNotice, onError }: PanelProps & { categorie
   const [description, setDescription] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exportAll, setExportAll] = useState(false);
+  const [includeCommentary, setIncludeCommentary] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const toggle = (cat: string) => setSelected((prev) => {
@@ -73,7 +82,7 @@ function ExportPanel({ categories, onNotice, onError }: PanelProps & { categorie
     setBusy(true);
     try {
       const manifest = await api.exportPack(
-        { id: id.trim(), name: name.trim(), version: version.trim() || '1.0.0', description, categories: [...selected], note_ids: [], export_all: exportAll },
+        { id: id.trim(), name: name.trim(), version: version.trim() || '1.0.0', description, categories: [...selected], note_ids: [], export_all: exportAll, include_commentary: includeCommentary },
         path,
       );
       onNotice(`Exported “${manifest.name}” v${manifest.version}.`);
@@ -82,7 +91,7 @@ function ExportPanel({ categories, onNotice, onError }: PanelProps & { categorie
     } finally {
       setBusy(false);
     }
-  }, [id, name, version, description, selected, exportAll, onNotice, onError]);
+  }, [id, name, version, description, selected, exportAll, includeCommentary, onNotice, onError]);
 
   return (
     <section className="pk-panel">
@@ -99,6 +108,10 @@ function ExportPanel({ categories, onNotice, onError }: PanelProps & { categorie
       <label className="pk-check pk-export-all-toggle">
         <input type="checkbox" checked={exportAll} onChange={(e) => setExportAll(e.target.checked)} />
         <span>Export entire book (all non-deleted notes)</span>
+      </label>
+      <label className="pk-check">
+        <input type="checkbox" checked={includeCommentary} onChange={(e) => setIncludeCommentary(e.target.checked)} />
+        <span>Include commentary (proposals, notes, footnotes)</span>
       </label>
 
       <div className="pk-subhead">Categories to include</div>
@@ -126,6 +139,7 @@ function ImportPanel({ localCategories, onNotice, onError }: PanelProps & { loca
   const [importMode, setImportMode] = useState<'merge' | 'new_book' | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [map, setMap] = useState<Record<string, string>>({});
+  const [resolutions, setResolutions] = useState<Record<string, NoteResolution>>({});
   const [report, setReport] = useState<ImportReport | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -156,6 +170,7 @@ function ImportPanel({ localCategories, onNotice, onError }: PanelProps & { loca
     setImportMode(null);
     setSelected(new Set());
     setMap({});
+    setResolutions({});
     setReport(null);
   };
 
@@ -171,19 +186,30 @@ function ImportPanel({ localCategories, onNotice, onError }: PanelProps & { loca
     return next;
   });
 
+  const setResolution = (noteId: string, resolution: NoteResolution) =>
+    setResolutions((prev) => ({ ...prev, [noteId]: resolution }));
+
   const runImport = useCallback(async () => {
     if (!path) return;
     setBusy(true);
     try {
-      const r = await api.importPack(path, { selected_note_ids: [...selected], category_map: map });
+      const r = await api.importPack(path, { selected_note_ids: [...selected], category_map: map, resolutions });
       setReport(r);
-      onNotice(`Imported ${r.imported.length}, skipped ${r.skipped_locally_modified.length} locally-edited.`);
+      const parts = [
+        r.imported.length > 0 && `Imported ${r.imported.length}`,
+        r.overwritten.length > 0 && `overwritten ${r.overwritten.length}`,
+        r.merged.length > 0 && `merged ${r.merged.length}`,
+        r.commentary_created.length > 0 && `${r.commentary_created.length} saved as commentary`,
+        r.duplicated.length > 0 && `duplicated ${r.duplicated.length}`,
+        r.skipped_locally_modified.length > 0 && `skipped ${r.skipped_locally_modified.length} locally-edited`,
+      ].filter(Boolean);
+      onNotice(parts.join(', ') + '.');
     } catch (e) {
       onError(String(e));
     } finally {
       setBusy(false);
     }
-  }, [path, selected, map, onNotice, onError]);
+  }, [path, selected, map, resolutions, onNotice, onError]);
 
   const runImportAsBook = useCallback(async () => {
     if (!path || !preview) return;
@@ -240,11 +266,24 @@ function ImportPanel({ localCategories, onNotice, onError }: PanelProps & { loca
               <div className="pk-subhead">Notes ({selected.size}/{selectableCount})</div>
               <div className="pk-checklist">
                 {preview.notes.map((n) => (
-                  <label key={n.id} className={`pk-check pk-status-${n.status}`}>
-                    <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggle(n.id)} />
-                    <span className="pk-note-title">{n.title || '(untitled)'}</span>
-                    <span className="pk-status">{STATUS_LABEL[n.status]}</span>
-                  </label>
+                  <div key={n.id} className={`pk-note-row pk-status-${n.status}`}>
+                    <label className="pk-check">
+                      <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggle(n.id)} />
+                      <span className="pk-note-title">{n.title || '(untitled)'}</span>
+                      <span className="pk-status">{STATUS_LABEL[n.status]}</span>
+                    </label>
+                    {n.status === 'locally_modified' && selected.has(n.id) && (
+                      <select
+                        className="pk-resolution-select"
+                        value={resolutions[n.id] ?? 'skip'}
+                        onChange={(e) => setResolution(n.id, e.target.value as NoteResolution)}
+                      >
+                        {RESOLUTION_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
                 ))}
               </div>
 
@@ -274,8 +313,13 @@ function ImportPanel({ localCategories, onNotice, onError }: PanelProps & { loca
 
       {report && (
         <div className="pk-report">
-          Imported {report.imported.length}. Skipped {report.skipped_locally_modified.length} locally-edited.
-          {report.created_categories.length > 0 && <> Created {report.created_categories.length} categor{report.created_categories.length !== 1 ? 'ies' : 'y'}.</>}
+          {report.imported.length > 0 && <div>Imported: {report.imported.length}</div>}
+          {report.overwritten.length > 0 && <div>Overwritten: {report.overwritten.length}</div>}
+          {report.merged.length > 0 && <div>Merged: {report.merged.length}</div>}
+          {report.commentary_created.length > 0 && <div>Saved as commentary: {report.commentary_created.length}</div>}
+          {report.duplicated.length > 0 && <div>Duplicated: {report.duplicated.length}</div>}
+          {report.skipped_locally_modified.length > 0 && <div>Skipped (locally edited): {report.skipped_locally_modified.length}</div>}
+          {report.created_categories.length > 0 && <div>Created {report.created_categories.length} categor{report.created_categories.length !== 1 ? 'ies' : 'y'}.</div>}
         </div>
       )}
     </section>

@@ -438,9 +438,6 @@ pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
             )?;
             note.body = stored.body.clone();
         }
-        if !note.metadata.packs.packs.is_empty() && content_changed(&stored, &note) {
-            note.metadata.packs.locally_modified = true;
-        }
         // Remove categories that existed only because of a body #tag that has since been deleted.
         let old_body_cats = dialect::extract_categories(&stored.body);
         let new_body_cats = dialect::extract_categories(&note.body);
@@ -494,15 +491,6 @@ fn hydrate_categories_from_note_metadata(book: &Book) -> CoreResult<()> {
     }
     let referenced_categories: Vec<String> = referenced_categories.into_iter().collect();
     ensure_categories_declared(book, &referenced_categories)
-}
-
-/// Whether a user-meaningful field of a note changed (the parts a pack re-import would overwrite).
-/// Lifecycle/authorship/date churn does not count as a "local modification".
-fn content_changed(before: &Note, after: &Note) -> bool {
-    before.title != after.title
-        || before.summary != after.summary
-        || before.body != after.body
-        || before.categories != after.categories
 }
 
 /// Set (or clear) a note's sort position.

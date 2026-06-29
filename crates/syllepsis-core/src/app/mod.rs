@@ -9,6 +9,7 @@ pub mod image_assets;
 pub mod lifecycle;
 pub mod llm;
 pub mod pack;
+pub mod pack_manifest;
 pub mod plugin;
 pub mod publish;
 pub mod search;
