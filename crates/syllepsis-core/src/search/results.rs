@@ -5,7 +5,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{NoteStatus, ObjectType};
+use crate::model::{ClassificationKind, NoteStatus, ObjectType};
 
 /// Per-retriever contribution to a hit's final reciprocal-rank-fusion score.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,8 +36,10 @@ pub struct SearchHit {
     pub score: f32,
     /// Subtle explainability metadata for the ranking UI.
     pub ranking_signals: SearchRankingSignals,
-    /// The note's object type (note, todo, qa, …).
+    /// The note's storage type.
     pub object_type: ObjectType,
+    /// The note's semantic classification or note subtype.
+    pub classification: ClassificationKind,
     /// When the note was last updated — ISO timestamp for the UI date badge.
     pub updated: DateTime<Utc>,
     /// Whether the note is starred.

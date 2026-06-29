@@ -2,13 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../lib/store';
 import { api } from '../lib/api';
-import type { Category, CloudSyncFinished, ObjectType } from '../types';
+import type { Category, ClassificationKind, CloudSyncFinished, ObjectType } from '../types';
 import type { SignatureSlot } from '../theme/themes';
 import { Icon } from './Icon';
 import './Sidebar.css';
 
 interface Props {
-  onNewNote: (type?: ObjectType) => void;
+  onNewNote: (type?: ObjectType, classification?: ClassificationKind) => void;
   onImportImage: () => void;
   isMobileOpen?: boolean;
   onClose?: () => void;
@@ -16,14 +16,14 @@ interface Props {
 
 // Object types a user can create directly from the New menu. (Picture/Drawing need asset
 // authoring that isn't built yet; Commentary is produced by the AI tools, not created by hand.)
-const NEW_TYPES: { type: ObjectType; label: string }[] = [
-  { type: 'note', label: 'Note' },
-  { type: 'quote', label: 'Quote' },
-  { type: 'reference', label: 'Reference' },
-  { type: 'todo', label: 'To-do' },
-  { type: 'qa', label: 'Q & A' },
+const NEW_TYPES: { type: ObjectType; classification?: ClassificationKind; label: string }[] = [
+  { type: 'note', classification: 'note', label: 'Note' },
+  { type: 'note', classification: 'quote', label: 'Quote' },
+  { type: 'note', classification: 'reference', label: 'Reference' },
+  { type: 'note', classification: 'todo', label: 'To-do' },
+  { type: 'note', classification: 'qa', label: 'Q & A' },
   { type: 'table', label: 'Table' },
-  { type: 'code', label: 'Code' },
+  { type: 'note', classification: 'code', label: 'Code' },
 ];
 
 const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[] = [
@@ -143,14 +143,14 @@ export function Sidebar({ onNewNote, onImportImage, isMobileOpen = false, onClos
     closeMobileDrawer();
   }, [closeMobileDrawer, setActiveCategory, setView]);
 
-  const createType = useCallback((type: ObjectType) => {
+  const createType = useCallback((type: ObjectType, classification?: ClassificationKind) => {
     setNewMenuOpen(false);
-    onNewNote(type);
+    onNewNote(type, classification);
     onClose?.();
   }, [onClose, onNewNote]);
 
   const handleNewNote = useCallback(() => {
-    onNewNote('note');
+    onNewNote('note', 'note');
     closeMobileDrawer();
   }, [closeMobileDrawer, onNewNote]);
 
@@ -257,7 +257,7 @@ export function Sidebar({ onNewNote, onImportImage, isMobileOpen = false, onClos
           {newMenuOpen && (
             <div className="sidebar-new-menu">
               {NEW_TYPES.map((t) => (
-                <button key={t.type} className="sidebar-new-menu-item" onClick={() => createType(t.type)}>
+                <button key={`${t.type}-${t.classification ?? 'storage'}`} className="sidebar-new-menu-item" onClick={() => createType(t.type, t.classification)}>
                   {t.label}
                 </button>
               ))}

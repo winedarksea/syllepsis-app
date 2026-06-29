@@ -411,7 +411,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::embeddings::HashingEmbedder;
-    use crate::model::{Note, ObjectType};
+    use crate::model::{ClassificationKind, Note, ObjectType};
     use crate::search::filter::SearchFilter;
 
     fn note(title: &str, body: &str, cats: &[&str]) -> Note {
@@ -580,9 +580,10 @@ mod tests {
     }
 
     #[test]
-    fn object_type_filter_narrows_hits() {
+    fn classification_filter_narrows_hits() {
         let mut notes = vec![note("A note", "content about breaker", &["electrical"])];
-        let mut todo = Note::new(ObjectType::Todo, "A todo", "syllepsis_001");
+        let mut todo = Note::new(ObjectType::Note, "A todo", "syllepsis_001");
+        todo.metadata.classification.kind = ClassificationKind::Todo;
         todo.body = "todo content about breaker".into();
         todo.categories = vec!["electrical".into()];
         notes.push(todo);
@@ -592,14 +593,15 @@ mod tests {
         let query_emb = eng.query_embedding("breaker");
 
         let filter = SearchFilter {
-            object_types: vec![ObjectType::Todo],
+            classifications: vec![ClassificationKind::Todo],
             ..Default::default()
         };
         let results = index
             .search(&eng, "breaker", &filter, Some(&query_emb))
             .unwrap();
         assert_eq!(results.hits.len(), 1);
-        assert_eq!(results.hits[0].object_type, ObjectType::Todo);
+        assert_eq!(results.hits[0].object_type, ObjectType::Note);
+        assert_eq!(results.hits[0].classification, ClassificationKind::Todo);
     }
 
     #[test]

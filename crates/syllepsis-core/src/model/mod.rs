@@ -14,7 +14,9 @@ pub mod style_card;
 pub mod world;
 
 pub use category::Category;
-pub use classification::{Basis, Checkability, Classification, Priority, Stability, StatementType};
+pub use classification::{
+    Basis, Checkability, Classification, ClassificationKind, Priority, Stability,
+};
 pub use commentary::{
     CommentaryKind, CommentaryMetadata, CommentarySource, CommentaryStatus, CommentaryTargetField,
     FactCheckAssessment,

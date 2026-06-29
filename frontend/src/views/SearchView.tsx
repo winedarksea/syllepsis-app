@@ -8,13 +8,19 @@ import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { PageHeader } from '../components/PageHeader';
-import type { SearchResults, CrossBookNote, ObjectType, SearchFilter, NoteVisibility } from '../types';
+import type { SearchResults, CrossBookNote, ClassificationKind, ObjectType, SearchFilter, NoteVisibility } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import { formatSearchRelevancePercent } from '../lib/searchRelevance';
 import './SearchView.css';
 
 const ALL_OBJECT_TYPES: ObjectType[] = [
-  'note', 'quote', 'reference', 'todo', 'qa', 'table', 'picture', 'drawing', 'code',
+  'note', 'table', 'picture', 'drawing',
+];
+
+const ALL_CLASSIFICATIONS: ClassificationKind[] = [
+  'note', 'qa', 'reference', 'quote', 'code', 'todo', 'idea',
+  'hypothesis', 'factual_claim', 'rule_or_requirement', 'principle', 'preference',
+  'procedure', 'context', 'analysis_or_interpretation', 'narrative',
 ];
 
 const FRESHNESS_PRESETS: { label: string; days: number | null }[] = [
@@ -37,6 +43,7 @@ function activeFilterCount(
   freshnessIndex: number,
   lengthIndex: number,
   objectTypes: ObjectType[],
+  classifications: ClassificationKind[],
   starredOnly: boolean,
   allBooks: boolean,
   visibility: NoteVisibility,
@@ -46,6 +53,7 @@ function activeFilterCount(
     (freshnessIndex > 0 ? 1 : 0) +
     (lengthIndex > 0 ? 1 : 0) +
     (objectTypes.length > 0 ? 1 : 0) +
+    (classifications.length > 0 ? 1 : 0) +
     (starredOnly ? 1 : 0) +
     (allBooks ? 1 : 0) +
     (visibility !== 'active' ? 1 : 0)
@@ -57,6 +65,7 @@ function buildFilter(
   freshnessIndex: number,
   lengthIndex: number,
   objectTypes: ObjectType[],
+  classifications: ClassificationKind[],
   starredOnly: boolean,
   visibility: NoteVisibility,
 ): SearchFilter {
@@ -71,6 +80,7 @@ function buildFilter(
     min_body_len: lenPreset.min,
     max_body_len: lenPreset.max,
     object_types: objectTypes,
+    classifications,
     starred_only: starredOnly,
   };
 }
@@ -100,6 +110,7 @@ export function SearchView() {
   const [freshnessIndex, setFreshnessIndex] = useState(0);
   const [lengthIndex, setLengthIndex] = useState(0);
   const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
+  const [classifications, setClassifications] = useState<ClassificationKind[]>([]);
   const [starredOnly, setStarredOnly] = useState(false);
   const [visibility, setVisibility] = useState<NoteVisibility>('active');
   const [showAllFacets, setShowAllFacets] = useState(false);
@@ -118,7 +129,7 @@ export function SearchView() {
 
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const numActive = activeFilterCount(categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks, visibility);
+  const numActive = activeFilterCount(categories, freshnessIndex, lengthIndex, objectTypes, classifications, starredOnly, allBooks, visibility);
 
   const run = useCallback((
     q: string,
@@ -126,6 +137,7 @@ export function SearchView() {
     freshIdx: number,
     lenIdx: number,
     types: ObjectType[],
+    kinds: ClassificationKind[],
     starred: boolean,
     crossBook: boolean,
     lifecycleVisibility: NoteVisibility,
@@ -144,7 +156,7 @@ export function SearchView() {
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
     } else {
-      const filter = buildFilter(cats, freshIdx, lenIdx, types, starred, lifecycleVisibility);
+      const filter = buildFilter(cats, freshIdx, lenIdx, types, kinds, starred, lifecycleVisibility);
       api.search(q, filter)
         .then((r) => { setResults(r); setCrossBookResults(null); setError(null); })
         .catch((e) => setError(String(e)))
@@ -156,11 +168,11 @@ export function SearchView() {
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
     debounce.current = setTimeout(
-      () => run(query, categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks, visibility),
+      () => run(query, categories, freshnessIndex, lengthIndex, objectTypes, classifications, starredOnly, allBooks, visibility),
       300,
     );
     return () => { if (debounce.current) clearTimeout(debounce.current); };
-  }, [query, categories, freshnessIndex, lengthIndex, objectTypes, starredOnly, allBooks, visibility, run]);
+  }, [query, categories, freshnessIndex, lengthIndex, objectTypes, classifications, starredOnly, allBooks, visibility, run]);
 
   // IntersectionObserver for windowed reveal
   useEffect(() => {
@@ -191,11 +203,18 @@ export function SearchView() {
     );
   }, []);
 
+  const toggleClassification = useCallback((classification: ClassificationKind) => {
+    setClassifications((prev) =>
+      prev.includes(classification) ? prev.filter((c) => c !== classification) : [...prev, classification],
+    );
+  }, []);
+
   const clearAll = useCallback(() => {
     setCategories([]);
     setFreshnessIndex(0);
     setLengthIndex(0);
     setObjectTypes([]);
+    setClassifications([]);
     setStarredOnly(false);
     setVisibility('active');
     setAllBooks(false);
@@ -282,7 +301,7 @@ export function SearchView() {
           </div>
 
           <div className="sv-filter-row sv-filter-row--top">
-            <label className="sv-filter-label">Type</label>
+            <label className="sv-filter-label">Storage</label>
             <div className="sv-filter-checkgroup">
               {ALL_OBJECT_TYPES.map((t) => (
                 <label key={t} className="sv-filter-check">
@@ -292,6 +311,22 @@ export function SearchView() {
                     onChange={() => toggleObjectType(t)}
                   />
                   {t}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="sv-filter-row sv-filter-row--top">
+            <label className="sv-filter-label">Classification</label>
+            <div className="sv-filter-checkgroup">
+              {ALL_CLASSIFICATIONS.map((classification) => (
+                <label key={classification} className="sv-filter-check">
+                  <input
+                    type="checkbox"
+                    checked={classifications.includes(classification)}
+                    onChange={() => toggleClassification(classification)}
+                  />
+                  {classification.replace(/_/g, ' ')}
                 </label>
               ))}
             </div>
@@ -373,6 +408,11 @@ export function SearchView() {
               {t} ×
             </button>
           ))}
+          {classifications.map((classification) => (
+            <button key={classification} className="sv-chip" onClick={() => toggleClassification(classification)}>
+              {classification.replace(/_/g, ' ')} ×
+            </button>
+          ))}
           {starredOnly && (
             <button className="sv-chip" onClick={() => setStarredOnly(false)}>★ starred ×</button>
           )}
@@ -416,7 +456,8 @@ export function SearchView() {
                     {hit.archived && <span className="sv-hit-type">archived</span>}
                     {hit.marked_for_deletion_at && <span className="sv-hit-type">trash</span>}
                     {hit.status && <span className="sv-hit-type">{hit.status.replace(/_/g, ' ')}</span>}
-                    <span className="sv-hit-type">{hit.object_type}</span>
+                    <span className="sv-hit-type">{hit.classification.replace(/_/g, ' ')}</span>
+                    {hit.object_type !== 'note' && <span className="sv-hit-type">{hit.object_type}</span>}
                     <span className="sv-hit-date">{relativeDate(hit.updated)}</span>
                     <span
                       className="sv-hit-score"

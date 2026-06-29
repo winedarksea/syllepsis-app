@@ -4,8 +4,7 @@
 //! beneath it. `body` is therefore `#[serde(skip)]` — it is never part of the frontmatter.
 //!
 //! Every text object carries the **summary / full-description duality**: `summary` is the
-//! flashcard-front/chapter-blurb view and `body` is the full text. For QA notes these are
-//! relabeled question/answer in the UI; the storage is identical.
+//! flashcard-front/chapter-blurb view and `body` is the full text.
 
 use crate::config::SummaryConfig;
 use crate::id::NoteId;
@@ -85,11 +84,7 @@ impl Note {
             markdown_version: dialect_version.into(),
             title,
             summary: String::new(),
-            body: match object_type {
-                ObjectType::Todo => "- [ ] ".to_string(),
-                ObjectType::Code => "```\n\n```".to_string(),
-                _ => String::new(),
-            },
+            body: String::new(),
             categories: Vec::new(),
             prior: None,
             location: None,

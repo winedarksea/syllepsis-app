@@ -2,8 +2,7 @@
 // Future: replace with tauri-specta generated bindings.
 
 export type ObjectType =
-  | 'note' | 'quote' | 'reference' | 'todo' | 'qa'
-  | 'commentary' | 'table' | 'picture' | 'drawing' | 'code';
+  | 'note' | 'commentary' | 'table' | 'picture' | 'drawing';
 
 export type PriorKind =
   | 'new_paragraph'
@@ -21,10 +20,11 @@ export interface PriorEdge {
   kind: PriorKind;
 }
 
-export type StatementType =
+export type ClassificationKind =
+  | 'note' | 'qa' | 'reference' | 'quote' | 'code' | 'todo' | 'idea'
   | 'hypothesis' | 'factual_claim' | 'rule_or_requirement' | 'principle'
   | 'preference' | 'procedure' | 'context' | 'analysis_or_interpretation'
-  | 'narrative' | 'idea';
+  | 'narrative';
 
 export type Basis =
   | 'science_and_data' | 'regulation_or_standard' | 'logic_and_reasoning'
@@ -45,7 +45,7 @@ export type CommentarySource = 'ai' | 'user';
 export type CommentaryTargetField = 'body' | 'summary' | 'categories';
 
 export interface Classification {
-  statement_type: StatementType;
+  kind: ClassificationKind;
   basis: Basis;
   checkability: Checkability;
   stability: Stability;
@@ -235,6 +235,7 @@ export interface QueuedLlmJobResult {
 export interface CreateNoteOptions {
   vanishing?: boolean;
   vanish_days?: number;
+  classification?: ClassificationKind;
 }
 
 export interface AssetMetadata {
@@ -391,6 +392,7 @@ export interface SearchFilter {
   min_body_len: number | null;
   max_body_len: number | null;
   object_types: ObjectType[];
+  classifications: ClassificationKind[];
   starred_only: boolean;
 }
 
@@ -402,6 +404,7 @@ export function emptyFilter(): SearchFilter {
     min_body_len: null,
     max_body_len: null,
     object_types: [],
+    classifications: [],
     starred_only: false,
   };
 }
@@ -415,6 +418,7 @@ export interface SearchHit {
   score: number;
   ranking_signals: SearchRankingSignals;
   object_type: ObjectType;
+  classification: ClassificationKind;
   /** ISO timestamp of last update. */
   updated: string;
   starred: boolean;

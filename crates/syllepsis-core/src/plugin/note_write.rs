@@ -29,7 +29,7 @@ pub struct CreateNoteInput {
     pub summary: String,
     #[serde(default)]
     pub categories: Vec<String>,
-    /// Object type id prefix (e.g. `"note"`, `"quote"`); defaults to a plain note.
+    /// Object type id prefix (e.g. `"note"`, `"table"`); defaults to a plain note.
     #[serde(default)]
     pub object_type: Option<String>,
 }

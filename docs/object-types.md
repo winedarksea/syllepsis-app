@@ -12,11 +12,11 @@ Note IDs are auto-generated, decentralized (no hosted backend hands them out), a
 {type}-{slug}-{ulid}
 ```
 
-- **`type`** — the object-type enum (`note`, `quote`, `reference`, `todo`, …). Cheap human context.
+- **`type`** — the storage-shape enum (`note`, `table`, `picture`, `drawing`, or internal `commentary`). Note subtypes such as quote and todo live in classification metadata.
 - **`slug`** — derived from the title/content: ASCII-folded, lowercased, kebab-cased, stopwords trimmed, truncated to ~32 chars. **Cosmetic and mutable** — it may regenerate when the title changes.
 - **`ulid`** — a [ULID](https://github.com/ulid/spec) (128 bits, Crockford base32, lowercased), the **canonical, immutable identity**. Time-ordered so files sort chronologically; high-entropy so independent devices generate IDs offline without colliding on merge, and so IDs stay unique even across imported knowledge packs.
 
-Example: `quote-montaigne-on-friendship-01jh5k3q2x9y8w7v6t5s4r3q2p`
+Example: `note-montaigne-on-friendship-01jh5k3q2x9y8w7v6t5s4r3q2p`
 
 **Identity rules:**
 - The canonical `id` lives in **frontmatter**, never in the file path. The filename is a derived, disposable convenience. This is what lets a note move between [sorting subfolders](#storage-layout) or be renamed externally without losing identity.
@@ -41,7 +41,14 @@ _categories/ contains category frontmatter files
 _commentary/ contains commentary
 _cache/ or _derived/ for ephemerals, gitignored and possibly not cloud synced
 
-## Special Non-Text Types
+## Storage Object Types
+
+Object type is reserved for storage differences:
+- **Notes**: Markdown body plus YAML frontmatter.
+- **Tables**: CSV companion file plus YAML frontmatter.
+- **Pictures**: imported raster asset plus Markdown/frontmatter metadata.
+- **Drawings**: imported SVG asset plus Markdown/frontmatter metadata.
+- **Commentary**: internal Markdown notes under `_commentary/`.
 
 ### Tables
 Stored as CSV with YAML frontmatter. Special subtypes: **decision matrices** and **pro/con tables**.
@@ -59,9 +66,6 @@ Crdt doesn't track images.
 
 A raster image can serve as the backdrop for an [image-backed world](spatial-worlds.md#worlds) and carry an overlay of note/category pins and regions. Because raster images don't scale like vector, the overlay must apply an explicit zoom/pan transform so pins stay anchored to the correct spot as the user zooms — SVG [drawings](#drawings) are preferred where clean zoom or named regions matter.
 
-### Code Blocks
-A special text type. **Mermaid** diagrams (including Venn diagrams) are a special subtype that can render inline.
-
 ### Drawings (SVG)
 An object type for vector drawings, stored as imported **SVG** plus the same Markdown metadata and
 UUID sidecar used by pictures. A leading XML/DTD prolog is stripped before storage so DTD-bearing
@@ -73,7 +77,7 @@ element IDs are preserved for world regions.
 
 Drawings are the **preferred backdrop for image-backed worlds** (floorplans, mind palaces): being vector, they zoom cleanly, and a named element (`id="kitchen"`) doubles as a clickable overlay region. See [spatial-worlds.md](spatial-worlds.md) for overlays and [sync-backup.md](sync-backup.md#drawings-and-svg) for how drawing geometry is synced (SVG is text, but not CRDT-tracked by default).
 
-## Text Object Types
+## Text Classifications
 
 ### Summary / Description Duality
 
@@ -89,11 +93,24 @@ A warning displays if:
 
 A metric shows the summary-to-full-description ratio alongside a vector similarity score to keep them in alignment.
 
+Text notes can be classified as `note`, `qa`, `reference`, `quote`, `code`, `todo`, `idea`,
+`hypothesis`, `factual_claim`, `rule_or_requirement`, `principle`, `preference`, `procedure`,
+`context`, `analysis_or_interpretation`, or `narrative`. The default is `note`.
+
+Creating a note from a subtype shortcut seeds an editable Markdown hint, but the app does not
+enforce that format yet:
+- **Todo**: `- [ ] `
+- **Q&A**: `question:` / `answer:` body fields.
+- **Quote**: blockquote plus `Source:`.
+- **Reference**: lightweight citation line.
+- **Code**: fenced `text` code block.
+
 ### Quotes
-Text plus a reference. Signals that the content was written by someone else. Linked reference uses `@`.
+Text plus a source. Signals that the content was written by someone else. Linked reference uses `@`.
 
 ### QA (Question & Answer)
-Renames "summary" → "question" and "description" → "answer". Both are shown simultaneously rather than one at a time. If the answer is a single link, the question acts as a tag pointer to that section.
+Starts with editable `question:` and `answer:` body fields. Later versions may enforce a stricter
+shape, but for now it is a hint only.
 
 ### References
 Author, Year, Title, URL (shown on hover). Tagged with `@`.
@@ -101,7 +118,9 @@ Author, Year, Title, URL (shown on hover). Tagged with `@`.
 - References have no summary and are expected to be mostly fixed metadata.
 
 ### Todos
-A special text type containing only checklist items. Includes syntax sugar and auto-archiving: done/cancelled items move to a todo archive file after a configurable number of days (with `completed:date` added).
+A note classification optimized for checklist items. Includes syntax sugar and auto-archiving:
+done/cancelled items move to a todo archive file after a configurable number of days (with
+`completed:date` added).
 
 **Status syntax:**
 ```
@@ -145,7 +164,7 @@ When a rewrite is accepted, the commentary replaces the original note body. The 
 
 LLM response types are an extensible family: fact checks, devil's advocate (seeks potential flaws), grammar/style checks, etc.
 
-### Future Text Object Types
+### Future Text Classifications
 - **Executable code cells**: code isolated in a WASM sandbox (distinct from the display-only code blocks above).
 - **Query cells**: dataview-style query cells that compute their content from other notes' metadata ([Obsidian Dataview](https://blacksmithgu.github.io/obsidian-dataview/) is the reference for the idea).
 - **Worksheet**: a structured fill-in object type (details TBD).
@@ -186,7 +205,7 @@ Notes can be forked (duplicated). A forked note stores:
 
 ```json
 {
-  "statement_type": "hypothesis | factual_claim | rule_or_requirement | principle | preference | procedure | context | analysis_or_interpretation | narrative | idea",
+  "kind": "note | qa | reference | quote | code | todo | idea | hypothesis | factual_claim | rule_or_requirement | principle | preference | procedure | context | analysis_or_interpretation | narrative",
   "basis": "science_and_data | regulation_or_standard | logic_and_reasoning | tradition_and_culture | established_lore_or_fiction | lived_experience | personal_preference | none",
   "checkability": "objectively_checkable | partly_judgment_based | subjective_or_personal | none",
   "stability": "settled | evolving | tentative",

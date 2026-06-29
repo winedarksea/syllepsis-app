@@ -260,7 +260,7 @@ function AutocompletePlugin({
     }
     if (kind === 'waiting' || kind === 'blocked-by') {
       return notes
-        .filter((note) => note.type === 'todo')
+        .filter((note) => note.metadata.classification.kind === 'todo')
         .filter((note) => note.id.toLowerCase().includes(prefix) || note.title.toLowerCase().includes(prefix))
         .slice(0, 6)
         .map((note) => ({ label: `${kind}:${note.title || note.id}`, insert: `${kind}:${note.id}` }));

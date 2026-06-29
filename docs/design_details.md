@@ -56,15 +56,14 @@ It would also be good if this could be integrated as "native" context to a user'
 Goal: we want to encourage generative learning, especially for users who have already started with a large downloaded knowledge pack. When they add their own unsorted notes, the suggested connections and LLM fact checks should help them understand the knowledge
 
 Object Types:
-Each note is an object. Most data would be stored as a type of string object. String objects are broken down into various sub types of string objects. These string objects are stored as markdown text files.
+Each note is an object. Object type is reserved for storage shape: Markdown notes, CSV-backed tables, raster pictures, SVG drawings, and internal commentary. Note subtypes like Q&A, reference, quote, code, todo, idea, and hypothesis are classifications on Markdown notes.
 YAML frontmatter stores the key metadata but it is hidden from the standard ui view (metadata there being handled by a UI metadata input area). Perhaps fenced blocks instead of yaml would be fine.
-There are several note types that are special types. Tables would store as a csv (again with YAML frontmatter). Pictures are a special item types, captions and other metadata would be stored in the XMP metadata, using the same markdown format for text metadata like captions, which this app would read and write to. The goal is to support PNG, JPEG, GIF, SVG, and WebP.
+There are several storage types. Tables would store as a csv (again with YAML frontmatter). Pictures are a special item types, captions and other metadata would be stored in the XMP metadata, using the same markdown format for text metadata like captions, which this app would read and write to. The goal is to support PNG, JPEG, GIF, SVG, and WebP.
 This means that pictures, tables, and so on are not put strictly into text notes at all, but they can be sorted just before/after text notes, and text notes can link to them. The UI viewer then has the option to include them (pictures, etc) embedded in text at the link point, as a click and expand item, or as a link to follow through to a dedicated view.
 Tables have special subtypes, decision matrices and pro/con tables.
-Code blocks as a special text type, with Mermaid a special type of code block that can render the diagram, including Venn diagrams, a type of mermaid diagram.
-Quotes (ie famous people's sayings) as a special type, includes links
+Code, quotes, Q&A, references, and todos are note classifications. Creating one from the New menu seeds an editable starter template, but the body stays free-form for now.
 A "drawing" type (stored as SVG) allowing drawings with built in render to image where needed. Imported SVGs are treated as drawings (no separate type); the future in-app drawing tool emits SVG too, so both share the same overlay/anchor tooling and are the preferred backdrop for image-backed worlds. SVG is text so it diffs in git, but drawing geometry is file-synced (UUID sidecar), NOT CRDT-tracked by default — only the small overlay anchors (note↔coordinate links) are CRDT-tracked. Whether simple app-authored drawings could later be CRDT-tracked is an open question.
-Note IDs (auto generated) should be human readable to some extent. Format is `{type}-{slug}-{ulid}` with no colons (so the same string is filename-safe everywhere), e.g. `quote-montaigne-on-friendship-01jh5k3q2x9y8w7v6t5s4r3q2p`. The ulid is the canonical immutable identity (decentralized, collision-proof); the type+slug is cosmetic. Canonical id lives in frontmatter, not the path. See [object-types.md](object-types.md#note-ids) for the full scheme.
+Note IDs (auto generated) should be human readable to some extent. Format is `{type}-{slug}-{ulid}` with no colons (so the same string is filename-safe everywhere), e.g. `note-montaigne-on-friendship-01jh5k3q2x9y8w7v6t5s4r3q2p`. The ulid is the canonical immutable identity (decentralized, collision-proof); the type+slug is cosmetic. Canonical id lives in frontmatter, not the path. See [object-types.md](object-types.md#note-ids) for the full scheme.
 
 Examples apps worth referencing for comparison: LogSeq, Obsidian, Tana, Trillium, Plottr, Mem
 
@@ -172,7 +171,7 @@ Footnotes: users would be able to enter a third text body, in addition to the ma
 Include other kanban/scrum type metadata, such as assignee and magnitude, although mostly unused for now. The goal is to be able to use this as a todo list or kanban board, albeit as a lower priority and secondary functionality
 Text Object Metadata Example (not finalized):
 {
-"statement_type": "hypothesis | factual_claim | rule_or_requirement | principle | preference | procedure | context | analysis_or_interpretation | narrative | idea", (idea is default)
+"kind": "note | qa | reference | quote | code | todo | idea | hypothesis | factual_claim | rule_or_requirement | principle | preference | procedure | context | analysis_or_interpretation | narrative", (note is default)
 "basis": "science_and_data | regulation_or_standard | logic_and_reasoning | tradition_and_culture | established_lore_or_fiction |  lived_experience | personal_preference | none", (none is default)
 "checkability": "objectively_checkable | partly_judgment_based | subjective_or_personal | none",
 "stability": "settled | evolving | tentative",
@@ -182,7 +181,7 @@ Text Object Metadata Example (not finalized):
 }
 Should include something like markdown_version:gnosis_app_001. Should include the app name in this version so users of the markdown outside the app can figure out the style's origin
 
-Todo list as a special text type. It only contains checklist items (that's all the UI will show of the markdown), includes syntax sugar (see below) and an auto-archiving feature where items marked done or cancelled are moved after a configurable number of days to a todo archive file with a completed:date added. UI for todo has a simple action to drag them up or down in order on the list
+Todo list as a note classification. It starts with checklist syntax, includes syntax sugar (see below) and an auto-archiving feature where items marked done or cancelled are moved after a configurable number of days to a todo archive file with a completed:date added. UI for todo has a simple action to drag them up or down in order on the list
 Perhaps some more syntax sugar like this for todo status (we would probably support this in all text notes, but it is aimed at todos in particular):
 Checklist enum:
 - [ ] open (not started)

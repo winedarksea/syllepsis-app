@@ -1,14 +1,20 @@
-//! The descriptive "what kind of statement is this" schema from object-types.md. These are
-//! orthogonal to [`super::ObjectType`]: a `note` can be a `hypothesis` grounded in
-//! `science_and_data`, etc. All fields have doc-specified defaults so a bare note needs no
-//! frontmatter.
+//! The descriptive classification schema from object-types.md. Object type is storage shape;
+//! this module describes both ordinary statement classes and note subtypes such as Q&A or todo.
 
 use serde::{Deserialize, Serialize};
 
-/// What sort of claim the text makes.
+/// What kind of note or claim this content represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum StatementType {
+pub enum ClassificationKind {
+    #[default]
+    Note,
+    Qa,
+    Reference,
+    Quote,
+    Code,
+    Todo,
+    Idea,
     Hypothesis,
     FactualClaim,
     RuleOrRequirement,
@@ -18,8 +24,6 @@ pub enum StatementType {
     Context,
     AnalysisOrInterpretation,
     Narrative,
-    #[default]
-    Idea,
 }
 
 /// What the statement rests on.
@@ -73,7 +77,7 @@ pub enum Priority {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Classification {
-    pub statement_type: StatementType,
+    pub kind: ClassificationKind,
     pub basis: Basis,
     pub checkability: Checkability,
     pub stability: Stability,
@@ -90,7 +94,7 @@ mod tests {
     #[test]
     fn defaults_match_doc() {
         let c = Classification::default();
-        assert_eq!(c.statement_type, StatementType::Idea);
+        assert_eq!(c.kind, ClassificationKind::Note);
         assert_eq!(c.basis, Basis::None);
         assert_eq!(c.stability, Stability::Evolving);
         assert_eq!(c.priority, Priority::Standard);
@@ -100,7 +104,13 @@ mod tests {
 
     #[test]
     fn serializes_snake_case() {
-        let yaml = serde_yaml::to_string(&StatementType::FactualClaim).unwrap();
+        let yaml = serde_yaml::to_string(&ClassificationKind::FactualClaim).unwrap();
         assert_eq!(yaml.trim(), "factual_claim");
+    }
+
+    #[test]
+    fn note_subtypes_serialize_snake_case() {
+        let yaml = serde_yaml::to_string(&ClassificationKind::Qa).unwrap();
+        assert_eq!(yaml.trim(), "qa");
     }
 }

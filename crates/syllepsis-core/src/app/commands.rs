@@ -17,7 +17,9 @@ use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::markdown::dialect;
 use crate::model::metadata::{LockMode, Metadata};
-use crate::model::{Category, Note, NoteVisibility, ObjectType, PriorEdge, PriorRef};
+use crate::model::{
+    Category, ClassificationKind, Note, NoteVisibility, ObjectType, PriorEdge, PriorRef,
+};
 use crate::publish;
 use crate::sort::{self, RenderItem};
 use crate::storage::{layout, Book, NoteStore};
@@ -44,6 +46,7 @@ pub struct BookStats {
 pub struct CreateNoteOptions {
     pub vanishing: bool,
     pub vanish_days: Option<u32>,
+    pub classification: Option<ClassificationKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -388,6 +391,13 @@ pub fn create_note_with_options(
     options: CreateNoteOptions,
 ) -> CoreResult<NoteDto> {
     let mut note = book.new_note(object_type, title)?;
+    if object_type == ObjectType::Note {
+        if let Some(classification) = options.classification {
+            note.metadata.classification.kind = classification;
+            note.body = starter_template_for_classification(classification).to_string();
+            book.save_note(&note)?;
+        }
+    }
     if options.vanishing {
         let days = options
             .vanish_days
@@ -408,6 +418,17 @@ pub fn create_note_with_options(
         std::fs::write(csv_path, encode_csv(&empty))?;
     }
     Ok(NoteDto::from_note(&note))
+}
+
+fn starter_template_for_classification(classification: ClassificationKind) -> &'static str {
+    match classification {
+        ClassificationKind::Todo => "- [ ] ",
+        ClassificationKind::Qa => "question: \nanswer: \n",
+        ClassificationKind::Quote => "> Quote text\n\nSource: \n",
+        ClassificationKind::Reference => "Author. (Year). Title. Source. URL.\n",
+        ClassificationKind::Code => "```text\n\n```\n",
+        _ => "",
+    }
 }
 
 /// Persist edits to a note. Bumps the updated timestamp and folds any inline `#tags` in the
@@ -1054,6 +1075,68 @@ mod tests {
     }
 
     #[test]
+    fn new_note_defaults_to_note_classification() {
+        let (_dir, book) = book();
+        let note = create_note(&book, ObjectType::Note, "plain", None).unwrap();
+        assert_eq!(note.object_type, ObjectType::Note);
+        assert_eq!(note.metadata.classification.kind, ClassificationKind::Note);
+        assert!(note.body.is_empty());
+    }
+
+    #[test]
+    fn note_classification_shortcuts_seed_editable_templates() {
+        let cases = [
+            (ClassificationKind::Todo, "- [ ] "),
+            (ClassificationKind::Qa, "question: \nanswer: \n"),
+            (ClassificationKind::Quote, "> Quote text\n\nSource: \n"),
+            (
+                ClassificationKind::Reference,
+                "Author. (Year). Title. Source. URL.\n",
+            ),
+            (ClassificationKind::Code, "```text\n\n```\n"),
+        ];
+        let (_dir, book) = book();
+
+        for (classification, expected_body) in cases {
+            let title = format!("{classification:?}");
+            let note = create_note_with_options(
+                &book,
+                ObjectType::Note,
+                &title,
+                None,
+                CreateNoteOptions {
+                    classification: Some(classification),
+                    ..CreateNoteOptions::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(note.object_type, ObjectType::Note);
+            assert_eq!(note.metadata.classification.kind, classification);
+            assert_eq!(note.body, expected_body);
+        }
+    }
+
+    #[test]
+    fn table_creation_still_creates_csv_sidecar() {
+        let (_dir, book) = book();
+        let table = create_note_with_options(
+            &book,
+            ObjectType::Table,
+            "data",
+            None,
+            CreateNoteOptions {
+                classification: Some(ClassificationKind::Todo),
+                ..CreateNoteOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(table.object_type, ObjectType::Table);
+        assert_eq!(table.metadata.classification.kind, ClassificationKind::Note);
+        let table_id = NoteId::parse(&table.id).unwrap();
+        assert!(layout::table_companion_csv_path(&book.root, &table_id).exists());
+    }
+
+    #[test]
     fn create_note_options_can_make_note_vanish() {
         let (_dir, book) = book();
         let note = create_note_with_options(
@@ -1064,6 +1147,7 @@ mod tests {
             CreateNoteOptions {
                 vanishing: true,
                 vanish_days: Some(7),
+                classification: None,
             },
         )
         .unwrap();

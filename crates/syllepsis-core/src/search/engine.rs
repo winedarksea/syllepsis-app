@@ -193,6 +193,13 @@ impl SearchEngine {
         if !filter.object_types.is_empty() && !filter.object_types.contains(&note.object_type) {
             return false;
         }
+        if !filter.classifications.is_empty()
+            && !filter
+                .classifications
+                .contains(&note.metadata.classification.kind)
+        {
+            return false;
+        }
         if filter.starred_only && !note.metadata.classification.starred {
             return false;
         }
@@ -392,6 +399,7 @@ impl SearchEngine {
             score,
             ranking_signals,
             object_type: note.object_type,
+            classification: note.metadata.classification.kind,
             updated: note.metadata.dates.updated,
             starred: note.metadata.classification.starred,
             body_len: note.body.chars().count(),

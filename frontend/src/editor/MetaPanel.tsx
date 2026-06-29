@@ -9,13 +9,14 @@ import { api } from '../lib/api';
 import { Icon } from '../components/Icon';
 import { WorldLocationHelper } from '../components/WorldLocationHelper';
 import type {
-  NoteDto, Category, LockMode, PriorKind, PriorRef, StatementType, Priority, FlexDate, NoteStatus,
+  NoteDto, Category, LockMode, PriorKind, PriorRef, ClassificationKind, Priority, FlexDate, NoteStatus,
   NoteEmbeddingDetails,
 } from '../types';
 
-const STATEMENT_TYPES: StatementType[] = [
+const CLASSIFICATION_KINDS: ClassificationKind[] = [
+  'note', 'qa', 'reference', 'quote', 'code', 'todo', 'idea',
   'hypothesis', 'factual_claim', 'rule_or_requirement', 'principle', 'preference',
-  'procedure', 'context', 'analysis_or_interpretation', 'narrative', 'idea',
+  'procedure', 'context', 'analysis_or_interpretation', 'narrative',
 ];
 const PRIORITIES: Priority[] = ['standard', 'important', 'core'];
 const NOTE_STATUSES: NoteStatus[] = [
@@ -217,8 +218,9 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
     ? `${note.categories.length} ${note.categories.length === 1 ? 'category' : 'categories'}`
     : undefined;
   const scheduledDate = note.metadata.dates.scheduled;
+  const isTodo = note.metadata.classification.kind === 'todo';
   const dateSummary = scheduledDate
-    ? `${note.type === 'todo' ? 'Due' : 'Scheduled'} ${formatDateShort(scheduledDate.date)}`
+    ? `${isTodo ? 'Due' : 'Scheduled'} ${formatDateShort(scheduledDate.date)}`
     : undefined;
   const statusSummary = note.metadata.status ? humanize(note.metadata.status) : undefined;
 
@@ -316,7 +318,7 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
                   </select>
                 </div>
 
-                {note.type === 'todo' && (
+                {isTodo && (
                   <p className="meta-hint">
                     Use <code>waiting:note-id</code> or <code>blocked-by:note-id</code> in the body to link tasks.
                     The note id is the <code>id:</code> field from the note's frontmatter.
@@ -366,7 +368,7 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
           <section className="meta-section">
             <SectionHead
               icon="calendar_today"
-              label={note.type === 'todo' ? 'Task dates' : 'Dates'}
+              label={isTodo ? 'Task dates' : 'Dates'}
               isOpen={openSections.has('dates')}
               summary={dateSummary}
               onToggle={() => toggleSection('dates')}
@@ -375,12 +377,12 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
               <div className="dp-section-body">
                 <div className="dp-dates-grid">
                   <DateField
-                    label={note.type === 'todo' ? 'Due' : 'Scheduled'}
+                    label={isTodo ? 'Due' : 'Scheduled'}
                     value={note.metadata.dates.scheduled}
                     onChange={(d) => patchMeta({ dates: { ...note.metadata.dates, scheduled: d } })}
                   />
                   <DateField
-                    label={note.type === 'todo' ? 'Done' : 'Completed'}
+                    label={isTodo ? 'Done' : 'Completed'}
                     value={note.metadata.dates.completed}
                     onChange={(d) => patchMeta({ dates: { ...note.metadata.dates, completed: d } })}
                   />
@@ -462,25 +464,25 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
             )}
           </section>
 
-          {/* Classification: statement type only */}
+          {/* Classification */}
           <section className="meta-section">
             <SectionHead
               icon="label"
               label="Classification"
               isOpen={openSections.has('classification')}
-              summary={humanize(note.metadata.classification.statement_type)}
+              summary={humanize(note.metadata.classification.kind)}
               onToggle={() => toggleSection('classification')}
             />
             {openSections.has('classification') && (
               <div className="dp-section-body">
                 <div className="meta-row">
                   <select
-                    value={note.metadata.classification.statement_type}
+                    value={note.metadata.classification.kind}
                     onChange={(e) => patchMeta({
-                      classification: { ...note.metadata.classification, statement_type: e.target.value as StatementType },
+                      classification: { ...note.metadata.classification, kind: e.target.value as ClassificationKind },
                     })}
                   >
-                    {STATEMENT_TYPES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}
+                    {CLASSIFICATION_KINDS.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}
                   </select>
                 </div>
               </div>

@@ -24,7 +24,7 @@ import { Icon } from './components/Icon';
 import { LlmJobTray } from './components/LlmJobTray';
 import { resolveThemeVars, resolveThemeStyle } from './theme/themes';
 import type {
-  BookInfo, TrackedBookInfo, ObjectType,
+  BookInfo, TrackedBookInfo, ClassificationKind, ObjectType,
   CloudBookSummary, CloudSyncProviderDescriptor, CloudSyncProviderStatus,
 } from './types';
 import './App.css';
@@ -639,8 +639,8 @@ function Workspace() {
       .finally(() => setPluginsLoaded(true));
   }, [setPluginRenderLanguages, setPluginsLoaded]);
 
-  const handleNewNote = useCallback(async (type: ObjectType = 'note') => {
-    const note = await api.createNote(type, '');
+  const handleNewNote = useCallback(async (type: ObjectType = 'note', classification?: ClassificationKind) => {
+    const note = await api.createNote(type, '', undefined, classification ? { classification } : undefined);
     openEditor(note.id, 'edit');
   }, [openEditor]);
 

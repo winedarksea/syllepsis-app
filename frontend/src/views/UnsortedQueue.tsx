@@ -7,7 +7,7 @@ import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
-import type { NoteDto, ObjectType, TimelineDateField, NoteVisibility } from '../types';
+import type { ClassificationKind, NoteDto, TimelineDateField, NoteVisibility } from '../types';
 import './UnsortedQueue.css';
 
 const SORT_FIELDS: { id: TimelineDateField; label: string }[] = [
@@ -19,15 +19,30 @@ const SORT_FIELDS: { id: TimelineDateField; label: string }[] = [
 
 type FilterMode = 'unsorted' | 'all' | 'uncategorized';
 
-const OBJECT_TYPE_LABELS: Record<ObjectType | 'all', string> = {
-  all: 'All types', note: 'Note', quote: 'Quote', reference: 'Reference',
-  todo: 'Todo', qa: 'Q&A', commentary: 'Commentary', table: 'Table',
-  picture: 'Picture', drawing: 'Drawing', code: 'Code',
+const CLASSIFICATION_LABELS: Record<ClassificationKind | 'all', string> = {
+  all: 'All classifications',
+  note: 'Note',
+  qa: 'Q&A',
+  reference: 'Reference',
+  quote: 'Quote',
+  code: 'Code',
+  todo: 'Todo',
+  idea: 'Idea',
+  hypothesis: 'Hypothesis',
+  factual_claim: 'Factual Claim',
+  rule_or_requirement: 'Rule Or Requirement',
+  principle: 'Principle',
+  preference: 'Preference',
+  procedure: 'Procedure',
+  context: 'Context',
+  analysis_or_interpretation: 'Analysis Or Interpretation',
+  narrative: 'Narrative',
 };
 
-const ALL_OBJECT_TYPES: Array<ObjectType | 'all'> = [
-  'all', 'note', 'quote', 'reference', 'todo', 'qa',
-  'table', 'picture', 'drawing', 'code',
+const ALL_CLASSIFICATIONS: Array<ClassificationKind | 'all'> = [
+  'all', 'note', 'qa', 'reference', 'quote', 'code', 'todo', 'idea',
+  'hypothesis', 'factual_claim', 'rule_or_requirement', 'principle', 'preference',
+  'procedure', 'context', 'analysis_or_interpretation', 'narrative',
 ];
 
 // Sort key (epoch ms) for a note on the chosen date field; null when the date is absent.
@@ -127,7 +142,7 @@ export function UnsortedQueue() {
   const [visibility, setVisibility] = useState<NoteVisibility>('active');
   const [sortField, setSortField] = useState<TimelineDateField>('updated');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
-  const [typeFilter, setTypeFilter] = useState<ObjectType | 'all'>('all');
+  const [classificationFilter, setClassificationFilter] = useState<ClassificationKind | 'all'>('all');
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -174,8 +189,10 @@ export function UnsortedQueue() {
       if (kb === null) return -1;
       return (ka - kb) * direction;
     });
-    return typeFilter === 'all' ? sorted : sorted.filter((n) => n.type === typeFilter);
-  }, [notes, filterMode, visibility, sortField, sortDir, typeFilter]);
+    return classificationFilter === 'all'
+      ? sorted
+      : sorted.filter((n) => n.metadata.classification.kind === classificationFilter);
+  }, [notes, filterMode, visibility, sortField, sortDir, classificationFilter]);
 
   if (loading) return <div className="uq-state">Loading…</div>;
   if (error) return <div className="uq-state uq-error">{error}</div>;
@@ -244,14 +261,14 @@ export function UnsortedQueue() {
             </button>
           </label>
           <label className="uq-sort">
-            <span className="uq-sort-label">Type</span>
+            <span className="uq-sort-label">Classification</span>
             <select
               className="uq-sort-select"
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value as ObjectType | 'all')}
+              value={classificationFilter}
+              onChange={(e) => setClassificationFilter(e.target.value as ClassificationKind | 'all')}
             >
-              {ALL_OBJECT_TYPES.map((t) => (
-                <option key={t} value={t}>{OBJECT_TYPE_LABELS[t]}</option>
+              {ALL_CLASSIFICATIONS.map((t) => (
+                <option key={t} value={t}>{CLASSIFICATION_LABELS[t]}</option>
               ))}
             </select>
           </label>
@@ -293,7 +310,8 @@ export function UnsortedQueue() {
                 {note.metadata.classification.starred && (
                   <Icon name="star" size={14} fill className="uq-card-star" title="Starred" />
                 )}
-                <span className="uq-card-type">{note.type}</span>
+                <span className="uq-card-type">{CLASSIFICATION_LABELS[note.metadata.classification.kind]}</span>
+                {note.type !== 'note' && <span className="uq-card-type">{note.type}</span>}
               </div>
               {note.summary && (
                 <p className="uq-card-summary">{note.summary}</p>

@@ -12,6 +12,7 @@ function hit(signals: SearchHit['ranking_signals']): SearchHit {
     score: signals.total,
     ranking_signals: signals,
     object_type: 'note',
+    classification: 'note',
     updated: '2026-06-28T00:00:00Z',
     starred: false,
     body_len: 100,

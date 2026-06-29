@@ -3,11 +3,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{NoteVisibility, ObjectType};
+use crate::model::{ClassificationKind, NoteVisibility, ObjectType};
 
 /// Structured search filter. All fields are optional/defaulted so an empty `SearchFilter` (i.e.
 /// `SearchFilter::default()`) reproduces the existing unfiltered behavior — zero categories means
-/// any category passes; zero object_types means any type passes; etc.
+/// any category passes; zero object_types/classifications means any type/classification passes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SearchFilter {
@@ -23,6 +23,8 @@ pub struct SearchFilter {
     pub max_body_len: Option<usize>,
     /// Keep only notes of these object types (empty = all types).
     pub object_types: Vec<ObjectType>,
+    /// Keep only notes of these classifications (empty = all classifications).
+    pub classifications: Vec<ClassificationKind>,
     /// When true, only starred notes pass.
     pub starred_only: bool,
 }

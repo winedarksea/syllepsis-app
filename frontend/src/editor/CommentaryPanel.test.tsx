@@ -49,7 +49,7 @@ function note(): NoteDto {
     sorted: false,
     metadata: {
       classification: {
-        statement_type: 'idea',
+        kind: 'note',
         basis: 'none',
         checkability: 'none',
         stability: 'settled',

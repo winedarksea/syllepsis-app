@@ -58,7 +58,7 @@ pub struct NoteId(String);
 impl NoteId {
     /// Mint a brand-new id with a fresh, time-ordered ulid.
     ///
-    /// `type_prefix` is the object type's id prefix (e.g. `"note"`, `"quote"`); pass it from
+    /// `type_prefix` is the object type's id prefix (e.g. `"note"`, `"table"`); pass it from
     /// [`crate::model::ObjectType`] so this module stays free of a model dependency.
     pub fn generate(type_prefix: &str, title: &str) -> NoteId {
         Self::with_ulid(type_prefix, title, &next_ulid())
@@ -104,7 +104,7 @@ impl NoteId {
         &self.0
     }
 
-    /// The object-type prefix (`"note"`, `"quote"`, …).
+    /// The object-type prefix (`"note"`, `"table"`, …).
     pub fn type_prefix(&self) -> &str {
         self.0.split_once('-').map(|(t, _)| t).unwrap_or(&self.0)
     }
@@ -257,10 +257,10 @@ mod tests {
 
     #[test]
     fn generates_and_parses_round_trip() {
-        let id = NoteId::generate("quote", "Montaigne on Friendship");
+        let id = NoteId::generate("note", "Montaigne on Friendship");
         let parsed = NoteId::parse(id.as_str()).expect("freshly generated id must parse");
         assert_eq!(id, parsed);
-        assert_eq!(id.type_prefix(), "quote");
+        assert_eq!(id.type_prefix(), "note");
         assert_eq!(id.slug(), "montaigne-friendship"); // "on" is a stopword
         assert_eq!(id.ulid().len(), ULID_LEN);
     }
@@ -276,10 +276,10 @@ mod tests {
 
     #[test]
     fn parses_id_with_hyphenated_slug() {
-        let id = NoteId::generate("reference", "well-tempered clavier");
+        let id = NoteId::generate("table", "well-tempered clavier");
         let parsed = NoteId::parse(id.as_str()).unwrap();
         assert_eq!(parsed.slug(), "well-tempered-clavier");
-        assert_eq!(parsed.type_prefix(), "reference");
+        assert_eq!(parsed.type_prefix(), "table");
     }
 
     #[test]
