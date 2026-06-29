@@ -301,12 +301,12 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
         .collect();
     let mut report = ImportReport::default();
     let mut needed_categories: BTreeSet<String> = BTreeSet::new();
+    let mut bundled_commentary_parent_ids: BTreeSet<String> = BTreeSet::new();
+    let mut updated_pack_baseline = false;
 
     // Load or create the manifest for this pack.
     let mut manifest = BookPackManifest::load(&book.root, &pack.manifest.id)?;
     manifest.pack_id = pack.manifest.id.clone();
-    manifest.version = pack.manifest.version.clone();
-    manifest.imported_at = chrono::Utc::now().to_rfc3339();
 
     for pack_note in pack
         .notes
@@ -336,7 +336,9 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
                 let baseline =
                     capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
                 manifest.notes.insert(pack_note.id.clone(), baseline);
+                updated_pack_baseline = true;
                 report.imported.push(pack_note.id.clone());
+                bundled_commentary_parent_ids.insert(pack_note.id.clone());
             }
 
             ImportStatus::Update => {
@@ -352,7 +354,9 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
                 let baseline =
                     capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
                 manifest.notes.insert(pack_note.id.clone(), baseline);
+                updated_pack_baseline = true;
                 report.imported.push(pack_note.id.clone());
+                bundled_commentary_parent_ids.insert(pack_note.id.clone());
             }
 
             ImportStatus::LocallyModified => {
@@ -379,7 +383,9 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
                         let baseline =
                             capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
                         manifest.notes.insert(pack_note.id.clone(), baseline);
+                        updated_pack_baseline = true;
                         report.overwritten.push(pack_note.id.clone());
+                        bundled_commentary_parent_ids.insert(pack_note.id.clone());
                     }
 
                     NoteResolution::Merge => {
@@ -394,7 +400,9 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
                         let baseline =
                             capture_baseline(book, &id, &pack_note.body, &pack.manifest.version)?;
                         manifest.notes.insert(pack_note.id.clone(), baseline);
+                        updated_pack_baseline = true;
                         report.merged.push(pack_note.id.clone());
+                        bundled_commentary_parent_ids.insert(pack_note.id.clone());
                     }
 
                     NoteResolution::Commentary => {
@@ -427,6 +435,7 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
                             &pack.manifest.version,
                         )?;
                         manifest.notes.insert(new_id.to_string(), baseline);
+                        updated_pack_baseline = true;
 
                         // Remove the original note from pack membership so it becomes a fork.
                         if let Ok(mut original) = book.store.read_note(&id) {
@@ -447,9 +456,13 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
         }
     }
 
-    // Import bundled commentary (if any), creating children for imported parents.
+    // Import bundled commentary (if any), creating children only for parents that this import
+    // actually brought in or updated under their original pack id.
     for pack_commentary in &pack.commentary {
         let parent_id_str = pack_commentary.commentary.parent_note_id.to_string();
+        if !bundled_commentary_parent_ids.contains(&parent_id_str) {
+            continue;
+        }
         // Only recreate if the parent was imported/present.
         let Ok(parent_id) = NoteId::parse(&parent_id_str) else {
             continue;
@@ -475,6 +488,11 @@ pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreRes
             commentary_note.body = pack_commentary.body.clone();
             let _ = book.save_commentary_note(&commentary_note);
         }
+    }
+
+    if updated_pack_baseline {
+        manifest.version = pack.manifest.version.clone();
+        manifest.imported_at = chrono::Utc::now().to_rfc3339();
     }
 
     // Persist the updated manifest.
@@ -612,15 +630,16 @@ fn try_crdt_merge(
         return Ok(pack_body.to_string());
     }
     let actor = crate::sync::actor_id_for(&book.root)?;
+    let pack_actor = crate::crdt::ActorId::new(format!("pack-import-{raw_id}"));
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(&baseline.base_crdt_snapshot_b64)
         .map_err(|e| crate::error::CoreError::InvalidBook(format!("decode pack baseline: {e}")))?;
 
     // Build a "proposal" doc from the ancestor, then set it to the pack body.
-    let mut proposal_doc = backend.load_document(&actor, &decoded)?;
+    let mut proposal_doc = backend.load_document(&pack_actor, &decoded)?;
     proposal_doc.set_text(pack_body);
 
-    // Load the live local sidecar and merge.
+    // Load the live local sidecar, fold in the current markdown body, then merge.
     let sidecar = layout::crdt_sidecar_path(&book.root, id);
     let mut current_doc = if sidecar.exists() {
         backend.load_document(&actor, &std::fs::read(sidecar)?)?
@@ -628,6 +647,10 @@ fn try_crdt_merge(
         let note = book.store.read_note(id)?;
         backend.new_document(&actor, &note.body)
     };
+    let current_note = book.store.read_note(id)?;
+    if current_doc.text() != current_note.body {
+        current_doc.set_text(&current_note.body);
+    }
     current_doc.merge(&proposal_doc.snapshot()?)?;
     Ok(current_doc.text())
 }
@@ -711,6 +734,76 @@ mod tests {
         }
     }
 
+    struct VersionUpdateFixture {
+        _target_dir: tempfile::TempDir,
+        target: Book,
+        note_id: String,
+        base_options: ImportOptions,
+        pack_v2: Pack,
+    }
+
+    fn version_update_fixture() -> VersionUpdateFixture {
+        let (_source_dir, source) = book();
+        let note_id = add(&source, "Compost", "v1 body", &["garden"]);
+        source
+            .store
+            .write_category(&Category::new("garden"))
+            .unwrap();
+        let pack_v1 = build_pack(&source, &spec()).unwrap();
+
+        let (target_dir, target) = book();
+        let base_options = selected_options(&note_id);
+        import_pack(&target, &pack_v1, &base_options).unwrap();
+
+        let mut v2_note = source
+            .store
+            .read_note(&NoteId::parse(&note_id).unwrap())
+            .unwrap();
+        v2_note.title = "Compost Updated".into();
+        v2_note.summary = "v1.1 summary".into();
+        v2_note.body = "v1.1 body".into();
+        source.save_note(&v2_note).unwrap();
+        let mut v2_spec = spec();
+        v2_spec.version = "1.1.0".into();
+        let pack_v2 = build_pack(&source, &v2_spec).unwrap();
+
+        VersionUpdateFixture {
+            _target_dir: target_dir,
+            target,
+            note_id,
+            base_options,
+            pack_v2,
+        }
+    }
+
+    fn selected_options(note_id: &str) -> ImportOptions {
+        ImportOptions {
+            selected_note_ids: vec![note_id.to_string()],
+            category_map: BTreeMap::new(),
+            resolutions: BTreeMap::new(),
+        }
+    }
+
+    fn edit_local_body(book: &Book, note_id: &str, body: &str) {
+        let mut edited = get_note(book, note_id).unwrap();
+        edited.body = body.into();
+        update_note(book, edited).unwrap();
+    }
+
+    fn pack_manifest(book: &Book) -> BookPackManifest {
+        BookPackManifest::load(&book.root, "garden-pack").unwrap()
+    }
+
+    fn option_with_resolution(
+        base: &ImportOptions,
+        note_id: &str,
+        resolution: NoteResolution,
+    ) -> ImportOptions {
+        let mut options = base.clone();
+        options.resolutions.insert(note_id.to_string(), resolution);
+        options
+    }
+
     #[test]
     fn export_selects_by_category_and_bundles_used_categories() {
         let (_d, book) = book();
@@ -758,6 +851,212 @@ mod tests {
             imported.metadata.packs.pack_version.as_deref(),
             Some("1.0.0")
         );
+    }
+
+    #[test]
+    fn preview_marks_v1_import_as_update_and_local_edit_as_locally_modified() {
+        let fixture = version_update_fixture();
+
+        let unchanged_preview = preview_import(&fixture.target, &fixture.pack_v2).unwrap();
+        assert_eq!(unchanged_preview.notes[0].status, ImportStatus::Update);
+
+        edit_local_body(
+            &fixture.target,
+            &fixture.note_id,
+            "local compost observations",
+        );
+        let edited_preview = preview_import(&fixture.target, &fixture.pack_v2).unwrap();
+        assert_eq!(
+            edited_preview.notes[0].status,
+            ImportStatus::LocallyModified
+        );
+    }
+
+    #[test]
+    fn reimport_default_skip_preserves_local_note_and_baseline() {
+        let fixture = version_update_fixture();
+        edit_local_body(
+            &fixture.target,
+            &fixture.note_id,
+            "my retained local compost notes",
+        );
+        let original_manifest = pack_manifest(&fixture.target);
+        let original_baseline = original_manifest
+            .notes
+            .get(&fixture.note_id)
+            .cloned()
+            .unwrap();
+
+        let report = import_pack(&fixture.target, &fixture.pack_v2, &fixture.base_options).unwrap();
+
+        assert_eq!(
+            report.skipped_locally_modified,
+            vec![fixture.note_id.clone()]
+        );
+        assert_eq!(
+            get_note(&fixture.target, &fixture.note_id).unwrap().body,
+            "my retained local compost notes"
+        );
+        let manifest = pack_manifest(&fixture.target);
+        assert_eq!(manifest.version, "1.0.0");
+        assert_eq!(
+            manifest.notes.get(&fixture.note_id),
+            Some(&original_baseline)
+        );
+    }
+
+    #[test]
+    fn reimport_overwrite_replaces_body_and_advances_baseline() {
+        let fixture = version_update_fixture();
+        edit_local_body(&fixture.target, &fixture.note_id, "local edit");
+        let options = option_with_resolution(
+            &fixture.base_options,
+            &fixture.note_id,
+            NoteResolution::Overwrite,
+        );
+
+        let report = import_pack(&fixture.target, &fixture.pack_v2, &options).unwrap();
+
+        assert_eq!(report.overwritten, vec![fixture.note_id.clone()]);
+        let updated = get_note(&fixture.target, &fixture.note_id).unwrap();
+        assert_eq!(updated.title, "Compost Updated");
+        assert_eq!(updated.summary, "v1.1 summary");
+        assert_eq!(updated.body, "v1.1 body");
+        assert_eq!(updated.categories, vec!["garden".to_string()]);
+        assert_eq!(
+            updated.metadata.packs.pack_version.as_deref(),
+            Some("1.1.0")
+        );
+        assert!(!updated.metadata.packs.locally_modified);
+
+        let manifest = pack_manifest(&fixture.target);
+        assert_eq!(manifest.version, "1.1.0");
+        let baseline = manifest.notes.get(&fixture.note_id).unwrap();
+        assert_eq!(baseline.pack_version, "1.1.0");
+        assert_eq!(baseline.base_body_sha256, sha256_hex("v1.1 body"));
+    }
+
+    #[test]
+    fn reimport_commentary_creates_proposal_without_touching_note() {
+        let fixture = version_update_fixture();
+        edit_local_body(&fixture.target, &fixture.note_id, "my local body");
+        let original_manifest = pack_manifest(&fixture.target);
+        let original_baseline = original_manifest
+            .notes
+            .get(&fixture.note_id)
+            .cloned()
+            .unwrap();
+        let options = option_with_resolution(
+            &fixture.base_options,
+            &fixture.note_id,
+            NoteResolution::Commentary,
+        );
+
+        let report = import_pack(&fixture.target, &fixture.pack_v2, &options).unwrap();
+
+        assert_eq!(report.commentary_created, vec![fixture.note_id.clone()]);
+        assert_eq!(
+            get_note(&fixture.target, &fixture.note_id).unwrap().body,
+            "my local body"
+        );
+        let commentary = fixture.target.read_all_commentary_notes().unwrap();
+        assert!(commentary.iter().any(|note| {
+            note.body == "v1.1 body"
+                && note
+                    .commentary
+                    .as_ref()
+                    .map(|metadata| metadata.kind == CommentaryKind::Proposal)
+                    .unwrap_or(false)
+        }));
+        let manifest = pack_manifest(&fixture.target);
+        assert_eq!(manifest.version, "1.0.0");
+        assert_eq!(
+            manifest.notes.get(&fixture.note_id),
+            Some(&original_baseline)
+        );
+    }
+
+    #[test]
+    fn reimport_duplicate_keeps_original_as_user_fork_and_tracks_new_pack_note() {
+        let fixture = version_update_fixture();
+        edit_local_body(&fixture.target, &fixture.note_id, "my fork");
+        let options = option_with_resolution(
+            &fixture.base_options,
+            &fixture.note_id,
+            NoteResolution::Duplicate,
+        );
+
+        let report = import_pack(&fixture.target, &fixture.pack_v2, &options).unwrap();
+
+        assert_eq!(report.duplicated, vec![fixture.note_id.clone()]);
+        let original = get_note(&fixture.target, &fixture.note_id).unwrap();
+        assert_eq!(original.body, "my fork");
+        assert!(!original
+            .metadata
+            .packs
+            .packs
+            .contains(&"garden-pack".to_string()));
+        assert_eq!(original.metadata.packs.pack_version, None);
+
+        let all_notes = fixture.target.store.read_all_notes().unwrap();
+        let duplicate = all_notes
+            .iter()
+            .find(|note| note.body == "v1.1 body")
+            .expect("duplicate note should carry the incoming pack body");
+        assert_ne!(duplicate.id.to_string(), fixture.note_id);
+        assert!(duplicate
+            .metadata
+            .packs
+            .packs
+            .contains(&"garden-pack".to_string()));
+        assert_eq!(
+            duplicate.metadata.packs.pack_version.as_deref(),
+            Some("1.1.0")
+        );
+
+        let manifest = pack_manifest(&fixture.target);
+        assert!(!manifest.notes.contains_key(&fixture.note_id));
+        assert!(manifest.notes.contains_key(&duplicate.id.to_string()));
+    }
+
+    #[test]
+    fn reimport_merge_resolution_default_backend_behavior_is_explicit() {
+        let fixture = version_update_fixture();
+        edit_local_body(&fixture.target, &fixture.note_id, "local edit");
+        let options = option_with_resolution(
+            &fixture.base_options,
+            &fixture.note_id,
+            NoteResolution::Merge,
+        );
+
+        let report = import_pack(&fixture.target, &fixture.pack_v2, &options).unwrap();
+
+        assert_eq!(report.merged, vec![fixture.note_id.clone()]);
+        assert_eq!(
+            get_note(&fixture.target, &fixture.note_id).unwrap().body,
+            "v1.1 body"
+        );
+        assert_eq!(pack_manifest(&fixture.target).version, "1.1.0");
+    }
+
+    #[cfg(feature = "loro")]
+    #[test]
+    fn reimport_merge_resolution_loro_three_way_merges_local_and_pack_edits() {
+        let fixture = version_update_fixture();
+
+        edit_local_body(&fixture.target, &fixture.note_id, "v1 body\nlocal addition");
+        let options = option_with_resolution(
+            &fixture.base_options,
+            &fixture.note_id,
+            NoteResolution::Merge,
+        );
+
+        let report = import_pack(&fixture.target, &fixture.pack_v2, &options).unwrap();
+
+        assert_eq!(report.merged, vec![fixture.note_id.clone()]);
+        let merged_body = get_note(&fixture.target, &fixture.note_id).unwrap().body;
+        assert!(merged_body.contains("v1.1 body"));
+        assert!(merged_body.contains("local addition"));
     }
 
     #[test]
@@ -954,6 +1253,55 @@ mod tests {
         // A pack without include_commentary should omit it.
         let pack_no_comm = build_pack(&source, &spec()).unwrap();
         assert!(pack_no_comm.commentary.is_empty());
+    }
+
+    #[test]
+    fn bundled_commentary_respects_selected_parent_notes() {
+        let (_d, source) = book();
+        let selected_id = add(&source, "Compost", "body selected", &["garden"]);
+        let unselected_id = add(&source, "Mulch", "body unselected", &["garden"]);
+        crate::app::commentary::create_commentary(
+            &source,
+            &selected_id,
+            CommentaryKind::Proposal,
+            "selected commentary",
+        )
+        .unwrap();
+        crate::app::commentary::create_commentary(
+            &source,
+            &unselected_id,
+            CommentaryKind::Proposal,
+            "unselected commentary",
+        )
+        .unwrap();
+        source
+            .store
+            .write_category(&Category::new("garden"))
+            .unwrap();
+
+        let initial_pack = build_pack(&source, &spec()).unwrap();
+        let mut commentary_spec = spec();
+        commentary_spec.include_commentary = true;
+        let commentary_pack = build_pack(&source, &commentary_spec).unwrap();
+
+        let (_target_dir, target) = book();
+        let initial_options = ImportOptions {
+            selected_note_ids: vec![selected_id.clone(), unselected_id.clone()],
+            category_map: BTreeMap::new(),
+            resolutions: BTreeMap::new(),
+        };
+        import_pack(&target, &initial_pack, &initial_options).unwrap();
+
+        let selected_only_options = selected_options(&selected_id);
+        import_pack(&target, &commentary_pack, &selected_only_options).unwrap();
+
+        let commentary = target.read_all_commentary_notes().unwrap();
+        assert!(commentary
+            .iter()
+            .any(|note| note.body == "selected commentary"));
+        assert!(!commentary
+            .iter()
+            .any(|note| note.body == "unselected commentary"));
     }
 
     #[test]

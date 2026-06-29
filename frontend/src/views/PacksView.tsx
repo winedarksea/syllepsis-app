@@ -157,6 +157,7 @@ function ImportPanel({ localCategories, onNotice, onError }: PanelProps & { loca
       const initialMap: Record<string, string> = {};
       for (const m of pv.category_suggestions) if (m.suggested_local) initialMap[m.incoming] = m.suggested_local;
       setMap(initialMap);
+      setResolutions({});
     } catch (e) {
       onError(String(e));
     } finally {
