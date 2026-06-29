@@ -239,12 +239,14 @@ pub fn purge_expired(book: &Book, now: DateTime<Utc>) -> CoreResult<Vec<String>>
     let mut purged = Vec::new();
     for note in book.store.read_all_notes()? {
         if is_due_for_purge(&note, delay, now) {
+            crate::app::image_assets::delete_inline_assets(&book.root, &note.body);
             book.delete_note(&note.id)?;
             purged.push(note.id.to_string());
         }
     }
     for note in book.read_all_commentary_notes()? {
         if is_due_for_purge(&note, delay, now) {
+            crate::app::image_assets::delete_inline_assets(&book.root, &note.body);
             book.delete_commentary_note(&note.id)?;
             purged.push(note.id.to_string());
         }
@@ -264,12 +266,14 @@ pub fn purge_all_trash(book: &Book) -> CoreResult<Vec<String>> {
     let mut purged = Vec::new();
     for note in book.store.read_all_notes()? {
         if note.metadata.lifecycle.marked_for_deletion_at.is_some() {
+            crate::app::image_assets::delete_inline_assets(&book.root, &note.body);
             book.delete_note(&note.id)?;
             purged.push(note.id.to_string());
         }
     }
     for note in book.read_all_commentary_notes()? {
         if note.metadata.lifecycle.marked_for_deletion_at.is_some() {
+            crate::app::image_assets::delete_inline_assets(&book.root, &note.body);
             book.delete_commentary_note(&note.id)?;
             purged.push(note.id.to_string());
         }

@@ -65,6 +65,13 @@ impl AssetRegistry {
     pub fn is_empty(&self) -> bool {
         self.by_uuid.is_empty()
     }
+
+    /// Iterate all tracked assets as `(uuid, book-relative-path)` pairs.
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.by_uuid
+            .iter()
+            .map(|(uuid, path)| (uuid.as_str(), path.as_str()))
+    }
 }
 
 /// Ensure `asset_rel` has a UUID sidecar, returning its id. Idempotent: an existing sidecar's id is

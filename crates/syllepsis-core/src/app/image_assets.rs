@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::app::NoteDto;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{AssetMetadata, Note, ObjectType};
-use crate::storage::Book;
+use crate::storage::{Book, NoteStore};
 use crate::sync::{assign_asset_uuid, AssetRegistry};
 
 const ASSETS_DIRECTORY: &str = "assets";
@@ -141,6 +141,98 @@ pub fn inspect_tracked_asset(
         inspected.dimensions,
         inspected.media_type.to_string(),
     )))
+}
+
+/// Delete any `.{name}.importing` temp files left behind by a crashed import.
+pub fn cleanup_stale_imports(book: &Book) -> CoreResult<()> {
+    let assets_dir = book.root.join(ASSETS_DIRECTORY);
+    if !assets_dir.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(&assets_dir)? {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with('.') && name.ends_with(".importing") {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Delete the asset file and `.uuid` sidecar for every inline image referenced in `note_body`.
+/// Best-effort: missing files are silently skipped.
+pub fn delete_inline_assets(book_root: &Path, note_body: &str) {
+    for path in extract_inline_asset_paths(note_body) {
+        let _ = std::fs::remove_file(book_root.join(&path));
+        let _ = std::fs::remove_file(book_root.join(format!("{path}.uuid")));
+    }
+}
+
+/// Delete tracked assets that are not referenced by any note in the book.
+/// Assets modified within the last 5 minutes are left alone (sync grace window).
+pub fn delete_orphaned_assets(book: &Book) -> CoreResult<()> {
+    delete_orphaned_assets_as_of(book, std::time::SystemTime::now())
+}
+
+fn delete_orphaned_assets_as_of(book: &Book, now: std::time::SystemTime) -> CoreResult<()> {
+    let registry = AssetRegistry::scan(&book.root)?;
+    if registry.is_empty() {
+        return Ok(());
+    }
+
+    let mut referenced = std::collections::HashSet::new();
+    let all_notes = book
+        .store
+        .read_all_notes()?
+        .into_iter()
+        .chain(book.read_all_commentary_notes()?.into_iter());
+    for note in all_notes {
+        if let Some(asset) = &note.asset {
+            referenced.insert(asset.uuid.clone());
+        }
+        for path in extract_inline_asset_paths(&note.body) {
+            let sidecar = book.root.join(format!("{path}.uuid"));
+            if let Ok(uuid) = std::fs::read_to_string(&sidecar) {
+                referenced.insert(uuid.trim().to_string());
+            }
+        }
+    }
+
+    let grace = std::time::Duration::from_secs(5 * 60);
+    for (uuid, relative_path) in registry.entries() {
+        if referenced.contains(uuid) {
+            continue;
+        }
+        let asset_path = book.root.join(relative_path);
+        if let Ok(metadata) = std::fs::metadata(&asset_path) {
+            if let Ok(modified) = metadata.modified() {
+                if now.duration_since(modified).unwrap_or_default() < grace {
+                    continue;
+                }
+            }
+        }
+        let _ = std::fs::remove_file(&asset_path);
+        let _ = std::fs::remove_file(book.root.join(format!("{relative_path}.uuid")));
+    }
+    Ok(())
+}
+
+fn extract_inline_asset_paths(body: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    const PREFIX: &str = "](assets/";
+    let mut remaining = body;
+    while let Some(pos) = remaining.find(PREFIX) {
+        remaining = &remaining[pos + 2..]; // skip past "](" → "assets/..."
+        if let Some(end) = remaining.find(')') {
+            paths.push(remaining[..end].to_string());
+            remaining = &remaining[end + 1..];
+        } else {
+            break;
+        }
+    }
+    paths
 }
 
 fn rollback_import(book: &Book, relative_path: &str) {
@@ -343,5 +435,101 @@ mod tests {
         std::fs::write(&source, b"not an image").unwrap();
         assert!(import_tracked_asset(&book, source.to_str().unwrap()).is_err());
         assert!(!book.root.join(ASSETS_DIRECTORY).exists());
+    }
+
+    #[test]
+    fn stale_import_temp_deleted_on_cleanup() {
+        let (_dir, book) = book();
+        let assets_dir = book.root.join(ASSETS_DIRECTORY);
+        std::fs::create_dir_all(&assets_dir).unwrap();
+        let temp_file = assets_dir.join(".foo.importing");
+        std::fs::write(&temp_file, b"partial").unwrap();
+
+        cleanup_stale_imports(&book).unwrap();
+        assert!(!temp_file.exists());
+    }
+
+    #[test]
+    fn real_asset_not_touched_by_import_cleanup() {
+        let (directory, book) = book();
+        let source = directory.path().join("photo.png");
+        image::DynamicImage::new_rgb8(3, 2)
+            .save_with_format(&source, image::ImageFormat::Png)
+            .unwrap();
+        let imported = import_tracked_asset(&book, source.to_str().unwrap()).unwrap();
+        let asset_path = book.root.join(&imported.relative_path);
+        assert!(asset_path.exists());
+
+        cleanup_stale_imports(&book).unwrap();
+        assert!(asset_path.exists());
+    }
+
+    #[test]
+    fn delete_inline_assets_removes_file_and_sidecar() {
+        let (directory, book) = book();
+        let source = directory.path().join("photo.png");
+        image::DynamicImage::new_rgb8(3, 2)
+            .save_with_format(&source, image::ImageFormat::Png)
+            .unwrap();
+        let a = import_tracked_asset(&book, source.to_str().unwrap()).unwrap();
+        let b = import_tracked_asset(&book, source.to_str().unwrap()).unwrap();
+
+        let body = format!("![image]({})", a.relative_path);
+        delete_inline_assets(&book.root, &body);
+
+        assert!(!book.root.join(&a.relative_path).exists(), "referenced asset deleted");
+        assert!(
+            !book.root.join(format!("{}.uuid", a.relative_path)).exists(),
+            "referenced sidecar deleted"
+        );
+        assert!(book.root.join(&b.relative_path).exists(), "unreferenced asset intact");
+        assert!(
+            book.root.join(format!("{}.uuid", b.relative_path)).exists(),
+            "unreferenced sidecar intact"
+        );
+    }
+
+    #[test]
+    fn orphan_scan_removes_unreferenced_assets() {
+        let (directory, book) = book();
+        let source = directory.path().join("photo.png");
+        image::DynamicImage::new_rgb8(3, 2)
+            .save_with_format(&source, image::ImageFormat::Png)
+            .unwrap();
+        let imported = import_tracked_asset(&book, source.to_str().unwrap()).unwrap();
+        let asset_path = book.root.join(&imported.relative_path);
+        let sidecar_path = book.root.join(format!("{}.uuid", imported.relative_path));
+        assert!(asset_path.exists());
+        assert!(sidecar_path.exists());
+
+        // Use a far-future "now" so the 5-minute grace window has long elapsed.
+        let far_future = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+        delete_orphaned_assets_as_of(&book, far_future).unwrap();
+
+        assert!(!asset_path.exists(), "orphaned asset removed");
+        assert!(!sidecar_path.exists(), "orphaned sidecar removed");
+    }
+
+    #[test]
+    fn orphan_scan_keeps_referenced_assets() {
+        let (directory, book) = book();
+        let source = directory.path().join("photo.png");
+        image::DynamicImage::new_rgb8(3, 2)
+            .save_with_format(&source, image::ImageFormat::Png)
+            .unwrap();
+        let imported = import_image_object(&book, source.to_str().unwrap(), None).unwrap();
+        let asset = imported.asset.as_ref().unwrap();
+        let registry = crate::sync::AssetRegistry::scan(&book.root).unwrap();
+        let relative_path = registry.resolve(&asset.uuid).unwrap().to_string();
+        let asset_path = book.root.join(&relative_path);
+        let sidecar_path = book.root.join(format!("{relative_path}.uuid"));
+        assert!(asset_path.exists());
+        assert!(sidecar_path.exists());
+
+        let far_future = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+        delete_orphaned_assets_as_of(&book, far_future).unwrap();
+
+        assert!(asset_path.exists(), "referenced asset kept");
+        assert!(sidecar_path.exists(), "referenced sidecar kept");
     }
 }
