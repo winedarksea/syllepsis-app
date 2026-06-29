@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use chrono::Utc;
 use image::ImageReader;
 use serde::{Deserialize, Serialize};
 
@@ -118,6 +119,154 @@ pub fn import_image_object(
         return Err(error);
     }
     Ok(NoteDto::from_note(&note))
+}
+
+/// Create a new blank Drawing note with a minimal starter SVG containing an empty embedded scene.
+/// The note's body is empty; callers may populate it later (e.g., with linked-note references).
+pub fn create_drawing_object(book: &Book, title: &str) -> CoreResult<NoteDto> {
+    let blank_svg = blank_drawing_svg();
+    let imported = write_asset_bytes(book, blank_svg.as_bytes(), "svg", "image/svg+xml", (800, 600), "drawing.svg")?;
+    let note_title = {
+        let t = title.trim();
+        if t.is_empty() { "Drawing".to_string() } else { t.to_string() }
+    };
+    let mut note = Note::new(
+        ObjectType::Drawing,
+        note_title,
+        book.config.markdown.dialect_version.clone(),
+    );
+    note.asset = Some(AssetMetadata {
+        uuid: imported.uuid.clone(),
+        media_type: imported.media_type.clone(),
+        intrinsic_dimensions: imported.intrinsic_dimensions,
+        original_filename: imported.original_filename.clone(),
+    });
+    if let Err(error) = book.save_note(&note) {
+        rollback_import(book, &imported.relative_path);
+        return Err(error);
+    }
+    Ok(NoteDto::from_note(&note))
+}
+
+/// Overwrite the SVG asset for an existing Drawing note. The SVG is validated by `inspect_svg`
+/// before writing. The asset UUID/filename are preserved; only the file contents change.
+/// Returns the updated note DTO (dimensions may change if the new SVG differs).
+pub fn save_drawing_svg(book: &Book, note_id: &str, svg: &str) -> CoreResult<NoteDto> {
+    let id = crate::id::NoteId::parse(note_id)?;
+    let mut note = book.store.read_note(&id)?;
+    if note.object_type != ObjectType::Drawing {
+        return Err(CoreError::InvalidBook(format!(
+            "note '{note_id}' is not a Drawing"
+        )));
+    }
+    let Some(asset) = &note.asset else {
+        return Err(CoreError::InvalidBook(format!(
+            "Drawing '{note_id}' has no asset"
+        )));
+    };
+    let registry = AssetRegistry::scan(&book.root)?;
+    let relative_path = registry.resolve(&asset.uuid).ok_or_else(|| {
+        CoreError::InvalidBook(format!("asset UUID '{}' not found in registry", asset.uuid))
+    })?;
+    let asset_path = book.root.join(relative_path);
+
+    // Validate the SVG (also normalises the prolog). inspect_svg returns InspectedImage.
+    let inspected = inspect_svg(svg.as_bytes())?;
+    let final_bytes = inspected
+        .normalized_bytes
+        .unwrap_or_else(|| svg.as_bytes().to_vec());
+
+    // Atomic write: temp → rename so a crash never leaves a half-written file.
+    let temp_path = asset_path.with_extension("svg.tmp");
+    std::fs::write(&temp_path, &final_bytes).map_err(|e| {
+        let _ = std::fs::remove_file(&temp_path);
+        CoreError::Io(e)
+    })?;
+    if let Err(e) = std::fs::rename(&temp_path, &asset_path) {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(CoreError::Io(e));
+    }
+
+    // Refresh dimensions in case the canvas was resized.
+    let current_asset = note.asset.as_mut().unwrap();
+    current_asset.intrinsic_dimensions = inspected.dimensions;
+    note.metadata.dates.updated = chrono::Utc::now();
+    book.save_note(&note)?;
+    Ok(NoteDto::from_note(&note))
+}
+
+/// Return the raw SVG text for the Drawing note's asset file. Used by the frontend to seed the
+/// Excalidraw editor. Returns an error if the note is not a Drawing or has no asset.
+pub fn read_drawing_svg(book: &Book, note_id: &str) -> CoreResult<String> {
+    let id = crate::id::NoteId::parse(note_id)?;
+    let note = book.store.read_note(&id)?;
+    if note.object_type != ObjectType::Drawing {
+        return Err(CoreError::InvalidBook(format!(
+            "note '{note_id}' is not a Drawing"
+        )));
+    }
+    let Some(asset) = &note.asset else {
+        return Err(CoreError::InvalidBook(format!(
+            "Drawing '{note_id}' has no asset"
+        )));
+    };
+    let registry = AssetRegistry::scan(&book.root)?;
+    let relative_path = registry.resolve(&asset.uuid).ok_or_else(|| {
+        CoreError::InvalidBook(format!("asset UUID '{}' not found in registry", asset.uuid))
+    })?;
+    let text = std::fs::read_to_string(book.root.join(relative_path))?;
+    Ok(text)
+}
+
+/// Write raw bytes as a new tracked asset (temp → uuid → rename). Returns ImportedAsset on
+/// success. On failure the temp file (if written) is cleaned up before returning the error.
+fn write_asset_bytes(
+    book: &Book,
+    bytes: &[u8],
+    extension: &str,
+    media_type: &str,
+    dimensions: (u32, u32),
+    original_filename: &str,
+) -> CoreResult<ImportedAsset> {
+    let assets_directory = book.root.join(ASSETS_DIRECTORY);
+    std::fs::create_dir_all(&assets_directory)?;
+    let file_stem = ulid::Ulid::new().to_string().to_lowercase();
+    let file_name = format!("{file_stem}.{extension}");
+    let relative_path = format!("{ASSETS_DIRECTORY}/{file_name}");
+    let final_path = assets_directory.join(&file_name);
+    let temporary_path = assets_directory.join(format!(".{file_name}.importing"));
+
+    std::fs::write(&temporary_path, bytes)?;
+    if let Err(error) = std::fs::rename(&temporary_path, &final_path) {
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(error.into());
+    }
+
+    let uuid = match assign_asset_uuid(&book.root, &relative_path) {
+        Ok(uuid) => uuid,
+        Err(error) => {
+            let _ = std::fs::remove_file(&final_path);
+            return Err(error);
+        }
+    };
+
+    Ok(ImportedAsset {
+        uuid,
+        relative_path,
+        media_type: media_type.to_string(),
+        intrinsic_dimensions: dimensions,
+        original_filename: original_filename.to_string(),
+        object_type: ObjectType::Drawing,
+    })
+}
+
+/// A minimal valid SVG with an empty Excalidraw scene embedded in `<metadata>`.
+/// The scene JSON is the same shape Excalidraw emits from `exportToSvg({ exportEmbedScene: true })`.
+fn blank_drawing_svg() -> String {
+    let scene = r#"{"type":"excalidraw","version":2,"source":"syllepsis","elements":[],"appState":{"gridSize":null,"viewBackgroundColor":"transparent"},"files":{}}"#;
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"><metadata><!-- payload-type:application/vnd.excalidraw+json -->{scene}</metadata></svg>"#
+    )
 }
 
 /// Resolve a tracked image UUID to bytes and media type for a self-contained frontend data URL.
@@ -320,7 +469,8 @@ fn inspect_svg(bytes: &[u8]) -> CoreResult<InspectedImage> {
                 || ((name == "href" || name.ends_with(":href"))
                     && !value.is_empty()
                     && !value.starts_with('#')
-                    && !value.starts_with("data:image/"))
+                    && !value.starts_with("data:image/")
+                    && !is_allowed_syllepsis_href(attribute.value().trim()))
                 || value.contains("url(http:")
                 || value.contains("url(https:")
             {
@@ -342,6 +492,19 @@ fn inspect_svg(bytes: &[u8]) -> CoreResult<InspectedImage> {
         normalized_bytes: (normalized.as_ptr() != text.as_ptr())
             .then(|| normalized.as_bytes().to_vec()),
     })
+}
+
+/// Returns true for `syllepsis://note/<ulid-or-id>` hrefs produced by the in-app drawing editor.
+/// The id must be non-empty and contain only URL-safe identifier characters so no path-traversal
+/// or injection is possible through this allowance.
+fn is_allowed_syllepsis_href(href: &str) -> bool {
+    let Some(id) = href.strip_prefix("syllepsis://note/") else {
+        return false;
+    };
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }
 
 fn normalize_svg_text(text: &str) -> CoreResult<&str> {
@@ -598,5 +761,108 @@ mod tests {
 
         assert!(asset_path.exists(), "referenced asset kept");
         assert!(sidecar_path.exists(), "referenced sidecar kept");
+    }
+
+    // ── Drawing-specific tests ────────────────────────────────────────────────
+
+    #[test]
+    fn create_drawing_object_produces_drawing_note_with_svg_asset() {
+        let (_dir, book) = book();
+        let dto = create_drawing_object(&book, "My Canvas").unwrap();
+        assert_eq!(dto.object_type, ObjectType::Drawing);
+        assert_eq!(dto.title, "My Canvas");
+        let asset = dto.asset.unwrap();
+        assert_eq!(asset.media_type, "image/svg+xml");
+        assert_eq!(asset.intrinsic_dimensions, (800, 600));
+        let registry = crate::sync::AssetRegistry::scan(&book.root).unwrap();
+        let rel = registry.resolve(&asset.uuid).unwrap();
+        let stored_svg = std::fs::read_to_string(book.root.join(rel)).unwrap();
+        assert!(stored_svg.contains("<svg"), "stored file is an SVG");
+        assert!(stored_svg.contains("excalidraw"), "SVG contains embedded scene");
+    }
+
+    #[test]
+    fn create_drawing_object_blank_title_defaults_to_drawing() {
+        let (_dir, book) = book();
+        let dto = create_drawing_object(&book, "  ").unwrap();
+        assert_eq!(dto.title, "Drawing");
+    }
+
+    #[test]
+    fn save_drawing_svg_overwrites_asset_and_preserves_uuid() {
+        let (_dir, book) = book();
+        let dto = create_drawing_object(&book, "canvas").unwrap();
+        let original_uuid = dto.asset.as_ref().unwrap().uuid.clone();
+
+        let new_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300"><rect width="10" height="10"/></svg>"#;
+        let updated = save_drawing_svg(&book, &dto.id, new_svg).unwrap();
+
+        assert_eq!(updated.asset.as_ref().unwrap().uuid, original_uuid, "uuid unchanged");
+        assert_eq!(updated.asset.as_ref().unwrap().intrinsic_dimensions, (400, 300));
+    }
+
+    #[test]
+    fn save_drawing_svg_accepts_syllepsis_note_href() {
+        let (_dir, book) = book();
+        let dto = create_drawing_object(&book, "links").unwrap();
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100" width="100" height="100"><a xlink:href="syllepsis://note/01ABCDEFGHJKLMNPQRST"><rect width="10" height="10"/></a></svg>"#;
+        save_drawing_svg(&book, &dto.id, svg).unwrap();
+    }
+
+    #[test]
+    fn save_drawing_svg_rejects_script_tags_and_leaves_prior_file_intact() {
+        let (_dir, book) = book();
+        let dto = create_drawing_object(&book, "secure").unwrap();
+        let asset_uuid = dto.asset.as_ref().unwrap().uuid.clone();
+        let registry = crate::sync::AssetRegistry::scan(&book.root).unwrap();
+        let rel = registry.resolve(&asset_uuid).unwrap().to_string();
+        let original_content = std::fs::read_to_string(book.root.join(&rel)).unwrap();
+
+        let malicious = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><script>alert(1)</script></svg>"#;
+        assert!(save_drawing_svg(&book, &dto.id, malicious).is_err());
+
+        let after = std::fs::read_to_string(book.root.join(rel)).unwrap();
+        assert_eq!(after, original_content, "prior file intact after rejection");
+    }
+
+    #[test]
+    fn save_drawing_svg_rejects_external_href() {
+        let (_dir, book) = book();
+        let dto = create_drawing_object(&book, "external").unwrap();
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100" width="100" height="100"><a xlink:href="https://evil.example/x"><rect width="10" height="10"/></a></svg>"#;
+        assert!(save_drawing_svg(&book, &dto.id, svg).is_err());
+    }
+
+    #[test]
+    fn save_drawing_svg_rejects_non_drawing_note() {
+        let (_dir, book) = book();
+        let text_note = crate::app::commands::create_note(&book, ObjectType::Note, "text note", None).unwrap();
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"></svg>"#;
+        assert!(save_drawing_svg(&book, &text_note.id, svg).is_err());
+    }
+
+    #[test]
+    fn read_drawing_svg_returns_raw_svg_text() {
+        let (_dir, book) = book();
+        let dto = create_drawing_object(&book, "read test").unwrap();
+        let new_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 150" width="200" height="150"><circle cx="50" cy="50" r="10"/></svg>"#;
+        save_drawing_svg(&book, &dto.id, new_svg).unwrap();
+        let read_back = read_drawing_svg(&book, &dto.id).unwrap();
+        assert!(read_back.contains("<svg"), "returns SVG text");
+        assert!(read_back.contains("<circle"), "contains saved element");
+    }
+
+    #[test]
+    fn syllepsis_href_rule_allows_valid_ids() {
+        assert!(is_allowed_syllepsis_href("syllepsis://note/01ABCDEFGHJKLMNPQRST"));
+        assert!(is_allowed_syllepsis_href("syllepsis://note/abc-def_123"));
+    }
+
+    #[test]
+    fn syllepsis_href_rule_rejects_malformed() {
+        assert!(!is_allowed_syllepsis_href("syllepsis://note/"));
+        assert!(!is_allowed_syllepsis_href("syllepsis://note/../etc"));
+        assert!(!is_allowed_syllepsis_href("https://example.com"));
+        assert!(!is_allowed_syllepsis_href("javascript:alert(1)"));
     }
 }

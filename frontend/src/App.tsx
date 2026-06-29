@@ -655,11 +655,17 @@ function Workspace() {
     openEditor(note.id, 'edit');
   }, [openEditor]);
 
+  const handleNewDrawing = useCallback(async () => {
+    const note = await api.createDrawing('Drawing');
+    openEditor(note.id, 'edit');
+  }, [openEditor]);
+
   return (
     <div className={`workspace ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}>
       <Sidebar
         onNewNote={handleNewNote}
         onImportImage={handleImportImage}
+        onNewDrawing={handleNewDrawing}
         isMobileOpen={mobileSidebarOpen}
         onClose={() => setMobileSidebarOpen(false)}
       />

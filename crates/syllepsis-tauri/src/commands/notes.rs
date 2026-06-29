@@ -235,6 +235,40 @@ pub fn asset_data(state: State<AppState>, asset_uuid: String) -> Result<Option<S
     })
 }
 
+/// Create a new blank Drawing note with an empty Excalidraw canvas as the SVG asset.
+#[tauri::command]
+pub fn create_drawing(state: State<AppState>, title: String) -> Result<NoteDto, String> {
+    with_book!(state, book, {
+        let dto = syllepsis_core::app::image_assets::create_drawing_object(book, &title)
+            .map_err(|e| e.to_string())?;
+        let _ = state.local_ai.enqueue_note(book, dto.id.clone(), false);
+        state.invalidate_graph_corpus();
+        Ok(dto)
+    })
+}
+
+/// Save the Excalidraw-exported SVG for a Drawing note (validates, then atomically overwrites).
+#[tauri::command]
+pub fn save_drawing_svg(
+    state: State<AppState>,
+    note_id: String,
+    svg: String,
+) -> Result<NoteDto, String> {
+    with_book!(state, book, {
+        syllepsis_core::app::image_assets::save_drawing_svg(book, &note_id, &svg)
+            .map_err(|e| e.to_string())
+    })
+}
+
+/// Return the raw SVG text for a Drawing note's asset, used to seed the Excalidraw editor.
+#[tauri::command]
+pub fn read_drawing_svg(state: State<AppState>, note_id: String) -> Result<String, String> {
+    with_book!(state, book, {
+        syllepsis_core::app::image_assets::read_drawing_svg(book, &note_id)
+            .map_err(|e| e.to_string())
+    })
+}
+
 /// Read the CSV companion file for a Table note. Returns an empty 5×3 grid if absent.
 #[tauri::command]
 pub fn read_table_data(

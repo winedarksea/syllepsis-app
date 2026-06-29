@@ -92,6 +92,10 @@ export const api = {
   importImageObject: (sourcePath: string, title?: string) =>
     invoke<NoteDto>('import_image_object', { sourcePath, title: title ?? null }),
   assetData: (assetUuid: string) => invoke<string | null>('asset_data', { assetUuid }),
+  createDrawing: (title: string) => invoke<NoteDto>('create_drawing', { title }),
+  saveDrawingSvg: (noteId: string, svg: string) =>
+    invoke<NoteDto>('save_drawing_svg', { noteId, svg }),
+  readDrawingSvg: (noteId: string) => invoke<string>('read_drawing_svg', { noteId }),
   readTableData: (noteId: string) => invoke<string[][]>('read_table_data', { noteId }),
   saveTableData: (noteId: string, rows: string[][]) =>
     invoke<void>('save_table_data', { noteId, rows }),

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { api } from '../lib/api';
+import { useStore } from '../lib/store';
 import { sanitizeHtml } from '../lib/sanitize';
 import { findLiteralMatches } from '../editor/find';
 
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function MarkdownRenderer({ markdown, className, findPattern, findMatchIndex = 0, onMatchCount }: Props) {
+  const { openEditor } = useStore();
   const [html, setHtml] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -54,6 +56,12 @@ export function MarkdownRenderer({ markdown, className, findPattern, findMatchIn
         const link = target?.closest<HTMLAnchorElement>('a[href]');
         const href = link?.getAttribute('href');
         if (!href) return;
+        if (href.startsWith('syllepsis://note/')) {
+          event.preventDefault();
+          const id = href.slice('syllepsis://note/'.length);
+          if (id) openEditor(id);
+          return;
+        }
         if (/^(https?:|mailto:)/i.test(href)) {
           event.preventDefault();
           void openUrl(href);

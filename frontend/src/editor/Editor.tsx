@@ -35,6 +35,7 @@ import { RelatedCarousel } from '../components/RelatedCarousel';
 import { MetaPanel } from './MetaPanel';
 import { LlmToolsMenu } from './LlmToolsMenu';
 import { CommentaryPanel } from './CommentaryPanel';
+import { DrawingEditor } from './DrawingEditor';
 import { clampFindIndex, findLiteralMatches, type EditorFindMatch } from './find';
 import './Editor.css';
 
@@ -460,6 +461,8 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   if (note) noteTypeRef.current = note.type;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  // Drawing: getSvg function exposed by DrawingEditor (null when not mounted).
+  const drawingSvgRef = useRef<(() => Promise<string | null>) | null>(null);
 
   const save = useCallback(async () => {
     if (!note || savingRef.current) return false;
@@ -471,6 +474,18 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         await api.saveTableData(noteId, rowsRef.current);
         const updated = await api.updateNote({ ...note, title, summary, body: '' });
         setNote(updated);
+      } else if (noteTypeRef.current === 'drawing' && drawingSvgRef.current) {
+        const svg = await drawingSvgRef.current();
+        if (svg) {
+          const updated = await api.saveDrawingSvg(noteId, svg);
+          // Sync body link list (best-effort, no throw on failure).
+          const syncFn = (drawingSvgRef as unknown as { _syncLinks?: () => Promise<void> })._syncLinks;
+          if (syncFn) await syncFn().catch(() => {});
+          setNote(updated);
+        }
+        // Also persist title/summary changes.
+        const metaUpdated = await api.updateNote({ ...note, title, summary });
+        setNote(metaUpdated);
       } else {
         // Locked notes: send back the stored body so the draft stays local.
         const isNoteLocked = !!(note.metadata.lifecycle?.lock && note.metadata.lifecycle.lock !== 'none');
@@ -1030,31 +1045,44 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       )}
 
       {isImageObject ? (
-        <div className="editor-image-object">
-          <div className="editor-image-preview">
-            {imageData ? (
-              <img src={imageData} alt={title || note.asset?.original_filename || 'Imported image'} />
-            ) : (
-              <div className="editor-image-missing">Image asset is missing.</div>
-            )}
-          </div>
-          {note.asset && (
-            <div className="editor-image-facts">
-              {note.asset.media_type} · {note.asset.intrinsic_dimensions[0]} × {note.asset.intrinsic_dimensions[1]} · {note.asset.original_filename}
-            </div>
-          )}
-          <textarea
-            className="editor-image-description"
-            value={body}
-            onChange={(event) => {
-              const value = event.target.value;
-              setBody(value);
-              getCurrentBody.current = () => value;
-              markDirty();
+        note.type === 'drawing' ? (
+          <DrawingEditor
+            note={note}
+            markDirty={markDirty}
+            getSvgRef={drawingSvgRef}
+            onSaved={(updated) => {
+              setNote(updated);
+              setBody(updated.body);
+              getCurrentBody.current = () => updated.body;
             }}
-            placeholder="Caption, provenance, or description…"
           />
-        </div>
+        ) : (
+          <div className="editor-image-object">
+            <div className="editor-image-preview">
+              {imageData ? (
+                <img src={imageData} alt={title || note.asset?.original_filename || 'Imported image'} />
+              ) : (
+                <div className="editor-image-missing">Image asset is missing.</div>
+              )}
+            </div>
+            {note.asset && (
+              <div className="editor-image-facts">
+                {note.asset.media_type} · {note.asset.intrinsic_dimensions[0]} × {note.asset.intrinsic_dimensions[1]} · {note.asset.original_filename}
+              </div>
+            )}
+            <textarea
+              className="editor-image-description"
+              value={body}
+              onChange={(event) => {
+                const value = event.target.value;
+                setBody(value);
+                getCurrentBody.current = () => value;
+                markDirty();
+              }}
+              placeholder="Caption, provenance, or description…"
+            />
+          </div>
+        )
       ) : mode === 'read' ? (
         <div className="editor-read-wrap">
           <MarkdownRenderer

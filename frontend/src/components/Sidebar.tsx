@@ -10,12 +10,12 @@ import './Sidebar.css';
 interface Props {
   onNewNote: (type?: ObjectType, classification?: ClassificationKind) => void;
   onImportImage: () => void;
+  onNewDrawing: () => void;
   isMobileOpen?: boolean;
   onClose?: () => void;
 }
 
-// Object types a user can create directly from the New menu. (Picture/Drawing need asset
-// authoring that isn't built yet; Commentary is produced by the AI tools, not created by hand.)
+// Object types a user can create directly from the New menu. (Commentary is produced by AI tools.)
 const NEW_TYPES: { type: ObjectType; classification?: ClassificationKind; label: string }[] = [
   { type: 'note', classification: 'note', label: 'Note' },
   { type: 'note', classification: 'quote', label: 'Quote' },
@@ -40,7 +40,7 @@ const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[]
   { view: 'diagnostics', icon: 'monitor_heart', label: 'Diagnostics' },
 ];
 
-export function Sidebar({ onNewNote, onImportImage, isMobileOpen = false, onClose }: Props) {
+export function Sidebar({ onNewNote, onImportImage, onNewDrawing, isMobileOpen = false, onClose }: Props) {
   const { view, setView, categories, unsortedCount, hideUnsortedBadge, diagnosticsIssueCount, activeCategory, setActiveCategory, theme, toggleTheme, closeBook } = useStore();
   const [newMenuOpen, setNewMenuOpen] = useState(false);
 
@@ -160,6 +160,12 @@ export function Sidebar({ onNewNote, onImportImage, isMobileOpen = false, onClos
     onClose?.();
   }, [onClose, onImportImage]);
 
+  const handleNewDrawing = useCallback(() => {
+    setNewMenuOpen(false);
+    onNewDrawing();
+    onClose?.();
+  }, [onClose, onNewDrawing]);
+
   const handleCloseBook = useCallback(() => {
     closeBook();
     closeMobileDrawer();
@@ -261,6 +267,12 @@ export function Sidebar({ onNewNote, onImportImage, isMobileOpen = false, onClos
                   {t.label}
                 </button>
               ))}
+              <button
+                className="sidebar-new-menu-item"
+                onClick={handleNewDrawing}
+              >
+                New Drawing
+              </button>
               <button
                 className="sidebar-new-menu-item"
                 onClick={handleImportImage}
