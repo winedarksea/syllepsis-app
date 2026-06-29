@@ -10,6 +10,7 @@ import { useStore } from '../lib/store';
 import { PageHeader } from '../components/PageHeader';
 import type { SearchResults, CrossBookNote, ObjectType, SearchFilter, NoteVisibility } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
+import { formatSearchRelevancePercent } from '../lib/searchRelevance';
 import './SearchView.css';
 
 const ALL_OBJECT_TYPES: ObjectType[] = [
@@ -200,15 +201,10 @@ export function SearchView() {
     setAllBooks(false);
   }, []);
 
-  // Score display: normalized 0–100% relative to top hit
-  const topScore = results?.hits[0]?.score ?? 0;
-  function hitPct(score: number): string {
-    if (topScore <= 0) return '0%';
-    return `${Math.round((score / topScore) * 100)}%`;
-  }
   function scoreTooltip(hit: SearchResults['hits'][0]): string {
     const s = hit.ranking_signals;
     return (
+      `Relevance ${formatSearchRelevancePercent(hit)} | ` +
       `RRF total ${s.total.toFixed(3)} = ` +
       `exact ${s.exact.toFixed(3)} + bm25 ${s.bm25.toFixed(3)} + vector ${s.vector.toFixed(3)}` +
       (s.vector_similarity > 0 ? ` | cos ${s.vector_similarity.toFixed(3)}` : '')
@@ -427,7 +423,7 @@ export function SearchView() {
                       title={scoreTooltip(hit)}
                       aria-label="Ranking score details"
                     >
-                      {hitPct(hit.score)}
+                      {formatSearchRelevancePercent(hit)}
                     </span>
                     <button
                       className="sv-hit-open"
