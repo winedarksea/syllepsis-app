@@ -85,7 +85,8 @@ impl NoteEmbeddingSidecar {
     }
 
     pub fn full_note_is_fresh(&self, note: &Note) -> bool {
-        if note.title.trim().is_empty() && note.body.trim().is_empty() {
+        let content_is_empty = note.body.trim().is_empty() && note.summary.trim().is_empty();
+        if note.title.trim().is_empty() && content_is_empty {
             return self.full_note.is_none();
         }
         self.full_note
@@ -99,7 +100,8 @@ pub fn summary_source_hash(note: &Note) -> [u8; 32] {
 }
 
 pub fn full_note_source_hash(note: &Note) -> [u8; 32] {
-    hash_fields(&[note.title.as_bytes(), note.body.as_bytes()])
+    let content = if note.body.trim().is_empty() { note.summary.as_bytes() } else { note.body.as_bytes() };
+    hash_fields(&[note.title.as_bytes(), content])
 }
 
 fn hash_fields(fields: &[&[u8]]) -> [u8; 32] {

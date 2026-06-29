@@ -356,10 +356,11 @@ impl EmbeddingProvider for OnnxEmbedder {
     }
 
     fn embed_full_note(&self, note: &Note) -> CoreResult<Option<Embedding>> {
-        let full_note = if note.title.trim().is_empty() && note.body.trim().is_empty() {
+        let content = if note.body.trim().is_empty() { &note.summary } else { &note.body };
+        let full_note = if note.title.trim().is_empty() && content.trim().is_empty() {
             None
         } else {
-            Some(self.run_ids(self.document_ids(&note.title, &note.body, true)?)?)
+            Some(self.run_ids(self.document_ids(&note.title, content, true)?)?)
         };
         Ok(full_note)
     }
