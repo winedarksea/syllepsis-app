@@ -143,6 +143,15 @@
   fill: var(--color-accent);
   stroke: var(--color-text-inverse);
   stroke-width: 2px;
+  filter:
+    drop-shadow(0 0 1.5px color-mix(in srgb, #000 50%, transparent))
+    drop-shadow(0 0 1px color-mix(in srgb, #fff 45%, transparent));
+  transition: filter 120ms ease;
+}
+.wv-svg-pin:hover circle {
+  filter:
+    drop-shadow(0 1px 2px color-mix(in srgb, #000 60%, transparent))
+    drop-shadow(0 0 5px color-mix(in srgb, var(--color-accent) 80%, transparent));
 }
 .wv-svg-pin text,
 .wv-svg-region-marker text {
@@ -161,7 +170,18 @@
   stroke: var(--color-secondary);
   stroke-dasharray: 5 4;
 }
-.wv-svg-region-marker rect { fill: var(--color-secondary); }
+.wv-svg-region-marker rect {
+  fill: var(--color-secondary);
+  filter:
+    drop-shadow(0 0 1.5px color-mix(in srgb, #000 50%, transparent))
+    drop-shadow(0 0 1px color-mix(in srgb, #fff 45%, transparent));
+  transition: filter 120ms ease;
+}
+.wv-svg-region-marker:hover rect {
+  filter:
+    drop-shadow(0 1px 2px color-mix(in srgb, #000 60%, transparent))
+    drop-shadow(0 0 5px color-mix(in srgb, var(--color-secondary) 80%, transparent));
+}
 .wv-missing-backdrop {
   fill: var(--color-text-tertiary);
   text-anchor: middle;
