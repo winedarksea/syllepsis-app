@@ -1236,4 +1236,320 @@ mod tests {
             crate::model::PriorRef::Note(_)
         ));
     }
+
+    // ── merge_notes ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn merge_notes_uses_hr_separator_between_sections() {
+        let (_dir, book) = book();
+        let mut target = create_note(&book, ObjectType::Note, "t", None).unwrap();
+        target.body = "first".into();
+        target = update_note(&book, target).unwrap();
+        let mut source = create_note(&book, ObjectType::Note, "s", None).unwrap();
+        source.body = "second".into();
+        source = update_note(&book, source).unwrap();
+
+        let merged = merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: target.id.clone(),
+                source_note_ids: vec![source.id],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(merged.body, "first\n\n---\n\nsecond");
+    }
+
+    #[test]
+    fn merge_notes_skips_empty_source_body() {
+        let (_dir, book) = book();
+        let mut target = create_note(&book, ObjectType::Note, "t", None).unwrap();
+        target.body = "content".into();
+        target = update_note(&book, target).unwrap();
+        let source = create_note(&book, ObjectType::Note, "empty", None).unwrap();
+
+        let merged = merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: target.id.clone(),
+                source_note_ids: vec![source.id],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(merged.body, "content");
+    }
+
+    #[test]
+    fn merge_notes_adopts_source_summary_when_target_has_none() {
+        let (_dir, book) = book();
+        let target = create_note(&book, ObjectType::Note, "t", None).unwrap();
+        let mut source = create_note(&book, ObjectType::Note, "s", None).unwrap();
+        source.summary = "source summary".into();
+        source = update_note(&book, source).unwrap();
+
+        let merged = merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: target.id.clone(),
+                source_note_ids: vec![source.id],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(merged.summary, "source summary");
+    }
+
+    #[test]
+    fn merge_notes_keeps_target_summary_when_set() {
+        let (_dir, book) = book();
+        let mut target = create_note(&book, ObjectType::Note, "t", None).unwrap();
+        target.summary = "target summary".into();
+        target = update_note(&book, target).unwrap();
+        let mut source = create_note(&book, ObjectType::Note, "s", None).unwrap();
+        source.summary = "source summary".into();
+        source = update_note(&book, source).unwrap();
+
+        let merged = merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: target.id.clone(),
+                source_note_ids: vec![source.id],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(merged.summary, "target summary");
+    }
+
+    #[test]
+    fn merge_notes_adopts_source_location_when_target_has_none() {
+        let (_dir, book) = book();
+        let target = create_note(&book, ObjectType::Note, "t", None).unwrap();
+        let mut source = create_note(&book, ObjectType::Note, "s", None).unwrap();
+        source.location = Some("Paris".into());
+        source = update_note(&book, source).unwrap();
+
+        let merged = merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: target.id.clone(),
+                source_note_ids: vec![source.id],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(merged.location.as_deref(), Some("Paris"));
+    }
+
+    #[test]
+    fn merge_notes_skips_when_source_id_equals_target_id() {
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "n", None).unwrap();
+        note.body = "solo".into();
+        note = update_note(&book, note).unwrap();
+
+        let merged = merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: note.id.clone(),
+                source_note_ids: vec![note.id.clone()],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(merged.body, "solo");
+    }
+
+    #[test]
+    fn merge_notes_deduplicates_categories() {
+        let (_dir, book) = book();
+        let mut target = create_note(&book, ObjectType::Note, "t", None).unwrap();
+        target.categories = vec!["shared".into(), "only-target".into()];
+        target = update_note(&book, target).unwrap();
+        let mut source = create_note(&book, ObjectType::Note, "s", None).unwrap();
+        source.categories = vec!["shared".into(), "only-source".into()];
+        source = update_note(&book, source).unwrap();
+
+        let merged = merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: target.id.clone(),
+                source_note_ids: vec![source.id],
+            },
+        )
+        .unwrap();
+
+        let shared_count = merged
+            .categories
+            .iter()
+            .filter(|c| c.as_str() == "shared")
+            .count();
+        assert_eq!(shared_count, 1);
+        assert!(merged.categories.contains(&"only-target".to_string()));
+        assert!(merged.categories.contains(&"only-source".to_string()));
+    }
+
+    #[test]
+    fn merge_notes_combines_multiple_sources() {
+        let (_dir, book) = book();
+        let mut target = create_note(&book, ObjectType::Note, "t", None).unwrap();
+        target.body = "A".into();
+        target = update_note(&book, target).unwrap();
+        let mut s1 = create_note(&book, ObjectType::Note, "s1", None).unwrap();
+        s1.body = "B".into();
+        s1 = update_note(&book, s1).unwrap();
+        let mut s2 = create_note(&book, ObjectType::Note, "s2", None).unwrap();
+        s2.body = "C".into();
+        s2 = update_note(&book, s2).unwrap();
+
+        let merged = merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: target.id.clone(),
+                source_note_ids: vec![s1.id, s2.id],
+            },
+        )
+        .unwrap();
+
+        assert!(merged.body.contains("A"));
+        assert!(merged.body.contains("B"));
+        assert!(merged.body.contains("C"));
+    }
+
+    // ── fork_note ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn fork_note_records_lineage_in_metadata() {
+        let (_dir, book) = book();
+        let source = create_note(&book, ObjectType::Note, "original", None).unwrap();
+
+        let forked = fork_note(&book, &source.id).unwrap();
+
+        let fork_info = forked.metadata.fork.as_ref().unwrap();
+        assert_eq!(fork_info.forked_from.to_string(), source.id);
+    }
+
+    #[test]
+    fn fork_note_inherits_categories_and_summary() {
+        let (_dir, book) = book();
+        let mut source = create_note(&book, ObjectType::Note, "src", None).unwrap();
+        source.summary = "a summary".into();
+        source.categories = vec!["research".into()];
+        let source = update_note(&book, source).unwrap();
+
+        let forked = fork_note(&book, &source.id).unwrap();
+
+        assert_eq!(forked.summary, "a summary");
+        assert_eq!(forked.categories, vec!["research".to_string()]);
+    }
+
+    // ── split_note ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn split_note_uses_original_title_with_split_suffix_when_no_second_title() {
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "whole", None).unwrap();
+        note.body = "first\n\nsecond".into();
+        note = update_note(&book, note).unwrap();
+
+        let (_, second) = split_note(
+            &book,
+            SplitNoteRequest {
+                note_id: note.id.clone(),
+                split_at: "first".len(),
+                second_title: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(second.title, "whole (split)");
+    }
+
+    #[test]
+    fn split_note_clamps_offset_beyond_body_length() {
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "n", None).unwrap();
+        note.body = "short".into();
+        note = update_note(&book, note).unwrap();
+
+        let (first, second) = split_note(
+            &book,
+            SplitNoteRequest {
+                note_id: note.id.clone(),
+                split_at: 9999,
+                second_title: Some("tail".into()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(first.body, "short");
+        assert_eq!(second.body, "");
+    }
+
+    #[test]
+    fn split_note_second_inherits_summary_and_location() {
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "n", None).unwrap();
+        note.body = "part one\n\npart two".into();
+        note.summary = "the summary".into();
+        note.location = Some("London".into());
+        note = update_note(&book, note).unwrap();
+
+        let (_, second) = split_note(
+            &book,
+            SplitNoteRequest {
+                note_id: note.id.clone(),
+                split_at: "part one".len(),
+                second_title: Some("two".into()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(second.summary, "the summary");
+        assert_eq!(second.location.as_deref(), Some("London"));
+    }
+
+    #[test]
+    fn split_note_rejects_non_char_boundary() {
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "n", None).unwrap();
+        note.body = "café".into();
+        note = update_note(&book, note).unwrap();
+
+        // byte 4 is the second byte of 'é' (U+00E9 encodes as 0xC3 0xA9), not a boundary
+        let result = split_note(
+            &book,
+            SplitNoteRequest {
+                note_id: note.id.clone(),
+                split_at: 4,
+                second_title: None,
+            },
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_note_trims_whitespace_at_split_boundary() {
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "n", None).unwrap();
+        note.body = "first   \n\n   second".into();
+        note = update_note(&book, note).unwrap();
+
+        let split_at = "first   ".len();
+        let (first, second) = split_note(
+            &book,
+            SplitNoteRequest {
+                note_id: note.id.clone(),
+                split_at,
+                second_title: Some("s".into()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(first.body, "first");
+        assert_eq!(second.body, "second");
+    }
 }
