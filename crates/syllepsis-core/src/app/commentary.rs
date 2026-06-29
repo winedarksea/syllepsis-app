@@ -219,7 +219,7 @@ pub fn mark_parent_commentary_for_deletion(book: &Book, parent_note_id: &str) ->
         if commentary
             .commentary
             .as_ref()
-            .is_some_and(|meta| meta.parent_note_id == parent)
+            .is_some_and(|meta| meta.parent_note_id.same_identity(&parent))
         {
             commentary.metadata.lifecycle.marked_for_deletion_at = Some(Utc::now());
             commentary.metadata.dates.updated = Utc::now();
@@ -235,7 +235,7 @@ pub fn delete_parent_commentary_now(book: &Book, parent_note_id: &str) -> CoreRe
         if commentary
             .commentary
             .as_ref()
-            .is_some_and(|meta| meta.parent_note_id == parent)
+            .is_some_and(|meta| meta.parent_note_id.same_identity(&parent))
         {
             book.delete_commentary_note(&commentary.id)?;
         }
@@ -375,7 +375,10 @@ fn fact_check_passes_for(book: &Book, commentary_id: &NoteId) -> CoreResult<bool
             meta.kind == CommentaryKind::FactCheck
                 && meta.status != CommentaryStatus::Dismissed
                 && meta.fact_check_passed == Some(true)
-                && meta.approves_commentary_id.as_ref() == Some(commentary_id)
+                && meta
+                    .approves_commentary_id
+                    .as_ref()
+                    .is_some_and(|approved| approved.same_identity(commentary_id))
         })
     }))
 }
@@ -386,7 +389,7 @@ fn summary_if_matches_parent(
     include_resolved: bool,
 ) -> Option<CommentarySummary> {
     let metadata = note.commentary.clone()?;
-    if &metadata.parent_note_id != parent {
+    if !metadata.parent_note_id.same_identity(parent) {
         return None;
     }
     if !include_resolved

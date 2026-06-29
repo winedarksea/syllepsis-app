@@ -92,3 +92,52 @@ fn dismiss_and_pin_update_commentary_lifecycle() {
     assert_eq!(meta.status, CommentaryStatus::Pinned);
     assert_eq!(meta.kind, CommentaryKind::Footnote);
 }
+
+#[test]
+fn commentary_stays_linked_when_parent_slug_changes() {
+    let (_dir, book) = book();
+    let mut parent = note(&book, "body");
+    let original_id = parent.id.clone();
+    create_commentary(
+        &book,
+        original_id.as_str(),
+        CommentaryKind::Comment,
+        "margin note",
+    )
+    .unwrap();
+
+    parent.retitle("Renamed Parent");
+    book.save_note(&parent).unwrap();
+
+    let listed = list_commentary(&book, parent.id.as_str(), false).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].body, "margin note");
+    assert!(listed[0].metadata.parent_note_id.same_identity(&parent.id));
+}
+
+#[test]
+fn parent_commentary_deletion_uses_stable_identity() {
+    let (_dir, book) = book();
+    let mut parent = note(&book, "body");
+    let original_id = parent.id.clone();
+    create_commentary(
+        &book,
+        original_id.as_str(),
+        CommentaryKind::Comment,
+        "margin note",
+    )
+    .unwrap();
+
+    parent.retitle("Renamed Parent");
+    book.save_note(&parent).unwrap();
+    mark_parent_commentary_for_deletion(&book, parent.id.as_str()).unwrap();
+
+    let listed = list_commentary(&book, parent.id.as_str(), false).unwrap();
+    assert!(listed.is_empty());
+    let resolved = list_commentary(&book, parent.id.as_str(), true).unwrap();
+    assert_eq!(resolved.len(), 1);
+    assert!(resolved[0]
+        .metadata
+        .parent_note_id
+        .same_identity(&parent.id));
+}
