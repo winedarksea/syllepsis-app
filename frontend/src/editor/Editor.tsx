@@ -1165,13 +1165,39 @@ function displayNeighbor(neighbor: { title: string; summary: string }) {
 }
 
 function centerTextareaSelection(textarea: HTMLTextAreaElement, text: string, offset: number) {
+  const markerTop = measureTextareaOffsetTop(textarea, text, offset);
+  textarea.scrollTop = Math.max(0, markerTop - textarea.clientHeight / 2);
+}
+
+function measureTextareaOffsetTop(textarea: HTMLTextAreaElement, text: string, offset: number): number {
   const style = getComputedStyle(textarea);
-  const lineHeight = Number.parseFloat(style.lineHeight) || 20;
-  const paddingTop = Number.parseFloat(style.paddingTop) || 0;
-  const linesBefore = text.slice(0, offset).split('\n').length - 1;
-  const targetTop = paddingTop + linesBefore * lineHeight;
-  textarea.scrollTop = Math.max(0, targetTop - textarea.clientHeight / 2);
-  textarea.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+  const mirror = document.createElement('div');
+  const marker = document.createElement('span');
+  const before = text.slice(0, offset);
+
+  mirror.style.position = 'fixed';
+  mirror.style.left = '-10000px';
+  mirror.style.top = '0';
+  mirror.style.visibility = 'hidden';
+  mirror.style.width = `${textarea.clientWidth}px`;
+  mirror.style.boxSizing = style.boxSizing;
+  mirror.style.padding = style.padding;
+  mirror.style.border = style.border;
+  mirror.style.font = style.font;
+  mirror.style.letterSpacing = style.letterSpacing;
+  mirror.style.lineHeight = style.lineHeight;
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.overflowWrap = 'break-word';
+  mirror.style.wordBreak = style.wordBreak;
+  mirror.style.tabSize = style.tabSize;
+
+  mirror.append(document.createTextNode(before));
+  marker.textContent = text[offset] ?? '.';
+  mirror.append(marker);
+  document.body.append(mirror);
+  const top = marker.offsetTop;
+  mirror.remove();
+  return top;
 }
 
 function NoteModeSwitcher({
