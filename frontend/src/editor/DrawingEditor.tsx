@@ -3,8 +3,9 @@
 // Notes without an embedded scene open view-only (externally imported SVGs).
 
 import '@excalidraw/excalidraw/index.css';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Excalidraw, exportToSvg, loadFromBlob } from '@excalidraw/excalidraw';
+import { Component, useCallback, useEffect, useRef, useState } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
+import { Excalidraw, exportToSvg, serializeAsJSON, hashElementsVersion } from '@excalidraw/excalidraw';
 import type {
   ExcalidrawImperativeAPI,
   ExcalidrawInitialDataState,
@@ -27,13 +28,38 @@ interface Props {
 
 type WithLink = { link?: string | null };
 
-/** Extract the Excalidraw JSON scene from inside an SVG's <metadata> block. */
+/** Decode the XML entities that XMLSerializer escapes inside textContent so the
+ *  recovered string is valid JSON again. */
+function decodeXmlEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+/** Extract the Excalidraw JSON scene from inside an SVG's <metadata> block.
+ *  The scene may be embedded bare, preceded by a comment marker
+ *  (`<!-- payload-type:... -->{json}`, our create format), or wrapped inside a
+ *  comment (`<!-- {json} -->`, Excalidraw's own UI export). We try the metadata
+ *  content with all comments stripped, then each comment's inner text, and use
+ *  the first candidate that looks like an Excalidraw scene. */
 function extractSceneFromSvg(svg: string): string | null {
   const metaMatch = svg.match(/<metadata[^>]*>([\s\S]*?)<\/metadata>/i);
   if (!metaMatch) return null;
-  const inner = metaMatch[1].replace(/<!--.*?-->/gs, '').trim();
-  if (!inner.includes('"type":"excalidraw"')) return null;
-  return inner;
+  const content = metaMatch[1];
+  const candidates: string[] = [content.replace(/<!--[\s\S]*?-->/g, '').trim()];
+  for (const m of content.matchAll(/<!--([\s\S]*?)-->/g)) {
+    candidates.push(m[1].trim());
+  }
+  for (const candidate of candidates) {
+    if (candidate.includes('"type":"excalidraw"')) {
+      return decodeXmlEntities(candidate);
+    }
+  }
+  return null;
 }
 
 /** Return `syllepsis://note/<id>` links present in an element list. */
@@ -116,10 +142,49 @@ function postProcessSvgLinks(svgString: string, elements: readonly ExcalidrawEle
   return result;
 }
 
+/** Catches render-phase errors from the Excalidraw canvas so a single failure renders an
+ *  inline message instead of white-screening the entire app, and surfaces the real error
+ *  (useful for diagnosing webview-specific failures). */
+class CanvasErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    // eslint-disable-next-line no-console
+    console.error('Excalidraw canvas crashed:', error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="drawing-editor-error">
+          <div className="drawing-editor-viewonly-body">
+            <strong className="drawing-editor-viewonly-title">The drawing canvas failed to load</strong>
+            <code className="drawing-editor-viewonly-reason">
+              {this.state.error.message || String(this.state.error)}
+            </code>
+            <span className="drawing-editor-viewonly-detail">
+              {this.state.error.stack}
+            </span>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
   const { openEditor } = useStore();
   const [initialData, setInitialData] = useState<ExcalidrawInitialDataState | null>(null);
   const [isViewOnly, setIsViewOnly] = useState(false);
+  const [viewOnlyReason, setViewOnlyReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
@@ -130,6 +195,10 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
   const latestAppStateRef = useRef<AppState | null>(null);
   const latestFilesRef = useRef<BinaryFiles>({});
   const lastSavedLinkIdsRef = useRef<Set<string>>(parseLinkedNoteIds(note.body));
+  // Hash of the last scene we acted on. Excalidraw fires onChange very frequently — including
+  // on re-renders and after a save re-renders us — so we only mark the note dirty when the
+  // element content actually changed, preventing perpetual no-op autosaves.
+  const lastSceneHashRef = useRef<number | null>(null);
 
   // Load scene from the SVG asset on mount / note change.
   useEffect(() => {
@@ -138,26 +207,38 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
     setError(null);
     setInitialData(null);
     setIsViewOnly(false);
+    setViewOnlyReason(null);
     api.readDrawingSvg(note.id)
       .then(async (svg) => {
         if (cancelled) return;
         const sceneJson = extractSceneFromSvg(svg);
         if (!sceneJson) {
           setIsViewOnly(true);
+          setViewOnlyReason('No Excalidraw scene found in SVG metadata.');
           setLoading(false);
           return;
         }
         try {
-          const blob = new Blob([sceneJson], { type: 'application/json' });
-          const loaded = await loadFromBlob(blob, null, null);
+          const parsed = JSON.parse(sceneJson) as {
+            elements?: ExcalidrawElement[];
+            appState?: Partial<AppState>;
+            files?: BinaryFiles;
+          };
+          const data: ExcalidrawInitialDataState = {
+            elements: parsed.elements ?? [],
+            appState: parsed.appState ?? {},
+            files: parsed.files ?? {},
+          };
           if (!cancelled) {
-            setInitialData(loaded as ExcalidrawInitialDataState);
-            if (loaded && 'elements' in loaded && Array.isArray((loaded as { elements: unknown }).elements)) {
-              latestElementsRef.current = (loaded as { elements: ExcalidrawElement[] }).elements;
-            }
+            setInitialData(data);
+            latestElementsRef.current = data.elements ?? [];
+            lastSceneHashRef.current = hashElementsVersion(data.elements ?? []);
           }
-        } catch {
-          if (!cancelled) setIsViewOnly(true);
+        } catch (e) {
+          if (!cancelled) {
+            setIsViewOnly(true);
+            setViewOnlyReason(String(e));
+          }
         }
         if (!cancelled) setLoading(false);
       })
@@ -179,7 +260,16 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
         const elements = latestElementsRef.current;
         const appState = latestAppStateRef.current ?? {};
         const files = latestFilesRef.current;
-        const svgEl = await exportToSvg({ elements, appState, files, exportEmbedScene: true });
+        const svgEl = await exportToSvg({ elements, appState, files });
+        // Inject the scene JSON into <metadata> so it can be restored on reopen.
+        // exportToSvg does not embed the scene itself — we do it manually.
+        const sceneJson = serializeAsJSON(elements, appState, files, 'local');
+        let metaEl = svgEl.querySelector('metadata');
+        if (!metaEl) {
+          metaEl = document.createElementNS('http://www.w3.org/2000/svg', 'metadata');
+          svgEl.insertBefore(metaEl, svgEl.firstChild);
+        }
+        metaEl.textContent = sceneJson;
         const svgString = new XMLSerializer().serializeToString(svgEl);
         return postProcessSvgLinks(svgString, elements);
       } catch {
@@ -224,10 +314,23 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
       latestElementsRef.current = elements;
       latestAppStateRef.current = appState;
       latestFilesRef.current = files;
+      // Only flag the note dirty (and thus schedule an autosave) when the drawing's elements
+      // actually changed — not on the spurious onChange events Excalidraw emits on re-render.
+      const hash = hashElementsVersion(elements);
+      if (hash === lastSceneHashRef.current) return;
+      lastSceneHashRef.current = hash;
       markDirty();
     },
     [markDirty],
   );
+
+  // Must be a stable reference: Excalidraw invokes this inside an effect keyed on the
+  // callback identity and calls setState there, so an inline arrow (new identity every
+  // render) re-runs that effect on each parent re-render and triggers an infinite update
+  // loop ("Maximum update depth exceeded").
+  const handleExcalidrawApi = useCallback((a: ExcalidrawImperativeAPI) => {
+    excalidrawApiRef.current = a;
+  }, []);
 
   const handleLinkNote = useCallback(
     (targetNote: NoteDto) => {
@@ -267,7 +370,16 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
   if (isViewOnly) {
     return (
       <div className="drawing-editor-viewonly">
-        <span className="drawing-editor-viewonly-label">View-only — no embedded Excalidraw scene</span>
+        <div className="drawing-editor-viewonly-body">
+          <strong className="drawing-editor-viewonly-title">No editable drawing data</strong>
+          {viewOnlyReason && (
+            <code className="drawing-editor-viewonly-reason">{viewOnlyReason}</code>
+          )}
+          <span className="drawing-editor-viewonly-detail">
+            This SVG has no embedded Excalidraw scene, so it can't be edited here.
+            It was likely imported from an external source rather than created in Syllepsis.
+          </span>
+        </div>
       </div>
     );
   }
@@ -284,12 +396,14 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
         </button>
       </div>
       <div className="drawing-editor-canvas">
-        <Excalidraw
-          initialData={initialData}
-          excalidrawAPI={(a) => { excalidrawApiRef.current = a; }}
-          onChange={handleChange}
-          onLinkOpen={handleLinkOpen}
-        />
+        <CanvasErrorBoundary>
+          <Excalidraw
+            initialData={initialData}
+            excalidrawAPI={handleExcalidrawApi}
+            onChange={handleChange}
+            onLinkOpen={handleLinkOpen}
+          />
+        </CanvasErrorBoundary>
       </div>
       {linkPickerOpen && (
         <NotePicker

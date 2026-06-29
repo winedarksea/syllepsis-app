@@ -2,7 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
 use image::ImageReader;
 use serde::{Deserialize, Serialize};
 
@@ -261,11 +260,13 @@ fn write_asset_bytes(
 }
 
 /// A minimal valid SVG with an empty Excalidraw scene embedded in `<metadata>`.
-/// The scene JSON is the same shape Excalidraw emits from `exportToSvg({ exportEmbedScene: true })`.
+/// The scene JSON is embedded as plain text, matching exactly what the frontend save
+/// path writes (`metaEl.textContent = serializeAsJSON(...)`), so a freshly created
+/// drawing reads back identically to a re-saved one.
 fn blank_drawing_svg() -> String {
     let scene = r#"{"type":"excalidraw","version":2,"source":"syllepsis","elements":[],"appState":{"gridSize":null,"viewBackgroundColor":"transparent"},"files":{}}"#;
     format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"><metadata><!-- payload-type:application/vnd.excalidraw+json -->{scene}</metadata></svg>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"><metadata>{scene}</metadata></svg>"#
     )
 }
 
