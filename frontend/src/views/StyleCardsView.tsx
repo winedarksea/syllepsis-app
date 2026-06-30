@@ -200,21 +200,23 @@ function CardDetail({
   return (
     <div className="sc-detail">
       <div className="sc-detail-header">
-        <div className="sc-detail-title-row">
-          <h2 className="sc-detail-name">{card.name}</h2>
-          {builtin && <span className="sc-builtin-badge">Built-in</span>}
+        <div className="sc-detail-header-top">
+          <div className="sc-detail-title-row">
+            <h2 className="sc-detail-name">{card.name}</h2>
+            {builtin && <span className="sc-builtin-badge">Built-in</span>}
+          </div>
+          <div className="sc-detail-actions">
+            {builtin ? (
+              <button className="sc-btn" onClick={onDuplicate}>Duplicate</button>
+            ) : (
+              <>
+                <button className="sc-btn" onClick={onEdit}>Edit</button>
+                <button className="sc-btn sc-btn-danger" onClick={onDelete}>Delete</button>
+              </>
+            )}
+          </div>
         </div>
         <p className="sc-detail-desc">{card.short_description}</p>
-        <div className="sc-detail-actions">
-          {builtin ? (
-            <button className="sc-btn" onClick={onDuplicate}>Duplicate</button>
-          ) : (
-            <>
-              <button className="sc-btn" onClick={onEdit}>Edit</button>
-              <button className="sc-btn sc-btn-danger" onClick={onDelete}>Delete</button>
-            </>
-          )}
-        </div>
       </div>
 
       <div className="sc-attrs-grid sc-detail-attrs">

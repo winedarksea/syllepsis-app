@@ -242,16 +242,21 @@
 
 .sc-detail-header {
   display: flex;
-  align-items: flex-start;
-  gap: var(--sp-4);
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.sc-detail-header-top {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: var(--sp-4);
 }
 
 .sc-detail-desc {
   font-size: var(--font-size-base);
   color: var(--color-text);
   line-height: var(--line-height-loose);
-  flex: 1;
 }
 
 .sc-detail-actions {
