@@ -20,6 +20,7 @@ const THEME_PREF_KEY = 'syllepsis.themePref';
 const THEME_ID_KEY = 'syllepsis.themeId';
 const CUSTOM_THEMES_KEY = 'syllepsis.customThemes';
 const HIDE_UNSORTED_BADGE_KEY = 'syllepsis.hideUnsortedBadge';
+const EDITOR_FOCUS_KEY = 'syllepsis.editorFocusMode';
 
 function browserStorage(): Storage | null {
   try {
@@ -103,6 +104,10 @@ interface AppStore {
   setUnsortedCount: (n: number) => void;
   hideUnsortedBadge: boolean;
   setHideUnsortedBadge: (v: boolean) => void;
+
+  // Distraction-free editor toggle (persisted). Collapses meta + secondary toolbar actions.
+  editorFocusMode: boolean;
+  setEditorFocusMode: (v: boolean) => void;
 
   // Diagnostics issue count (persisted per-book by Diagnostics view; 0 = clean/unknown)
   diagnosticsIssueCount: number;
@@ -256,6 +261,12 @@ export const useStore = create<AppStore>((set) => ({
   setHideUnsortedBadge: (hideUnsortedBadge) => {
     browserStorage()?.setItem(HIDE_UNSORTED_BADGE_KEY, String(hideUnsortedBadge));
     set({ hideUnsortedBadge });
+  },
+
+  editorFocusMode: browserStorage()?.getItem(EDITOR_FOCUS_KEY) === 'true',
+  setEditorFocusMode: (editorFocusMode) => {
+    browserStorage()?.setItem(EDITOR_FOCUS_KEY, String(editorFocusMode));
+    set({ editorFocusMode });
   },
 
   diagnosticsIssueCount: 0,

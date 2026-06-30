@@ -13,21 +13,17 @@
   overflow: hidden;
 }
 
+/* Single slim row: nav (back + arrows + mode switcher) left, actions (save etc.) right */
 .editor-toolbar {
-  display: flex;
-  flex-direction: column;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-  flex-shrink: 0;
-}
-
-/* Row 1: navigation (back + arrows) left, actions (save etc.) right */
-.editor-toolbar-row1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  flex-shrink: 0;
+  overflow-x: auto;
 }
 
 .editor-toolbar-nav {
@@ -36,14 +32,40 @@
   gap: var(--sp-2);
 }
 
-/* Row 2: mode switcher + meta chips */
-.editor-toolbar-row2 {
-  display: flex;
+/* Grouped secondary buttons (collapsible in focus mode) keep the inline layout. */
+.editor-actions-secondary {
+  display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-1) var(--sp-4) var(--sp-2);
-  border-top: 1px solid var(--color-border);
-  overflow-x: auto;
+}
+
+/* ── Focus / Zen mode ── collapse all chrome for distraction-free writing. */
+.editor-container--focus .editor-meta { display: none; }
+.editor-container--focus .editor-actions-secondary { display: none; }
+
+.editor-container--focus .editor-body-wrap,
+.editor-container--focus .editor-read-wrap {
+  border: none;
+  margin-inline: 0;
+  padding-inline: 0;
+}
+.editor-container--focus .editor-body-wrap:focus-within {
+  border-color: transparent;
+}
+.editor-container--focus .lexical-content-editable,
+.editor-container--focus .editor-raw-textarea,
+.editor-container--focus .editor-read-body {
+  max-width: 50rem;
+  margin-inline: auto;
+  padding-block: var(--sp-6);
+}
+.editor-container--focus .lexical-placeholder {
+  left: max(var(--sp-6), calc(50% - 25rem + var(--sp-6)));
+}
+
+.editor-focus-btn[aria-pressed="true"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 .editor-back {
@@ -93,6 +115,7 @@
 }
 
 .editor-type-badge {
+  flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
@@ -104,6 +127,7 @@
 }
 
 .editor-activity-chip {
+  flex-shrink: 0;
   max-width: min(320px, 40vw);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -412,22 +436,30 @@
 }
 
 .editor-meta {
-  padding: var(--sp-6) var(--sp-8) var(--sp-4);
+  padding: var(--sp-3) var(--sp-6) var(--sp-2);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 
+/* Title + inline type/activity chips share one line. */
+.editor-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+
 .editor-title {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   font-family: var(--font-serif);
-  font-size: var(--font-size-2xl);
+  font-size: var(--font-size-xl);
   font-weight: 600;
   color: var(--color-heading);
   background: transparent;
   border: none;
   outline: none;
-  margin-bottom: var(--sp-2);
   line-height: 1.2;
 }
 
@@ -438,7 +470,7 @@
   background: transparent;
   border: none;
   outline: none;
-  margin-bottom: var(--sp-3);
+  margin-bottom: var(--sp-1);
   font-style: italic;
 }
 
@@ -923,28 +955,21 @@
 }
 
 /* Lexical editor area */
-.editor-body-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-3) var(--sp-8) var(--sp-1);
-  background: var(--color-surface);
-  flex-shrink: 0;
-}
-
-.editor-body-label {
+/* Char count floats subtly in the writing area's bottom-right corner. */
+.editor-body-wrap .editor-body-stats {
+  position: absolute;
+  right: var(--sp-2);
+  bottom: var(--sp-2);
+  z-index: 1;
+  pointer-events: none;
   font-size: var(--font-size-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
   color: var(--color-text-tertiary);
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+  padding: 1px var(--sp-1);
+  border-radius: var(--radius-sm);
 }
-
-.editor-body-stats {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-}
-.editor-body-stats.caution { color: var(--color-tertiary); }
-.editor-body-stats.warning { color: var(--color-error); }
+.editor-body-wrap .editor-body-stats.caution { color: var(--color-tertiary); }
+.editor-body-wrap .editor-body-stats.warning { color: var(--color-error); }
 
 .editor-raw-toggle {
   font-size: var(--font-size-xs);
@@ -1627,24 +1652,23 @@ pre.plugin-block {
 
 @media (max-width: 900px) {
   /* The floating sidebar toggle (44px + ~12px left offset) would overlap the Back button.
-     Push both toolbar rows past it. */
-  .editor-toolbar-row1,
-  .editor-toolbar-row2 {
+     Push the toolbar past it. */
+  .editor-toolbar {
     padding-left: calc(44px + max(var(--sp-3), env(safe-area-inset-left)) + var(--sp-3));
   }
 }
 
 @media (max-width: 760px) {
-  /* Actions can wrap on very narrow screens; each item has a min-width so they stay usable. */
+  /* The single toolbar row can wrap on very narrow screens; each item stays usable. */
+  .editor-toolbar {
+    flex-wrap: wrap;
+  }
   .editor-toolbar-actions {
     flex-wrap: wrap;
     justify-content: flex-end;
   }
   .editor-meta {
-    padding: var(--sp-4);
-  }
-  .editor-body-header {
-    padding: var(--sp-3) var(--sp-4) var(--sp-1);
+    padding: var(--sp-3) var(--sp-4) var(--sp-2);
   }
   .editor-body-wrap {
     margin: 0 var(--sp-3) var(--sp-4);

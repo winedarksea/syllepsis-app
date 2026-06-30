@@ -314,6 +314,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const {
     closeEditor, openEditor, setCategories, setActiveCategory, setView, categories,
     pluginRenderLanguages, pluginsLoaded, noteReloadSignal, commentaryFocusId, clearCommentaryFocus,
+    editorFocusMode, setEditorFocusMode,
   } = useStore();
 
   // Map plugin-claimed code languages to a rendered PluginBlockNode; all other code fences keep
@@ -880,15 +881,15 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   };
 
   return (
-    <div className="editor-container selectable">
-      {/* ── Top toolbar ── */}
+    <div className={`editor-container selectable${editorFocusMode ? ' editor-container--focus' : ''}`}>
+      {/* ── Top toolbar (single row) ── */}
       <div className="editor-toolbar">
-        <div className="editor-toolbar-row1">
-          <div className="editor-toolbar-nav">
-            <button className="editor-back" onClick={handleBack}>
-              <Icon name="arrow_back" size={16} />
-              <span>Back</span>
-            </button>
+        <div className="editor-toolbar-nav">
+          <button className="editor-back" onClick={handleBack}>
+            <Icon name="arrow_back" size={16} />
+            <span>Back</span>
+          </button>
+          <span className="editor-actions-secondary editor-actions-nav">
             <button
               className="editor-nav-btn"
               disabled={!neighbors.previous}
@@ -905,8 +906,11 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             >
               <Icon name="chevron_right" size={18} />
             </button>
-          </div>
-          <div className="editor-toolbar-actions">
+          </span>
+          <NoteModeSwitcher mode={mode} disabled={isImageObject} onChange={switchMode} />
+        </div>
+        <div className="editor-toolbar-actions">
+          <span className="editor-actions-secondary">
             <button className="editor-tool-btn" onClick={() => setFindOpen((open) => !open)} title="Find in note">
               <Icon name="search" size={16} />
             </button>
@@ -946,20 +950,19 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             <button className="editor-delete-btn" onClick={handleDelete} title="Delete note">
               <Icon name="delete" size={16} />
             </button>
-            {dirty && <span className="editor-dirty-dot" title="Unsaved changes" />}
-            <button className="editor-save-btn" onClick={save} disabled={saving || !dirty}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </div>
-        <div className="editor-toolbar-row2">
-          <NoteModeSwitcher mode={mode} disabled={isImageObject} onChange={switchMode} />
-          <span className="editor-type-badge">{note.type}</span>
-          {noteActivity && (
-            <span className="editor-activity-chip" title={noteActivity.detail}>
-              {activityLabel(noteActivity.kind)} {formatRelativeTime(noteActivity.happened_at)}
-            </span>
-          )}
+          </span>
+          <button
+            className="editor-tool-btn editor-focus-btn"
+            onClick={() => setEditorFocusMode(!editorFocusMode)}
+            title={editorFocusMode ? 'Exit focus mode' : 'Focus mode'}
+            aria-pressed={editorFocusMode}
+          >
+            <Icon name={editorFocusMode ? 'close_fullscreen' : 'center_focus_strong'} size={16} />
+          </button>
+          {dirty && <span className="editor-dirty-dot" title="Unsaved changes" />}
+          <button className="editor-save-btn" onClick={save} disabled={saving || !dirty}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
         </div>
       </div>
 
@@ -978,20 +981,30 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
 
       {/* ── Meta panel (shared by all types) ── */}
       <div className="editor-meta">
-        <input
-          className="editor-title"
-          value={title}
-          readOnly={mode === 'read'}
-          onChange={(e) => { setTitle(e.target.value); markDirty(); }}
-          placeholder="Note title…"
-        />
-        <input
-          className="editor-summary"
-          value={summary}
-          readOnly={mode === 'read'}
-          onChange={(e) => { setSummary(e.target.value); markDirty(); }}
-          placeholder="One-line summary (optional)…"
-        />
+        <div className="editor-title-row">
+          <input
+            className="editor-title"
+            value={title}
+            readOnly={mode === 'read'}
+            onChange={(e) => { setTitle(e.target.value); markDirty(); }}
+            placeholder="Note title…"
+          />
+          <span className="editor-type-badge">{note.type}</span>
+          {noteActivity && (
+            <span className="editor-activity-chip" title={noteActivity.detail}>
+              {activityLabel(noteActivity.kind)} {formatRelativeTime(noteActivity.happened_at)}
+            </span>
+          )}
+        </div>
+        {(mode !== 'read' || summary) && (
+          <input
+            className="editor-summary"
+            value={summary}
+            readOnly={mode === 'read'}
+            onChange={(e) => { setSummary(e.target.value); markDirty(); }}
+            placeholder="One-line summary (optional)…"
+          />
+        )}
         <div className="editor-categories">
           {note.categories.map((c) => (
             <button
@@ -1010,11 +1023,6 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       </div>
 
       {/* ── Body / Data area ── */}
-      <div className="editor-body-header">
-        <span className="editor-body-label">{isTable ? 'Data' : (isImageObject ? 'Description' : 'Body')}</span>
-        <BodyStats count={charCount} visible={mode !== 'read' && !isImageObject} />
-      </div>
-
       {accidentalWholeNoteFence && !isTable && !isImageObject && (
         <div className="editor-repair-banner">
           <span>This note is stored as one fenced code block, so its markdown is shown as code.</span>
@@ -1134,6 +1142,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             onChange={(e) => { setRawText(e.target.value); markDirty(); }}
             spellCheck={false}
           />
+          <BodyStats count={charCount} visible={!isImageObject} />
         </div>
       ) : !pluginsLoaded ? (
         // Hold until list_plugins() settles so InitBodyPlugin fires with the correct transformers.
@@ -1152,6 +1161,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
                 catch (e) { onError(e as Error); return null; }
               }}
             />
+            <BodyStats count={charCount} visible={!isImageObject} />
           </div>
           <HistoryPlugin />
           <ListPlugin />

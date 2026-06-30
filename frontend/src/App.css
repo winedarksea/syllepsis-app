@@ -537,10 +537,7 @@
     font-size: var(--font-size-xs);
   }
   .editor-meta {
-    padding: var(--sp-4) var(--sp-5) var(--sp-3);
-  }
-  .editor-body-header {
-    padding: var(--sp-2) var(--sp-5) var(--sp-1);
+    padding: var(--sp-3) var(--sp-5) var(--sp-2);
   }
   .editor-body-wrap {
     margin: 0 var(--sp-5) var(--sp-5);
@@ -647,11 +644,7 @@
   }
 
   .editor-title {
-    font-size: var(--font-size-xl);
-  }
-
-  .editor-body-header {
-    padding: var(--sp-2) var(--sp-3) var(--sp-1);
+    font-size: var(--font-size-lg);
   }
 
   .editor-body-wrap {
