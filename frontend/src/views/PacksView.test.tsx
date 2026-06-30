@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PacksView } from './PacksView';
 import { useStore } from '../lib/store';
-import type { ImportPreview, ImportReport, NoteResolution } from '../types';
+import type { BookInfo, Category, ImportPreview, ImportReport, NoteResolution } from '../types';
 
 const dialogMocks = vi.hoisted(() => ({
   openDialog: vi.fn(),
@@ -63,9 +63,21 @@ function preview(notes: ImportPreview['notes']): ImportPreview {
 }
 
 function renderPacksView() {
+  const book: BookInfo = {
+    name: 'Test Book',
+    path: '/books/test',
+    open_warning: null,
+  };
+  const categories: Category[] = [
+    {
+      name: 'garden',
+      long_name: 'Garden',
+      heading_level: 1,
+    },
+  ];
   useStore.setState({
-    book: { name: 'Test Book', path: '/books/test' } as any,
-    categories: [{ name: 'garden' } as any],
+    book,
+    categories,
   });
   render(<PacksView />);
 }

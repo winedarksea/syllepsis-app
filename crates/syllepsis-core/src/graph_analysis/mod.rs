@@ -341,12 +341,8 @@ impl SemanticGraphCorpus {
             .filter_map(|(index, ms)| {
                 let start_ms = (*ms)?;
                 Some(
-                    std::iter::once(start_ms).chain(
-                        range_end_dates[index]
-                            .as_ref()
-                            .map(|end| end.at_ms)
-                            .into_iter(),
-                    ),
+                    std::iter::once(start_ms)
+                        .chain(range_end_dates[index].as_ref().map(|end| end.at_ms)),
                 )
             })
             .flatten()
@@ -397,16 +393,16 @@ impl SemanticGraphCorpus {
             }
 
             if request.timeline_range_end_date.is_some() {
-                place_timeline_collision_lanes(
-                    &mut xs,
-                    &mut ys,
-                    &resolved_ms,
-                    &range_end_dates,
-                    &self.notes,
-                    start_ms,
-                    end_ms,
-                    |ms| map_x(ms),
-                );
+                place_timeline_collision_lanes(TimelineCollisionLaneInputs {
+                    xs: &mut xs,
+                    ys: &mut ys,
+                    resolved_ms: &resolved_ms,
+                    range_end_dates: &range_end_dates,
+                    notes: &self.notes,
+                    axis_start_ms: start_ms,
+                    axis_end_ms: end_ms,
+                    map_x,
+                });
             } else {
                 // Group dated notes by bucket so same-bucket notes share an x and stack vertically.
                 let mut buckets: BTreeMap<i64, Vec<usize>> = BTreeMap::new();
@@ -896,16 +892,28 @@ fn place_stack(xs: &mut [f32], ys: &mut [f32], x: f32, members: Vec<usize>) {
     }
 }
 
-fn place_timeline_collision_lanes(
-    xs: &mut [f32],
-    ys: &mut [f32],
-    resolved_ms: &[Option<i64>],
-    range_end_dates: &[Option<GraphTimelineNodeDate>],
-    notes: &[Note],
+struct TimelineCollisionLaneInputs<'a, F: Fn(i64) -> f32> {
+    xs: &'a mut [f32],
+    ys: &'a mut [f32],
+    resolved_ms: &'a [Option<i64>],
+    range_end_dates: &'a [Option<GraphTimelineNodeDate>],
+    notes: &'a [Note],
     axis_start_ms: i64,
     axis_end_ms: i64,
-    map_x: impl Fn(i64) -> f32,
-) {
+    map_x: F,
+}
+
+fn place_timeline_collision_lanes<F: Fn(i64) -> f32>(inputs: TimelineCollisionLaneInputs<'_, F>) {
+    let TimelineCollisionLaneInputs {
+        xs,
+        ys,
+        resolved_ms,
+        range_end_dates,
+        notes,
+        axis_start_ms,
+        axis_end_ms,
+        map_x,
+    } = inputs;
     const Y_TOP: f32 = 0.08;
     const Y_BOTTOM: f32 = 0.95;
     const MINIMUM_LANE_GAP_DIVISOR: i64 = 250;

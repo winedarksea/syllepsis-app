@@ -1020,6 +1020,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "loro"))]
     fn reimport_merge_resolution_default_backend_behavior_is_explicit() {
         let fixture = version_update_fixture();
         edit_local_body(&fixture.target, &fixture.note_id, "local edit");

@@ -83,7 +83,6 @@ function parseLinkedNoteIds(body: string): Set<string> {
   const ids = new Set<string>();
   const re = /\(syllepsis:\/\/note\/([A-Za-z0-9_-]+)\)/g;
   let m: RegExpExecArray | null;
-  // eslint-disable-next-line no-cond-assign
   while ((m = re.exec(body)) !== null) ids.add(m[1]);
   return ids;
 }
@@ -159,7 +158,6 @@ class CanvasErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    // eslint-disable-next-line no-console
     console.error('Excalidraw canvas crashed:', error, info.componentStack);
   }
 
