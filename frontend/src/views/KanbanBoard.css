@@ -266,6 +266,8 @@
   border-radius: var(--radius-sm);
   color: var(--color-text-tertiary);
   cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
 .kb-drag-handle:hover {
@@ -275,6 +277,24 @@
 
 .kb-drag-handle:active {
   cursor: grabbing;
+}
+
+.kb-drag-preview {
+  position: fixed;
+  z-index: 100;
+  left: 0;
+  top: 0;
+  max-width: 240px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  color: var(--color-heading);
+  font-size: var(--font-size-sm);
+  font-weight: 650;
+  opacity: 0.92;
+  pointer-events: none;
 }
 
 .kb-status-badge {

@@ -11,6 +11,8 @@ vi.mock('../lib/api', () => ({
   },
 }));
 
+const originalElementFromPoint = document.elementFromPoint;
+
 beforeEach(() => {
   useStore.setState({
     book: { name: 'Test', path: '/tmp/test-book', open_warning: null },
@@ -23,6 +25,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  restoreElementFromPoint();
   cleanup();
 });
 
@@ -69,6 +72,37 @@ describe('KanbanBoard', () => {
         expect(api.setNoteWorkflowStatus).toHaveBeenCalledWith('note-1', expectedStatus, expect.any(String));
       });
     }
+  });
+
+  it('maps pointer dragging from the handle to the section under the pointer', async () => {
+    vi.mocked(api.setNoteWorkflowStatus).mockImplementation(async (_id, status) => noteDto('note-1', status));
+    const { container, getByLabelText } = renderBoard();
+    const dragHandle = getByLabelText(/drag task one/i);
+    const inProgressColumn = container.querySelectorAll('.kb-column')[1];
+    mockElementFromPoint(inProgressColumn);
+
+    fireEvent.pointerDown(dragHandle, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 10,
+      clientY: 10,
+    });
+    fireEvent.pointerMove(dragHandle, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 40,
+      clientY: 40,
+    });
+    fireEvent.pointerUp(dragHandle, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 40,
+      clientY: 40,
+    });
+
+    await waitFor(() => {
+      expect(api.setNoteWorkflowStatus).toHaveBeenCalledWith('note-1', 'active', expect.any(String));
+    });
   });
 });
 
@@ -137,4 +171,22 @@ function noteDto(id: string, status: NoteStatus | null): NoteDto {
       kanban: {},
     },
   };
+}
+
+function mockElementFromPoint(element: Element) {
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: vi.fn(() => element),
+  });
+}
+
+function restoreElementFromPoint() {
+  if (originalElementFromPoint) {
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: originalElementFromPoint,
+    });
+  } else {
+    Reflect.deleteProperty(document, 'elementFromPoint');
+  }
 }

@@ -45,6 +45,13 @@ function formatTimestamp(iso: string): string {
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+function localDateString(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
 function formatDateShort(iso?: string): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -166,6 +173,13 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
   const patch = (partial: Partial<NoteDto>) => onChange({ ...note, ...partial });
   const patchMeta = (partial: Partial<NoteDto['metadata']>) =>
     onChange({ ...note, metadata: { ...note.metadata, ...partial } });
+  const patchWorkflowStatus = (status: NoteStatus | undefined) => {
+    const today = localDateString();
+    const dates = { ...note.metadata.dates };
+    if (status === 'active' && !dates.started) dates.started = { date: today };
+    if (status === 'done' && !dates.completed) dates.completed = { date: today };
+    patchMeta({ status, dates });
+  };
 
   const toggleSection = (id: string) => {
     setOpenSections((prev) => {
@@ -249,7 +263,7 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
                   <button
                     className="dp-status-chip"
                     aria-pressed={!note.metadata.status}
-                    onClick={() => patchMeta({ status: undefined })}
+                    onClick={() => patchWorkflowStatus(undefined)}
                   >
                     No status
                   </button>
@@ -258,9 +272,7 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
                       key={s}
                       className="dp-status-chip"
                       aria-pressed={note.metadata.status === s}
-                      onClick={() => patchMeta({
-                        status: note.metadata.status === s ? undefined : s,
-                      })}
+                      onClick={() => patchWorkflowStatus(note.metadata.status === s ? undefined : s)}
                     >
                       {humanize(s)}
                     </button>

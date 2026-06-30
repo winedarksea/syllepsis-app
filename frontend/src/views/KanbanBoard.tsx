@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import type { DragEvent, ReactNode } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import type { DragEvent, PointerEvent, ReactNode } from 'react';
 import { Icon } from '../components/Icon';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
@@ -32,11 +32,26 @@ const COLOR_LABELS: Record<KanbanColorBy, string> = {
   importance: 'Importance',
 };
 
+const POINTER_DRAG_START_DISTANCE_PX = 6;
+const KANBAN_DROP_SECTION_ATTRIBUTE = 'data-kanban-drop-section';
+
 interface KanbanBoardProps {
   nodes: GraphAnalysisNode[];
   loading: boolean;
   onOpenNote: (id: string) => void;
   onWorkflowUpdated: (note: NoteDto) => void;
+}
+
+interface PointerDragState {
+  nodeId: string;
+  title: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  dragging: boolean;
+  targetSection: KanbanSectionId | null;
 }
 
 export function KanbanBoard({ nodes, loading, onOpenNote, onWorkflowUpdated }: KanbanBoardProps) {
@@ -46,6 +61,8 @@ export function KanbanBoard({ nodes, loading, onOpenNote, onWorkflowUpdated }: K
   const [busyNoteId, setBusyNoteId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pointerDragPreview, setPointerDragPreview] = useState<PointerDragState | null>(null);
+  const pointerDragStateRef = useRef<PointerDragState | null>(null);
 
   const categories = useMemo(
     () => Array.from(new Set(nodes.flatMap((node) => node.categories))).sort((a, b) => a.localeCompare(b)),
@@ -107,6 +124,80 @@ export function KanbanBoard({ nodes, loading, onOpenNote, onWorkflowUpdated }: K
     const nodeId = event.dataTransfer.getData('text/plain');
     const target = KANBAN_SECTIONS.find((entry) => entry.id === section)?.dropStatus;
     if (nodeId && target) void updateStatus(nodeId, target);
+  };
+
+  const beginPointerDrag = (node: GraphAnalysisNode, event: PointerEvent<HTMLElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const nextDragState: PointerDragState = {
+      nodeId: node.id,
+      title: node.title,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      currentX: event.clientX,
+      currentY: event.clientY,
+      dragging: false,
+      targetSection: null,
+    };
+    pointerDragStateRef.current = nextDragState;
+    setPointerDragPreview(nextDragState);
+  };
+
+  const updatePointerDrag = (event: PointerEvent<HTMLElement>) => {
+    const currentDragState = pointerDragStateRef.current;
+    if (!currentDragState || currentDragState.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const distanceFromStart = Math.hypot(
+      event.clientX - currentDragState.startX,
+      event.clientY - currentDragState.startY,
+    );
+    const dragging = currentDragState.dragging || distanceFromStart >= POINTER_DRAG_START_DISTANCE_PX;
+    const targetSection = dragging ? sectionUnderPointer(event.clientX, event.clientY) : null;
+    const nextDragState = {
+      ...currentDragState,
+      currentX: event.clientX,
+      currentY: event.clientY,
+      dragging,
+      targetSection,
+    };
+    pointerDragStateRef.current = nextDragState;
+    setPointerDragPreview(nextDragState);
+    setDragOverSection(targetSection);
+  };
+
+  const finishPointerDrag = (event: PointerEvent<HTMLElement>) => {
+    const currentDragState = pointerDragStateRef.current;
+    if (!currentDragState || currentDragState.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    pointerDragStateRef.current = null;
+    setPointerDragPreview(null);
+    setDragOverSection(null);
+
+    if (!currentDragState.dragging || !currentDragState.targetSection) return;
+    const target = KANBAN_SECTIONS.find((entry) => entry.id === currentDragState.targetSection)?.dropStatus;
+    if (target) void updateStatus(currentDragState.nodeId, target);
+  };
+
+  const cancelPointerDrag = (event: PointerEvent<HTMLElement>) => {
+    const currentDragState = pointerDragStateRef.current;
+    if (!currentDragState || currentDragState.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    pointerDragStateRef.current = null;
+    setPointerDragPreview(null);
+    setDragOverSection(null);
   };
 
   const selectedCategoryLabel = store.kanbanSelectedCategories.length === 0
@@ -200,6 +291,7 @@ export function KanbanBoard({ nodes, loading, onOpenNote, onWorkflowUpdated }: K
           <section
             key={section.id}
             className={`kb-column${dragOverSection === section.id ? ' drag-over' : ''}${activeSection === section.id ? ' active' : ''}`}
+            data-kanban-drop-section={section.id}
             onDragOver={(event) => {
               event.preventDefault();
               setDragOverSection(section.id);
@@ -222,6 +314,10 @@ export function KanbanBoard({ nodes, loading, onOpenNote, onWorkflowUpdated }: K
                   onOpen={() => onOpenNote(node.id)}
                   onToggleMenu={() => setOpenMenuId((current) => current === node.id ? null : node.id)}
                   onStatusChange={(status) => updateStatus(node.id, status)}
+                  onPointerDragStart={(event) => beginPointerDrag(node, event)}
+                  onPointerDragMove={updatePointerDrag}
+                  onPointerDragEnd={finishPointerDrag}
+                  onPointerDragCancel={cancelPointerDrag}
                 />
               ))}
               {grouped[section.id].length === 0 && (
@@ -231,6 +327,16 @@ export function KanbanBoard({ nodes, loading, onOpenNote, onWorkflowUpdated }: K
           </section>
         ))}
       </div>
+      {pointerDragPreview?.dragging && (
+        <div
+          className="kb-drag-preview"
+          style={{
+            transform: `translate3d(${pointerDragPreview.currentX}px, ${pointerDragPreview.currentY}px, 0)`,
+          }}
+        >
+          {pointerDragPreview.title}
+        </div>
+      )}
     </div>
   );
 }
@@ -243,6 +349,10 @@ function KanbanCard({
   onOpen,
   onToggleMenu,
   onStatusChange,
+  onPointerDragStart,
+  onPointerDragMove,
+  onPointerDragEnd,
+  onPointerDragCancel,
 }: {
   node: GraphAnalysisNode;
   busy: boolean;
@@ -251,6 +361,10 @@ function KanbanCard({
   onOpen: () => void;
   onToggleMenu: () => void;
   onStatusChange: (status: NoteStatus | null) => void;
+  onPointerDragStart: (event: PointerEvent<HTMLElement>) => void;
+  onPointerDragMove: (event: PointerEvent<HTMLElement>) => void;
+  onPointerDragEnd: (event: PointerEvent<HTMLElement>) => void;
+  onPointerDragCancel: (event: PointerEvent<HTMLElement>) => void;
 }) {
   const statusKey = node.status ?? 'none';
   return (
@@ -273,6 +387,10 @@ function KanbanCard({
           title="Drag note"
           aria-label={`Drag ${node.title}`}
           onClick={(event) => event.stopPropagation()}
+          onPointerDown={onPointerDragStart}
+          onPointerMove={onPointerDragMove}
+          onPointerUp={onPointerDragEnd}
+          onPointerCancel={onPointerDragCancel}
           onDragStart={(event) => {
             event.dataTransfer.effectAllowed = 'move';
             event.dataTransfer.setData('text/plain', node.id);
@@ -352,6 +470,15 @@ function localDateString(): string {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function sectionUnderPointer(clientX: number, clientY: number): KanbanSectionId | null {
+  const elementUnderPointer = document.elementFromPoint(clientX, clientY);
+  const dropSection = elementUnderPointer?.closest<HTMLElement>(`[${KANBAN_DROP_SECTION_ATTRIBUTE}]`);
+  const sectionId = dropSection?.dataset.kanbanDropSection;
+  return KANBAN_SECTIONS.some((section) => section.id === sectionId)
+    ? sectionId as KanbanSectionId
+    : null;
 }
 
 function humanize(value: string): string {
