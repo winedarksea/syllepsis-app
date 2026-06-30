@@ -465,13 +465,28 @@
 
 .editor-summary {
   width: 100%;
+  font-family: inherit;
   font-size: var(--font-size-sm);
+  line-height: 1.4;
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
   outline: none;
+  padding: 0;
   margin-bottom: var(--sp-1);
   font-style: italic;
+  /* Single clipped line until focused; tooltip reveals the full text in read mode. */
+  resize: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* When focused (editing, or clicked in read mode), wrap and grow to show it all
+   (height set via JS auto-size). */
+.editor-summary--expanded {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow: hidden;
 }
 
 .editor-categories {

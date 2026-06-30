@@ -335,6 +335,8 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const [mode, setMode] = useState<NoteScreenMode>(initialMode);
   const [rawText, setRawText] = useState('');
   const rawTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const summaryRef = useRef<HTMLTextAreaElement | null>(null);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [revision, setRevision] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -418,6 +420,14 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const markDirty = useCallback(() => {
     setDirty(true);
     setRevision((r) => r + 1);
+  }, []);
+
+  // Grow the summary field to fit its wrapped content while it's being edited.
+  const autoSizeSummary = useCallback(() => {
+    const el = summaryRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
   }, []);
 
   const handleMetaChange = useCallback((next: NoteDto) => {
@@ -997,11 +1007,26 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           )}
         </div>
         {(mode !== 'read' || summary) && (
-          <input
-            className="editor-summary"
+          <textarea
+            ref={summaryRef}
+            rows={1}
+            className={`editor-summary${summaryExpanded ? ' editor-summary--expanded' : ''}`}
             value={summary}
             readOnly={mode === 'read'}
-            onChange={(e) => { setSummary(e.target.value); markDirty(); }}
+            title={summary || undefined}
+            onChange={(e) => {
+              setSummary(e.target.value);
+              markDirty();
+              if (summaryExpanded) autoSizeSummary();
+            }}
+            onFocus={() => {
+              setSummaryExpanded(true);
+              requestAnimationFrame(autoSizeSummary);
+            }}
+            onBlur={() => {
+              setSummaryExpanded(false);
+              if (summaryRef.current) summaryRef.current.style.height = '';
+            }}
             placeholder="One-line summary (optional)…"
           />
         )}
