@@ -5,7 +5,13 @@
 import '@excalidraw/excalidraw/index.css';
 import { Component, useCallback, useEffect, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
-import { Excalidraw, exportToSvg, serializeAsJSON, hashElementsVersion } from '@excalidraw/excalidraw';
+import {
+  Excalidraw,
+  exportToSvg,
+  serializeAsJSON,
+  hashElementsVersion,
+  convertToExcalidrawElements,
+} from '@excalidraw/excalidraw';
 import type {
   ExcalidrawImperativeAPI,
   ExcalidrawInitialDataState,
@@ -188,10 +194,14 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
   const [viewOnlyReason, setViewOnlyReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
+  // The note picker doubles as both flows: `tag` links the pre-selected canvas element(s),
+  // `create` drops a fresh labeled box. Open when non-null.
+  const [linkMode, setLinkMode] = useState<'tag' | 'create' | null>(null);
+  const [hasSelection, setHasSelection] = useState(false);
   const [allNotes, setAllNotes] = useState<NoteDto[]>([]);
 
   const excalidrawApiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+  const pendingLinkIdsRef = useRef<string[]>([]);
   const latestElementsRef = useRef<readonly ExcalidrawElement[]>([]);
   const latestAppStateRef = useRef<AppState | null>(null);
   const latestFilesRef = useRef<BinaryFiles>({});
@@ -315,6 +325,8 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
       latestElementsRef.current = elements;
       latestAppStateRef.current = appState;
       latestFilesRef.current = files;
+      // Drives the "Link Selected to Note" button's enabled state.
+      setHasSelection(Object.keys(appState.selectedElementIds ?? {}).length > 0);
       // Only flag the note dirty (and thus schedule an autosave) when the drawing's elements
       // actually changed — not on the spurious onChange events Excalidraw emits on re-render.
       const hash = hashElementsVersion(elements);
@@ -333,13 +345,30 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
     excalidrawApiRef.current = a;
   }, []);
 
-  const handleLinkNote = useCallback(
+  // "Link Selected to Note": capture the current canvas selection synchronously (clicking this
+  // chrome button does not alter Excalidraw's selection — its blur listener is on `window`, and
+  // selection only clears on canvas pointer-down), then open the picker in tag mode.
+  const handleLinkSelectedOpen = useCallback(() => {
+    const exApi = excalidrawApiRef.current;
+    if (exApi) {
+      const state = exApi.getAppState();
+      pendingLinkIdsRef.current = Object.keys(state.selectedElementIds ?? {});
+    }
+    setLinkMode('tag');
+  }, []);
+
+  // "Add Link to Note": drop a fresh labeled box, no selection required.
+  const handleAddLinkOpen = useCallback(() => {
+    setLinkMode('create');
+  }, []);
+
+  // Tag the pre-selected element(s) with a note link.
+  const handleTagSelected = useCallback(
     (targetNote: NoteDto) => {
-      setLinkPickerOpen(false);
+      setLinkMode(null);
       const exApi = excalidrawApiRef.current;
       if (!exApi) return;
-      const state = exApi.getAppState();
-      const selectedIds = Object.keys(state.selectedElementIds ?? {});
+      const selectedIds = pendingLinkIdsRef.current;
       if (selectedIds.length === 0) return;
       const elements = exApi.getSceneElements() as ExcalidrawElement[];
       const updated = elements.map((el: ExcalidrawElement) =>
@@ -348,6 +377,43 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
           : el,
       );
       exApi.updateScene({ elements: updated });
+      markDirty();
+    },
+    [markDirty],
+  );
+
+  // Create a new labeled box (rectangle + bound text) linking to the note, centered in the
+  // viewport and selected so the user immediately sees where it landed.
+  const handleCreateLinkNode = useCallback(
+    (targetNote: NoteDto) => {
+      setLinkMode(null);
+      const exApi = excalidrawApiRef.current;
+      if (!exApi) return;
+      const state = exApi.getAppState();
+      const zoom = state.zoom?.value ?? 1;
+      const width = 220;
+      const height = 64;
+      // Inverse of Excalidraw's viewportX = (sceneX + scrollX) * zoom, centered then offset so
+      // the box's centre (not its corner) sits at the viewport centre.
+      const x = state.width / 2 / zoom - state.scrollX - width / 2;
+      const y = state.height / 2 / zoom - state.scrollY - height / 2;
+      const created = convertToExcalidrawElements([
+        {
+          type: 'rectangle',
+          x,
+          y,
+          width,
+          height,
+          roundness: { type: 3 },
+          link: `syllepsis://note/${targetNote.id}`,
+          label: { text: targetNote.title || targetNote.id, fontSize: 16 },
+        },
+      ]);
+      const container = created[0];
+      exApi.updateScene({
+        elements: [...(exApi.getSceneElements() as ExcalidrawElement[]), ...created],
+        appState: container ? { selectedElementIds: { [container.id]: true } } : undefined,
+      });
       markDirty();
     },
     [markDirty],
@@ -390,10 +456,22 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
       <div className="drawing-editor-chrome">
         <button
           className="drawing-link-note-btn editor-tool-btn"
-          onClick={() => setLinkPickerOpen(true)}
-          title="Link a note to the selected canvas element"
+          onClick={handleLinkSelectedOpen}
+          disabled={!hasSelection}
+          title={
+            hasSelection
+              ? 'Link the selected canvas element(s) to a note'
+              : 'Select a canvas element first to link it to a note'
+          }
         >
-          Link Note
+          Link Selected to Note
+        </button>
+        <button
+          className="drawing-link-note-btn editor-tool-btn"
+          onClick={handleAddLinkOpen}
+          title="Add a labeled box that links to a note"
+        >
+          Add Link to Note
         </button>
       </div>
       <div className="drawing-editor-canvas">
@@ -406,11 +484,12 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
           />
         </CanvasErrorBoundary>
       </div>
-      {linkPickerOpen && (
+      {linkMode && (
         <NotePicker
+          mode={linkMode}
           notes={allNotes.filter((n) => n.id !== note.id)}
-          onSelect={handleLinkNote}
-          onClose={() => setLinkPickerOpen(false)}
+          onSelect={linkMode === 'tag' ? handleTagSelected : handleCreateLinkNode}
+          onClose={() => setLinkMode(null)}
         />
       )}
     </div>
@@ -418,14 +497,20 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
 }
 
 function NotePicker({
+  mode,
   notes,
   onSelect,
   onClose,
 }: {
+  mode: 'tag' | 'create';
   notes: NoteDto[];
   onSelect: (note: NoteDto) => void;
   onClose: () => void;
 }) {
+  const heading =
+    mode === 'tag'
+      ? 'Link the selected element(s) to a note'
+      : 'Add a link to a note';
   const [query, setQuery] = useState('');
   const filtered = notes.filter((n) => {
     const q = query.trim().toLowerCase();
@@ -441,7 +526,7 @@ function NotePicker({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="editor-dialog-header">
-          <h3>Link a note to the selected element</h3>
+          <h3>{heading}</h3>
           <button onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="editor-dialog-body">
