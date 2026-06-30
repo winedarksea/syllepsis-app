@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use syllepsis_core::app::{commands as app, dto::NoteDto, plugin as app_plugin};
-use syllepsis_core::model::{NoteVisibility, ObjectType, PriorEdge};
+use syllepsis_core::model::{NoteStatus, NoteVisibility, ObjectType, PriorEdge};
 use syllepsis_core::onnx::{self, ModelCache};
 use syllepsis_core::sort::RenderItem;
 use syllepsis_core::storage::NoteStore;
@@ -142,6 +142,21 @@ pub fn update_note(state: State<AppState>, note: NoteDto) -> Result<NoteDto, Str
                 .local_ai
                 .enqueue_note(book, updated.id.clone(), false)?;
         }
+        state.invalidate_graph_corpus();
+        Ok(updated)
+    })
+}
+
+#[tauri::command]
+pub fn set_note_workflow_status(
+    state: State<AppState>,
+    id: String,
+    status: Option<NoteStatus>,
+    today_date: String,
+) -> Result<NoteDto, String> {
+    with_book!(state, book, {
+        let updated = app::set_note_workflow_status(book, &id, status, &today_date)
+            .map_err(|e| e.to_string())?;
         state.invalidate_graph_corpus();
         Ok(updated)
     })

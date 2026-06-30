@@ -5,7 +5,7 @@
 //! is unit-testable without a running app and shared across delivery targets (platform-infra.md
 //! "share as much code as possible").
 
-use chrono::{Duration, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
@@ -16,9 +16,9 @@ use crate::embeddings::{read_sidecar, StoredEmbedding};
 use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::markdown::dialect;
-use crate::model::metadata::{LockMode, Metadata};
+use crate::model::metadata::{FlexDate, LockMode, Metadata};
 use crate::model::{
-    Category, ClassificationKind, Note, NoteVisibility, ObjectType, PriorEdge, PriorRef,
+    Category, ClassificationKind, Note, NoteStatus, NoteVisibility, ObjectType, PriorEdge, PriorRef,
 };
 use crate::publish;
 use crate::sort::{self, RenderItem};
@@ -476,6 +476,37 @@ pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
     Ok(NoteDto::from_note(&note))
 }
 
+/// Metadata-only workflow status update for Kanban interactions. This avoids sending a stale body
+/// copy back through `update_note` when the board only needs to change status/date metadata.
+pub fn set_note_workflow_status(
+    book: &Book,
+    id: &str,
+    status: Option<NoteStatus>,
+    today_date: &str,
+) -> CoreResult<NoteDto> {
+    let today = NaiveDate::parse_from_str(today_date, "%Y-%m-%d").map_err(|error| {
+        CoreError::InvalidBook(format!("invalid workflow date '{today_date}': {error}"))
+    })?;
+    let note_id = NoteId::parse(id)?;
+    let mut note = book.store.read_note(&note_id)?;
+    note.metadata.status = status;
+    if status == Some(NoteStatus::Active) && note.metadata.dates.started.is_none() {
+        note.metadata.dates.started = Some(FlexDate {
+            date: Some(today),
+            ..Default::default()
+        });
+    }
+    if status == Some(NoteStatus::Done) && note.metadata.dates.completed.is_none() {
+        note.metadata.dates.completed = Some(FlexDate {
+            date: Some(today),
+            ..Default::default()
+        });
+    }
+    note.metadata.dates.updated = Utc::now();
+    book.save_note(&note)?;
+    Ok(NoteDto::from_note(&note))
+}
+
 /// Declare a category file for any category referenced by a note that does not yet have one.
 /// Without this, a `#tag` added to a note only lives in the note's frontmatter and never appears
 /// in the sidebar (which lists declared categories). Existing category files are left untouched so
@@ -859,6 +890,43 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let book = Book::create(dir.path(), "Test").unwrap();
         (dir, book)
+    }
+
+    #[test]
+    fn workflow_status_update_preserves_note_content_and_stamps_missing_dates() {
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "task", None).unwrap();
+        note.body = "do the careful thing".into();
+        note.categories = vec!["work".into()];
+        let note = update_note(&book, note).unwrap();
+
+        let active =
+            set_note_workflow_status(&book, &note.id, Some(NoteStatus::Active), "2026-06-30")
+                .unwrap();
+        assert_eq!(active.body, "do the careful thing");
+        assert_eq!(active.categories, vec!["work"]);
+        assert_eq!(active.metadata.status, Some(NoteStatus::Active));
+        assert_eq!(
+            active.metadata.dates.started.unwrap().date,
+            Some(NaiveDate::from_ymd_opt(2026, 6, 30).unwrap())
+        );
+
+        let done = set_note_workflow_status(&book, &note.id, Some(NoteStatus::Done), "2026-07-01")
+            .unwrap();
+        assert_eq!(done.metadata.status, Some(NoteStatus::Done));
+        assert_eq!(
+            done.metadata.dates.started.unwrap().date,
+            Some(NaiveDate::from_ymd_opt(2026, 6, 30).unwrap())
+        );
+        assert_eq!(
+            done.metadata.dates.completed.unwrap().date,
+            Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap())
+        );
+
+        let cleared = set_note_workflow_status(&book, &note.id, None, "2026-07-02").unwrap();
+        assert_eq!(cleared.metadata.status, None);
+        assert!(cleared.metadata.dates.started.is_some());
+        assert!(cleared.metadata.dates.completed.is_some());
     }
 
     #[test]

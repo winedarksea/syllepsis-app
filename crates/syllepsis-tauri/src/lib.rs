@@ -130,6 +130,7 @@ pub fn run() {
             note_embedding_details,
             merge_notes,
             split_note,
+            set_note_workflow_status,
             list_commentary,
             get_commentary,
             create_commentary,

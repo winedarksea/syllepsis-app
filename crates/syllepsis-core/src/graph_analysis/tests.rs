@@ -1,5 +1,5 @@
 use super::*;
-use crate::model::ObjectType;
+use crate::model::{ClassificationKind, NoteStatus, ObjectType, Priority};
 use crate::storage::Book;
 
 fn test_book() -> (tempfile::TempDir, Book) {
@@ -30,6 +30,39 @@ fn hidden_notes_are_excluded_from_the_corpus() {
 
     assert_eq!(result.nodes.len(), 1);
     assert_eq!(result.nodes[0].title, "Visible");
+}
+
+#[test]
+fn kanban_mode_returns_visible_notes_with_workflow_metadata_without_edges() {
+    let (_directory, book) = test_book();
+    let mut note = book.new_note(ObjectType::Note, "Board task").unwrap();
+    note.summary = "Small board card".into();
+    note.categories = vec!["work".into()];
+    note.metadata.status = Some(NoteStatus::Deferred);
+    note.metadata.classification.kind = ClassificationKind::Todo;
+    note.metadata.classification.priority = Priority::Core;
+    note.metadata.classification.starred = true;
+    book.save_note(&note).unwrap();
+
+    let corpus = SemanticGraphCorpus::build(&book).unwrap();
+    let result = corpus
+        .analyze(&GraphAnalysisRequest {
+            mode: GraphMode::Kanban,
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(result.mode, GraphMode::Kanban);
+    assert_eq!(result.nodes.len(), 1);
+    assert!(result.semantic_edges.is_empty());
+    assert!(result.prior_edges.is_empty());
+    let node = &result.nodes[0];
+    assert_eq!(node.title, "Board task");
+    assert_eq!(node.summary, "Small board card");
+    assert_eq!(node.status, Some(NoteStatus::Deferred));
+    assert_eq!(node.classification, ClassificationKind::Todo);
+    assert_eq!(node.priority, Priority::Core);
+    assert!(node.starred);
 }
 
 #[test]

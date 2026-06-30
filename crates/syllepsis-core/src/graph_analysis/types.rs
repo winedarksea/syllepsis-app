@@ -1,4 +1,7 @@
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::model::{ClassificationKind, NoteStatus, ObjectType, Priority};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -8,6 +11,7 @@ pub enum GraphMode {
     Communities,
     Density,
     Timeline,
+    Kanban,
 }
 
 /// Which metadata date drives a note's position on the timeline.
@@ -78,8 +82,22 @@ impl Default for GraphAnalysisRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphAnalysisNode {
     pub id: String,
+    #[serde(rename = "type")]
+    pub object_type: ObjectType,
     pub title: String,
+    pub summary: String,
     pub categories: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<NoteStatus>,
+    pub classification: ClassificationKind,
+    pub priority: Priority,
+    pub starred: bool,
+    pub created: DateTime<Utc>,
+    pub updated: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started: Option<NaiveDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed: Option<NaiveDate>,
     pub x: f32,
     pub y: f32,
     pub cluster_id: Option<usize>,

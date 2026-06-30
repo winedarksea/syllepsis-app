@@ -2,7 +2,8 @@
 
 import { create } from 'zustand';
 import type {
-  BookInfo, Category, GraphMode, NoteScreenMode, TimelineColorBy, TimelineDateField, TimelineGranularity,
+  BookInfo, Category, GraphMode, KanbanColorBy, NoteScreenMode, Priority, TimelineColorBy,
+  TimelineDateField, TimelineGranularity,
 } from '../types';
 
 export type ClustersPreset = 'pillars' | 'communities' | 'density';
@@ -21,6 +22,22 @@ const THEME_ID_KEY = 'syllepsis.themeId';
 const CUSTOM_THEMES_KEY = 'syllepsis.customThemes';
 const HIDE_UNSORTED_BADGE_KEY = 'syllepsis.hideUnsortedBadge';
 const EDITOR_FOCUS_KEY = 'syllepsis.editorFocusMode';
+const KANBAN_PREFS_PREFIX = 'syllepsis.kanbanPrefs';
+const DEFAULT_KANBAN_PRIORITIES: Priority[] = ['standard', 'important', 'core'];
+
+interface KanbanPrefs {
+  selectedCategories: string[];
+  selectedPriorities: Priority[];
+  showNoStatus: boolean;
+  colorBy: KanbanColorBy;
+}
+
+const DEFAULT_KANBAN_PREFS: KanbanPrefs = {
+  selectedCategories: [],
+  selectedPriorities: DEFAULT_KANBAN_PRIORITIES,
+  showNoStatus: true,
+  colorBy: 'classification',
+};
 
 function browserStorage(): Storage | null {
   try {
@@ -28,6 +45,36 @@ function browserStorage(): Storage | null {
   } catch {
     return null;
   }
+}
+
+function kanbanPrefsKey(book: BookInfo | null): string | null {
+  return book ? `${KANBAN_PREFS_PREFIX}.${book.path}` : null;
+}
+
+function readKanbanPrefs(book: BookInfo | null): KanbanPrefs {
+  const key = kanbanPrefsKey(book);
+  if (!key) return DEFAULT_KANBAN_PREFS;
+  try {
+    const parsed = JSON.parse(browserStorage()?.getItem(key) ?? 'null') as Partial<KanbanPrefs> | null;
+    return {
+      selectedCategories: Array.isArray(parsed?.selectedCategories) ? parsed.selectedCategories : [],
+      selectedPriorities: Array.isArray(parsed?.selectedPriorities) && parsed.selectedPriorities.length
+        ? parsed.selectedPriorities.filter((priority): priority is Priority =>
+          DEFAULT_KANBAN_PRIORITIES.includes(priority as Priority))
+        : DEFAULT_KANBAN_PRIORITIES,
+      showNoStatus: typeof parsed?.showNoStatus === 'boolean' ? parsed.showNoStatus : true,
+      colorBy: parsed?.colorBy === 'category' || parsed?.colorBy === 'importance'
+        ? parsed.colorBy
+        : 'classification',
+    };
+  } catch {
+    return DEFAULT_KANBAN_PREFS;
+  }
+}
+
+function writeKanbanPrefs(book: BookInfo | null, prefs: KanbanPrefs) {
+  const key = kanbanPrefsKey(book);
+  if (key) browserStorage()?.setItem(key, JSON.stringify(prefs));
 }
 
 function readSystemTheme(): 'light' | 'dark' {
@@ -154,6 +201,14 @@ interface AppStore {
   setShowTimelinePriorRelationships: (show: boolean) => void;
   showGraphPriorRelationships: boolean;
   setShowGraphPriorRelationships: (show: boolean) => void;
+  kanbanSelectedCategories: string[];
+  setKanbanSelectedCategories: (categories: string[]) => void;
+  kanbanSelectedPriorities: Priority[];
+  setKanbanSelectedPriorities: (priorities: Priority[]) => void;
+  kanbanShowNoStatus: boolean;
+  setKanbanShowNoStatus: (show: boolean) => void;
+  kanbanColorBy: KanbanColorBy;
+  setKanbanColorBy: (colorBy: KanbanColorBy) => void;
 
   // Fenced-code languages claimed by code-block-renderer plugins (lower-cased). Loaded once at
   // startup; the editor maps these languages to a rendered PluginBlockNode instead of plain code.
@@ -191,7 +246,15 @@ export const useStore = create<AppStore>((set) => ({
       const stored = parseInt(browserStorage()?.getItem(`syllepsis.diag.issueCount.${book.path}`) ?? '0', 10);
       if (!isNaN(stored)) diagnosticsIssueCount = stored;
     }
-    set({ book, diagnosticsIssueCount });
+    const kanbanPrefs = readKanbanPrefs(book);
+    set({
+      book,
+      diagnosticsIssueCount,
+      kanbanSelectedCategories: kanbanPrefs.selectedCategories,
+      kanbanSelectedPriorities: kanbanPrefs.selectedPriorities,
+      kanbanShowNoStatus: kanbanPrefs.showNoStatus,
+      kanbanColorBy: kanbanPrefs.colorBy,
+    });
   },
   // Return to the launch screen, clearing any per-book state so the next book opens clean.
   closeBook: () => set({
@@ -206,6 +269,10 @@ export const useStore = create<AppStore>((set) => ({
     categories: [],
     unsortedCount: 0,
     diagnosticsIssueCount: 0,
+    kanbanSelectedCategories: DEFAULT_KANBAN_PREFS.selectedCategories,
+    kanbanSelectedPriorities: DEFAULT_KANBAN_PREFS.selectedPriorities,
+    kanbanShowNoStatus: DEFAULT_KANBAN_PREFS.showNoStatus,
+    kanbanColorBy: DEFAULT_KANBAN_PREFS.colorBy,
   }),
 
   view: 'unsorted',
@@ -314,6 +381,53 @@ export const useStore = create<AppStore>((set) => ({
   showGraphPriorRelationships: true,
   setShowGraphPriorRelationships: (showGraphPriorRelationships) =>
     set({ showGraphPriorRelationships }),
+  kanbanSelectedCategories: DEFAULT_KANBAN_PREFS.selectedCategories,
+  setKanbanSelectedCategories: (kanbanSelectedCategories) =>
+    set((state) => {
+      writeKanbanPrefs(state.book, {
+        selectedCategories: kanbanSelectedCategories,
+        selectedPriorities: state.kanbanSelectedPriorities,
+        showNoStatus: state.kanbanShowNoStatus,
+        colorBy: state.kanbanColorBy,
+      });
+      return { kanbanSelectedCategories };
+    }),
+  kanbanSelectedPriorities: DEFAULT_KANBAN_PREFS.selectedPriorities,
+  setKanbanSelectedPriorities: (kanbanSelectedPriorities) =>
+    set((state) => {
+      const selectedPriorities = kanbanSelectedPriorities.length
+        ? kanbanSelectedPriorities
+        : DEFAULT_KANBAN_PRIORITIES;
+      writeKanbanPrefs(state.book, {
+        selectedCategories: state.kanbanSelectedCategories,
+        selectedPriorities,
+        showNoStatus: state.kanbanShowNoStatus,
+        colorBy: state.kanbanColorBy,
+      });
+      return { kanbanSelectedPriorities: selectedPriorities };
+    }),
+  kanbanShowNoStatus: DEFAULT_KANBAN_PREFS.showNoStatus,
+  setKanbanShowNoStatus: (kanbanShowNoStatus) =>
+    set((state) => {
+      writeKanbanPrefs(state.book, {
+        selectedCategories: state.kanbanSelectedCategories,
+        selectedPriorities: state.kanbanSelectedPriorities,
+        showNoStatus: kanbanShowNoStatus,
+        colorBy: state.kanbanColorBy,
+      });
+      return { kanbanShowNoStatus };
+    }),
+  kanbanColorBy: DEFAULT_KANBAN_PREFS.colorBy,
+  setKanbanColorBy: (kanbanColorBy) =>
+    set((state) => {
+      writeKanbanPrefs(state.book, {
+        selectedCategories: state.kanbanSelectedCategories,
+        selectedPriorities: state.kanbanSelectedPriorities,
+        showNoStatus: state.kanbanShowNoStatus,
+        colorBy: kanbanColorBy,
+      });
+      return { kanbanColorBy };
+    }),
 
   pluginRenderLanguages: [],
   setPluginRenderLanguages: (pluginRenderLanguages) => set({ pluginRenderLanguages }),

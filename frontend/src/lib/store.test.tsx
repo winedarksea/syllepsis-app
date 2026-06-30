@@ -48,6 +48,17 @@ describe('editor return navigation', () => {
     expect(useStore.getState().graphMode).toBe('timeline');
   });
 
+  it('returns to kanban mode after opening a note from graph', () => {
+    useStore.getState().setGraphMode('kanban');
+    useStore.getState().setView('graph');
+    useStore.getState().openEditor('note-1');
+
+    useStore.getState().closeEditor();
+
+    expect(useStore.getState().view).toBe('graph');
+    expect(useStore.getState().graphMode).toBe('kanban');
+  });
+
   it('keeps timeline ranges off by default', () => {
     expect(useStore.getState().timelinePrimaryDate).toBe('created');
     expect(useStore.getState().timelineRangeEndDate).toBeNull();

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
-import type { GraphAnalysisRequest, GraphAnalysisResult } from '../types';
+import type { GraphAnalysisNode, GraphAnalysisRequest, GraphAnalysisResult, NoteDto } from '../types';
 import { GraphCanvas } from './GraphCanvas';
 import { GraphControls } from './GraphControls';
+import { KanbanBoard } from './KanbanBoard';
 import { TimelineCanvas } from './TimelineCanvas';
 import { filterSemanticEdges } from './graphGeometry';
 import './GraphView.css';
@@ -107,6 +108,15 @@ export function GraphView() {
     [result, store.graphSimilarityThreshold],
   );
 
+  const handleWorkflowUpdated = (note: NoteDto) => {
+    setResult((current) => current
+      ? {
+        ...current,
+        nodes: current.nodes.map((node) => node.id === note.id ? updateGraphNodeFromNote(node, note) : node),
+      }
+      : current);
+  };
+
   if (!result && loading) return <div className="gv-state">Mapping your notes…</div>;
   if (!result && error) return <div className="gv-state gv-error">{error}</div>;
   if (!result || result.nodes.length === 0) return <div className="gv-state">No notes to graph yet.</div>;
@@ -118,8 +128,8 @@ export function GraphView() {
         <div className="gv-error-banner">{modelDownloadError ?? error}</div>
       )}
       <div className="gv-provider-note">
-        {result.mode === 'categories' || result.mode === 'timeline'
-          ? `${result.mode === 'categories' ? 'Category' : 'Timeline'}`
+        {result.mode === 'categories' || result.mode === 'timeline' || result.mode === 'kanban'
+          ? `${result.mode === 'categories' ? 'Category' : result.mode === 'timeline' ? 'Timeline' : 'Kanban'}`
           : result.provider.semantic
           ? `Semantic layout · ${result.provider.id}`
           : (
@@ -138,7 +148,14 @@ export function GraphView() {
             </>
           )}
       </div>
-      {result.mode === 'timeline' ? (
+      {result.mode === 'kanban' ? (
+        <KanbanBoard
+          nodes={result.nodes}
+          loading={loading}
+          onOpenNote={store.openEditor}
+          onWorkflowUpdated={handleWorkflowUpdated}
+        />
+      ) : result.mode === 'timeline' ? (
         <TimelineCanvas
           result={result}
           showAllTitles={store.showAllGraphTitles}
@@ -159,4 +176,22 @@ export function GraphView() {
       )}
     </div>
   );
+}
+
+function updateGraphNodeFromNote(node: GraphAnalysisNode, note: NoteDto): GraphAnalysisNode {
+  return {
+    ...node,
+    type: note.type,
+    title: note.title.trim() ? note.title : '(untitled)',
+    summary: note.summary,
+    categories: note.categories,
+    status: note.metadata.status,
+    classification: note.metadata.classification.kind,
+    priority: note.metadata.classification.priority,
+    starred: note.metadata.classification.starred,
+    created: note.metadata.dates.created,
+    updated: note.metadata.dates.updated,
+    started: note.metadata.dates.started?.date,
+    completed: note.metadata.dates.completed?.date,
+  };
 }

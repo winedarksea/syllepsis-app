@@ -23,6 +23,7 @@ import type {
   TextImportOptions, TextImportPreview, TextImportCommitRequest, TextImportReport,
   PluginDescriptor, CommentaryKind, CommentarySummary, ApplyCommentaryOptions,
   SearchApiStatus,
+  NoteStatus,
 } from '../types';
 
 export const api = {
@@ -81,6 +82,8 @@ export const api = {
       options: options ?? null,
     }),
   updateNote: (note: NoteDto) => invoke<NoteDto>('update_note', { note }),
+  setNoteWorkflowStatus: (id: string, status: NoteStatus | null, todayDate: string) =>
+    invoke<NoteDto>('set_note_workflow_status', { id, status, todayDate }),
   setPrior: (id: string, prior: PriorEdge | null) =>
     invoke<NoteDto>('set_prior', { id, prior }),
   forkNote: (id: string) => invoke<NoteDto>('fork_note', { id }),

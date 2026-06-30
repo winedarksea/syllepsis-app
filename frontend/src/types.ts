@@ -484,7 +484,7 @@ export interface EmbeddingDiagnostics {
   empty_notes: EmptyNote[];
 }
 
-export type GraphMode = 'categories' | 'pillars' | 'communities' | 'density' | 'timeline';
+export type GraphMode = 'categories' | 'pillars' | 'communities' | 'density' | 'timeline' | 'kanban';
 
 export type TimelineDateField =
   | 'created'
@@ -495,6 +495,7 @@ export type TimelineDateField =
   | 'completed';
 export type TimelineGranularity = 'auto' | 'hour' | 'day' | 'month' | 'year';
 export type TimelineColorBy = 'category' | 'cluster';
+export type KanbanColorBy = 'classification' | 'category' | 'importance';
 
 export interface GraphAnalysisRequest {
   mode: GraphMode;
@@ -512,8 +513,18 @@ export interface GraphAnalysisRequest {
 
 export interface GraphAnalysisNode {
   id: string;
+  type: ObjectType;
   title: string;
+  summary: string;
   categories: string[];
+  status?: NoteStatus;
+  classification: ClassificationKind;
+  priority: Priority;
+  starred: boolean;
+  created: string;
+  updated: string;
+  started?: string;
+  completed?: string;
   x: number;
   y: number;
   cluster_id?: number;

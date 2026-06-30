@@ -6,12 +6,13 @@ import type {
 } from '../lib/store';
 import type { GraphMode, TimelineDateField, TimelineGranularity } from '../types';
 
-type TopMode = 'categories' | 'clusters' | 'timeline';
+type TopMode = 'categories' | 'clusters' | 'timeline' | 'kanban';
 
 const TOP_MODES: { id: TopMode; label: string }[] = [
   { id: 'categories', label: 'Categories' },
   { id: 'clusters', label: 'Clusters' },
   { id: 'timeline', label: 'Timeline' },
+  { id: 'kanban', label: 'Kanban' },
 ];
 
 // The three clustering algorithms, surfaced as presets under "Clusters".
@@ -41,6 +42,7 @@ const GRANULARITIES: { id: TimelineGranularity; label: string }[] = [
 function topModeOf(mode: GraphMode): TopMode {
   if (mode === 'categories') return 'categories';
   if (mode === 'timeline') return 'timeline';
+  if (mode === 'kanban') return 'kanban';
   return 'clusters';
 }
 
@@ -55,6 +57,7 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
   const selectTopMode = (next: TopMode) => {
     if (next === 'categories') store.setGraphMode('categories');
     else if (next === 'timeline') store.setGraphMode('timeline');
+    else if (next === 'kanban') store.setGraphMode('kanban');
     else store.setGraphMode(store.clustersPreset);
   };
 
@@ -113,18 +116,20 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
           </select>
         </label>
 
-        <label className="gv-title-control">
-          <span>Show all titles</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={store.showAllGraphTitles}
-            className={`gv-switch${store.showAllGraphTitles ? ' on' : ''}`}
-            onClick={() => store.setShowAllGraphTitles(!store.showAllGraphTitles)}
-          >
-            <span className="gv-switch-knob" />
-          </button>
-        </label>
+        {topMode !== 'kanban' && (
+          <label className="gv-title-control">
+            <span>Show all titles</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={store.showAllGraphTitles}
+              className={`gv-switch${store.showAllGraphTitles ? ' on' : ''}`}
+              onClick={() => store.setShowAllGraphTitles(!store.showAllGraphTitles)}
+            >
+              <span className="gv-switch-knob" />
+            </button>
+          </label>
+        )}
       </div>
 
       {topMode === 'clusters' && (
@@ -226,7 +231,7 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
             </button>
           </label>
         </div>
-      ) : (
+      ) : topMode !== 'kanban' ? (
         <div className="gv-toolbar-secondary">
           <label className="gv-threshold-control">
             <span>Similarity</span>
@@ -267,7 +272,7 @@ export function GraphControls({ visibleSemanticEdges }: GraphControlsProps) {
             </button>
           )}
         </div>
-      )}
+      ) : null}
 
       {store.graphAdvancedOpen && topMode === 'clusters' && (
         <div className="gv-advanced-panel">

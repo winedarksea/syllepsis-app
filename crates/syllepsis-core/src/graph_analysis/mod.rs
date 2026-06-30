@@ -98,6 +98,9 @@ impl SemanticGraphCorpus {
         if request.mode == GraphMode::Timeline {
             return Ok(self.timeline_analysis(request));
         }
+        if request.mode == GraphMode::Kanban {
+            return Ok(self.kanban_analysis());
+        }
         if request.mode == GraphMode::Categories {
             return Ok(self.embedding_coverage_fallback(GraphMode::Categories));
         }
@@ -119,7 +122,9 @@ impl SemanticGraphCorpus {
             GraphMode::Pillars => 50,
             GraphMode::Communities => 8,
             GraphMode::Density => 15,
-            GraphMode::Categories | GraphMode::Timeline => request.umap_neighbors,
+            GraphMode::Categories | GraphMode::Timeline | GraphMode::Kanban => {
+                request.umap_neighbors
+            }
         };
         let requested_neighbors = if request.automatic_cluster_defaults {
             automatic_neighbor_count(request.mode, embedded_count)
@@ -193,6 +198,7 @@ impl SemanticGraphCorpus {
                 )
             }
             GraphMode::Timeline => unreachable!("timeline mode is handled before this match"),
+            GraphMode::Kanban => unreachable!("kanban mode is handled before this match"),
         };
 
         let mut full_positions = vec![(0.0, 0.0); self.notes.len()];
@@ -222,21 +228,17 @@ impl SemanticGraphCorpus {
             .notes
             .iter()
             .enumerate()
-            .map(|(index, note)| GraphAnalysisNode {
-                id: note.id.to_string(),
-                title: if note.title.trim().is_empty() {
-                    "(untitled)".into()
-                } else {
-                    note.title.clone()
-                },
-                categories: note.categories.clone(),
-                x: full_positions[index].0,
-                y: full_positions[index].1,
-                cluster_id: full_labels[index],
-                outlier: full_outliers[index],
-                no_semantic_signal: self.centroids[index].magnitude() <= f32::EPSILON,
-                timeline_date: None,
-                timeline_range: None,
+            .map(|(index, note)| {
+                graph_analysis_node(
+                    note,
+                    full_positions[index].0,
+                    full_positions[index].1,
+                    full_labels[index],
+                    full_outliers[index],
+                    self.centroids[index].magnitude() <= f32::EPSILON,
+                    None,
+                    None,
+                )
             })
             .collect();
         let outlier_count = full_outliers.iter().filter(|outlier| **outlier).count();
@@ -271,21 +273,17 @@ impl SemanticGraphCorpus {
             .notes
             .iter()
             .enumerate()
-            .map(|(index, note)| GraphAnalysisNode {
-                id: note.id.to_string(),
-                title: if note.title.trim().is_empty() {
-                    "(untitled)".into()
-                } else {
-                    note.title.clone()
-                },
-                categories: note.categories.clone(),
-                x: positions[index].0,
-                y: positions[index].1,
-                cluster_id: labels[index],
-                outlier: outliers[index],
-                no_semantic_signal: self.centroids[index].magnitude() <= f32::EPSILON,
-                timeline_date: None,
-                timeline_range: None,
+            .map(|(index, note)| {
+                graph_analysis_node(
+                    note,
+                    positions[index].0,
+                    positions[index].1,
+                    labels[index],
+                    outliers[index],
+                    self.centroids[index].magnitude() <= f32::EPSILON,
+                    None,
+                    None,
+                )
             })
             .collect();
         let semantic_edges =
@@ -307,6 +305,47 @@ impl SemanticGraphCorpus {
                 outlier_count: 0,
                 no_signal_count: self.notes.len() - self.embedded_note_indices.len(),
                 semantic_edge_candidate_count: semantic_edges.len(),
+            },
+            timeline: None,
+        }
+    }
+
+    fn kanban_analysis(&self) -> GraphAnalysisResult {
+        let nodes = self
+            .notes
+            .iter()
+            .enumerate()
+            .map(|(index, note)| {
+                graph_analysis_node(
+                    note,
+                    0.0,
+                    index as f32,
+                    None,
+                    false,
+                    self.centroids[index].magnitude() <= f32::EPSILON,
+                    None,
+                    None,
+                )
+            })
+            .collect();
+
+        GraphAnalysisResult {
+            mode: GraphMode::Kanban,
+            nodes,
+            clusters: Vec::new(),
+            semantic_edges: Vec::new(),
+            prior_edges: Vec::new(),
+            provider: GraphProviderMetadata {
+                id: self.provider_id.clone(),
+                semantic: self.provider_id != "hashing-bow",
+            },
+            summary: GraphAnalysisSummary {
+                note_count: self.notes.len(),
+                embedded_note_count: self.embedded_note_indices.len(),
+                cluster_count: 0,
+                outlier_count: 0,
+                no_signal_count: self.notes.len() - self.embedded_note_indices.len(),
+                semantic_edge_candidate_count: 0,
             },
             timeline: None,
         }
@@ -506,22 +545,8 @@ impl SemanticGraphCorpus {
             .notes
             .iter()
             .enumerate()
-            .map(|(index, note)| GraphAnalysisNode {
-                id: note.id.to_string(),
-                title: if note.title.trim().is_empty() {
-                    "(untitled)".into()
-                } else {
-                    note.title.clone()
-                },
-                categories: note.categories.clone(),
-                x: xs[index],
-                y: ys[index],
-                cluster_id: labels[index],
-                outlier: false,
-                // Reuse the "no signal" flag/styling to mark notes parked in the undated lane.
-                no_semantic_signal: resolved_ms[index].is_none(),
-                timeline_date: resolved_dates[index].clone(),
-                timeline_range: match (
+            .map(|(index, note)| {
+                let timeline_range = match (
                     &resolved_dates[index],
                     &range_end_dates[index],
                     range_end_xs[index],
@@ -532,7 +557,18 @@ impl SemanticGraphCorpus {
                         end_before_start: end_date.at_ms < start.at_ms,
                     }),
                     _ => None,
-                },
+                };
+                graph_analysis_node(
+                    note,
+                    xs[index],
+                    ys[index],
+                    labels[index],
+                    false,
+                    // Reuse the "no signal" flag/styling to mark notes parked in the undated lane.
+                    resolved_ms[index].is_none(),
+                    resolved_dates[index].clone(),
+                    timeline_range,
+                )
             })
             .collect();
 
@@ -611,6 +647,54 @@ impl SemanticGraphCorpus {
             &self.category_display_names,
         );
         (labels, clusters)
+    }
+}
+
+fn graph_analysis_node(
+    note: &Note,
+    x: f32,
+    y: f32,
+    cluster_id: Option<usize>,
+    outlier: bool,
+    no_semantic_signal: bool,
+    timeline_date: Option<GraphTimelineNodeDate>,
+    timeline_range: Option<GraphTimelineNodeRange>,
+) -> GraphAnalysisNode {
+    GraphAnalysisNode {
+        id: note.id.to_string(),
+        object_type: note.object_type,
+        title: if note.title.trim().is_empty() {
+            "(untitled)".into()
+        } else {
+            note.title.clone()
+        },
+        summary: note.summary.clone(),
+        categories: note.categories.clone(),
+        status: note.metadata.status,
+        classification: note.metadata.classification.kind,
+        priority: note.metadata.classification.priority,
+        starred: note.metadata.classification.starred,
+        created: note.metadata.dates.created,
+        updated: note.metadata.dates.updated,
+        started: note
+            .metadata
+            .dates
+            .started
+            .as_ref()
+            .and_then(|date| date.date),
+        completed: note
+            .metadata
+            .dates
+            .completed
+            .as_ref()
+            .and_then(|date| date.date),
+        x,
+        y,
+        cluster_id,
+        outlier,
+        no_semantic_signal,
+        timeline_date,
+        timeline_range,
     }
 }
 
@@ -773,7 +857,7 @@ fn cluster_descriptions(
                 })
                 .collect();
             let fallback = match mode {
-                GraphMode::Categories | GraphMode::Timeline => "Category",
+                GraphMode::Categories | GraphMode::Timeline | GraphMode::Kanban => "Category",
                 GraphMode::Pillars => "Pillar",
                 GraphMode::Communities => "Community",
                 GraphMode::Density => "Dense region",

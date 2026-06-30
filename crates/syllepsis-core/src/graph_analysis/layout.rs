@@ -25,7 +25,7 @@ pub(super) fn automatic_neighbor_count(mode: GraphMode, note_count: usize) -> us
         GraphMode::Pillars => (scale * 3).clamp(5, 30),
         GraphMode::Communities => (scale * 2).clamp(4, 20),
         GraphMode::Density => (scale * 2).clamp(5, 25),
-        GraphMode::Categories | GraphMode::Timeline => 15,
+        GraphMode::Categories | GraphMode::Timeline | GraphMode::Kanban => 15,
     }
     .min(note_count - 1)
 }
