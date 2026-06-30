@@ -604,10 +604,25 @@ function WizardShell({ title, onCancel, children }: { title: string; onCancel: (
 // ──────────────────────────────────────────────
 // Main workspace (book is open)
 // ──────────────────────────────────────────────
+function readDesktopSidebarShell(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(min-width: 901px)').matches
+    : true;
+}
+
 function Workspace() {
   const { view, editingNoteId, editingMode, setCategories, setUnsortedCount, openEditor, setPluginRenderLanguages, setPluginsLoaded } = useStore();
   const mobileSidebarOpen = useStore((s) => s.sidebarOpen);
   const setMobileSidebarOpen = useStore((s) => s.setSidebarOpen);
+  const desktopSidebarCollapsed = useStore((s) => s.desktopSidebarCollapsed);
+  const setDesktopSidebarCollapsed = useStore((s) => s.setDesktopSidebarCollapsed);
+  const [desktopSidebarShell, setDesktopSidebarShell] = useState(readDesktopSidebarShell);
+  const desktopSidebarHidden = desktopSidebarShell && desktopSidebarCollapsed;
+  const workspaceClassName = [
+    'workspace',
+    mobileSidebarOpen ? 'mobile-sidebar-open' : '',
+    desktopSidebarHidden ? 'desktop-sidebar-collapsed' : '',
+  ].filter(Boolean).join(' ');
 
   // Refresh sidebar data on view change (i.e. when returning from the editor).
   useEffect(() => {
@@ -623,6 +638,15 @@ function Workspace() {
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
   }, [mobileSidebarOpen, setMobileSidebarOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mediaQuery = window.matchMedia('(min-width: 901px)');
+    const handleChange = () => setDesktopSidebarShell(mediaQuery.matches);
+    handleChange();
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
 
   // Load the set of code languages that render plugins claim (once per workspace).
   // setPluginsLoaded(true) on both success and error so the editor never waits forever.
@@ -661,14 +685,27 @@ function Workspace() {
   }, [openEditor]);
 
   return (
-    <div className={`workspace ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}>
+    <div className={workspaceClassName}>
       <Sidebar
         onNewNote={handleNewNote}
         onImportImage={handleImportImage}
         onNewDrawing={handleNewDrawing}
         isMobileOpen={mobileSidebarOpen}
         onClose={() => setMobileSidebarOpen(false)}
+        isDesktopCollapsed={desktopSidebarHidden}
+        onDesktopCollapse={() => setDesktopSidebarCollapsed(true)}
       />
+      {desktopSidebarHidden && (
+        <button
+          className="desktop-sidebar-tab"
+          type="button"
+          onClick={() => setDesktopSidebarCollapsed(false)}
+          aria-label="Show navigation"
+          aria-expanded={!desktopSidebarCollapsed}
+        >
+          <Icon name="chevron_right" size={18} />
+        </button>
+      )}
       {/* The editor and the master–detail Style Cards view have no PageHeader, so they keep the
           floating toggle. Every other view renders an in-flow menu button via PageHeader. */}
       {(view === 'editor' || view === 'style_cards') && (

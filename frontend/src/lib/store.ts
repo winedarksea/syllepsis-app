@@ -120,6 +120,9 @@ interface AppStore {
   // PageHeader (and the editor's floating toggle); the persistent desktop sidebar ignores it.
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  // Wide-screen persistent sidebar collapse state. Session-scoped so the app defaults to shown.
+  desktopSidebarCollapsed: boolean;
+  setDesktopSidebarCollapsed: (collapsed: boolean) => void;
 
   // Category selected in sidebar
   activeCategory: string | null;
@@ -280,6 +283,8 @@ export const useStore = create<AppStore>((set) => ({
 
   sidebarOpen: false,
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
+  desktopSidebarCollapsed: false,
+  setDesktopSidebarCollapsed: (desktopSidebarCollapsed) => set({ desktopSidebarCollapsed }),
 
   activeCategory: null,
   setActiveCategory: (activeCategory) => set({ activeCategory }),

@@ -13,6 +13,8 @@ interface Props {
   onNewDrawing: () => void;
   isMobileOpen?: boolean;
   onClose?: () => void;
+  isDesktopCollapsed?: boolean;
+  onDesktopCollapse?: () => void;
 }
 
 // Object types a user can create directly from the New menu. (Commentary is produced by AI tools.)
@@ -40,7 +42,15 @@ const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[]
   { view: 'diagnostics', icon: 'monitor_heart', label: 'Diagnostics' },
 ];
 
-export function Sidebar({ onNewNote, onImportImage, onNewDrawing, isMobileOpen = false, onClose }: Props) {
+export function Sidebar({
+  onNewNote,
+  onImportImage,
+  onNewDrawing,
+  isMobileOpen = false,
+  onClose,
+  isDesktopCollapsed = false,
+  onDesktopCollapse,
+}: Props) {
   const { view, setView, categories, unsortedCount, hideUnsortedBadge, diagnosticsIssueCount, activeCategory, setActiveCategory, theme, toggleTheme, closeBook } = useStore();
   const [newMenuOpen, setNewMenuOpen] = useState(false);
 
@@ -171,8 +181,21 @@ export function Sidebar({ onNewNote, onImportImage, onNewDrawing, isMobileOpen =
     closeMobileDrawer();
   }, [closeBook, closeMobileDrawer]);
 
+  const syncButtonLabel = syncMsg ?? (syncing
+    ? 'Syncing...'
+    : syncMode === 'cloud'
+      ? 'Sync to cloud now'
+      : syncMode === 'git'
+        ? 'Pull latest changes from Git'
+        : 'Refresh sync status');
+
   return (
-    <aside className={`sidebar ${isMobileOpen ? 'mobile-open' : ''}`} aria-label="Workspace navigation">
+    <aside
+      className={`sidebar ${isMobileOpen ? 'mobile-open' : ''}`}
+      aria-label="Workspace navigation"
+      aria-hidden={isDesktopCollapsed}
+      inert={isDesktopCollapsed ? true : undefined}
+    >
       <div className="sidebar-header">
         <span className="sidebar-app-name">Syllepsis</span>
         <div className="sidebar-header-actions">
@@ -196,6 +219,14 @@ export function Sidebar({ onNewNote, onImportImage, onNewDrawing, isMobileOpen =
             title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
           >
             <Icon name={theme === 'light' ? 'dark_mode' : 'light_mode'} size={18} />
+          </button>
+          <button
+            className="sidebar-theme-btn sidebar-desktop-collapse"
+            onClick={onDesktopCollapse}
+            title="Collapse navigation"
+            aria-label="Collapse navigation"
+          >
+            <Icon name="left_panel_close" size={18} />
           </button>
           <button
             className="sidebar-theme-btn sidebar-mobile-close"
@@ -285,7 +316,9 @@ export function Sidebar({ onNewNote, onImportImage, onNewDrawing, isMobileOpen =
         <button
           className={`sidebar-sync-btn${syncing ? ' sidebar-sync-btn--busy' : ''}`}
           onClick={handleSync}
-          title={syncMsg ?? (syncing ? 'Syncing…' : syncMode === 'cloud' ? 'Sync to cloud now' : syncMode === 'git' ? 'Git pull' : 'Refresh')}
+          title={syncButtonLabel}
+          aria-label={syncButtonLabel}
+          data-tooltip={syncButtonLabel}
           disabled={syncing}
         >
           <Icon

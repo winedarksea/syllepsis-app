@@ -372,7 +372,8 @@
 }
 
 .mobile-sidebar-toggle,
-.mobile-sidebar-backdrop {
+.mobile-sidebar-backdrop,
+.desktop-sidebar-tab {
   display: none;
 }
 
@@ -527,6 +528,52 @@
 
 /* ── Responsive layout ── */
 
+@media (min-width: 901px) {
+  .workspace.desktop-sidebar-collapsed .sidebar {
+    width: 0;
+    min-width: 0;
+    border-right-color: transparent;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      width var(--transition-base),
+      min-width var(--transition-base),
+      transform var(--transition-base),
+      opacity var(--transition-base),
+      border-color var(--transition-base),
+      visibility 0s linear var(--transition-base);
+  }
+
+  .desktop-sidebar-tab {
+    display: flex;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: env(safe-area-inset-left, 0);
+    z-index: 130;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 100dvh;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border-right: 1px solid var(--color-border);
+    border-radius: 0;
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
+  }
+
+  .desktop-sidebar-tab:hover {
+    color: var(--color-text);
+    background: var(--color-hover);
+    border-right-color: var(--color-text-tertiary);
+  }
+}
+
 /* Tablet: narrow sidebar */
 @media (max-width: 900px) {
   .sidebar {
@@ -614,6 +661,10 @@
   .mobile-sidebar-toggle:hover {
     color: var(--color-text);
     background: var(--color-surface-raised);
+  }
+
+  .sidebar-desktop-collapse {
+    display: none;
   }
 
   .sidebar-mobile-close {

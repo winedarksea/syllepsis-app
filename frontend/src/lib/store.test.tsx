@@ -10,6 +10,7 @@ describe('editor return navigation', () => {
       editorReturnView: null,
       graphMode: 'categories',
       activeWorld: null,
+      desktopSidebarCollapsed: false,
     });
   });
 
@@ -80,5 +81,15 @@ describe('editor return navigation', () => {
     useStore.getState().closeEditor();
 
     expect(useStore.getState().view).toBe('unsorted');
+  });
+
+  it('keeps desktop sidebar collapse session-scoped and shown by default', () => {
+    expect(useStore.getState().desktopSidebarCollapsed).toBe(false);
+
+    useStore.getState().setDesktopSidebarCollapsed(true);
+    expect(useStore.getState().desktopSidebarCollapsed).toBe(true);
+
+    useStore.getState().setDesktopSidebarCollapsed(false);
+    expect(useStore.getState().desktopSidebarCollapsed).toBe(false);
   });
 });
