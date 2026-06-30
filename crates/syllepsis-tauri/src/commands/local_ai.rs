@@ -1,6 +1,8 @@
 //! Device-local controls and observability for the serial model worker.
 
 use serde::Serialize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 
 use syllepsis_core::app::search as search_app;
@@ -101,11 +103,20 @@ pub fn note_editing_finished(
         }
     }
 
-    // Finishing a note is a natural sync trigger. Kick a coalesced background sync off the IPC
-    // worker: it's naturally debounced by the sync lock's `try_lock` and gated to enabled+active
-    // cloud providers, so firing it here is safe and non-blocking.
+    // Finishing a note is a natural sync trigger, but rapid note exploration should not hammer
+    // the cloud. Increment the generation counter so only the *last* editing-finished within the
+    // debounce window actually syncs; earlier ones wake up, find a newer generation, and exit.
+    let gen = state
+        .sync_debounce_gen
+        .fetch_add(1, Ordering::Relaxed)
+        .wrapping_add(1);
+    let debounce_gen = Arc::clone(&state.sync_debounce_gen);
     let sync_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        if debounce_gen.load(Ordering::Relaxed) != gen {
+            return;
+        }
         let state = sync_app.state::<AppState>();
         if let Err(error) =
             crate::commands::sync::sync_connected_managed_cloud_providers(&sync_app, &state)

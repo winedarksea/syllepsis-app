@@ -811,7 +811,14 @@ fn upload_book_to_cloud_inner(state: &AppState, provider: &str) -> Result<SyncRe
     // is already running, skip this one (an empty report) rather than queue behind it.
     let _sync_guard = match state.sync_lock.try_lock() {
         Ok(guard) => guard,
-        Err(_) => return Ok(SyncReport::default()),
+        // Another sync pass is in progress — skip rather than queue.
+        Err(std::sync::TryLockError::WouldBlock) => return Ok(SyncReport::default()),
+        // The lock was poisoned by a panic in a previous sync. The guard contents are `()` so
+        // there is no inconsistent shared state to worry about; recover and proceed.
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            tracing::warn!("sync_lock was poisoned by a previous panic; recovering");
+            e.into_inner()
+        }
     };
 
     // Briefly lock the book only to snapshot what the engine needs (it operates on files, not the
