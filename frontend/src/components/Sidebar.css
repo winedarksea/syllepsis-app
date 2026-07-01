@@ -27,11 +27,21 @@
 }
 
 .sidebar-app-name {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
   font-family: var(--font-serif);
   font-weight: 600;
   font-size: var(--font-size-lg);
   color: var(--color-heading);
   letter-spacing: 0.2px;
+  transition: color var(--transition-fast);
+}
+
+.sidebar-app-name:hover,
+.sidebar-app-name:focus-visible {
+  color: var(--color-accent);
 }
 
 .sidebar-header-actions {

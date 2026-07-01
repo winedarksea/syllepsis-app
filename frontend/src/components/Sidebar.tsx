@@ -51,7 +51,7 @@ export function Sidebar({
   isDesktopCollapsed = false,
   onDesktopCollapse,
 }: Props) {
-  const { view, setView, categories, unsortedCount, hideUnsortedBadge, diagnosticsIssueCount, activeCategory, setActiveCategory, theme, toggleTheme, closeBook } = useStore();
+  const { view, setView, categories, unsortedCount, hideUnsortedBadge, diagnosticsIssueCount, activeCategory, setActiveCategory, closeBook } = useStore();
   const [newMenuOpen, setNewMenuOpen] = useState(false);
 
   type SyncMode = 'cloud' | 'git' | 'local';
@@ -197,7 +197,14 @@ export function Sidebar({
       inert={isDesktopCollapsed ? true : undefined}
     >
       <div className="sidebar-header">
-        <span className="sidebar-app-name">Syllepsis</span>
+        <button
+          className="sidebar-app-name"
+          onClick={handleCloseBook}
+          title="Close book — return to launch screen"
+          aria-label="Close book — return to launch screen"
+        >
+          Syllepsis
+        </button>
         <div className="sidebar-header-actions">
           <button
             className={`sidebar-theme-btn ${view === 'settings' ? 'active' : ''}`}
@@ -205,20 +212,6 @@ export function Sidebar({
             title="Settings"
           >
             <Icon name="settings" size={18} />
-          </button>
-          <button
-            className="sidebar-theme-btn"
-            onClick={handleCloseBook}
-            title="Close book — back to launch screen"
-          >
-            <Icon name="logout" size={18} />
-          </button>
-          <button
-            className="sidebar-theme-btn"
-            onClick={toggleTheme}
-            title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
-          >
-            <Icon name={theme === 'light' ? 'dark_mode' : 'light_mode'} size={18} />
           </button>
           <button
             className="sidebar-theme-btn sidebar-desktop-collapse"
