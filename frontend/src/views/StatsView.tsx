@@ -141,6 +141,15 @@ export function StatsView() {
             <StatCard label="Hidden" value={stats.hidden_notes} />
             <StatCard label="Archived" value={stats.archived_notes} />
             <StatCard label="With location" value={stats.notes_with_location} />
+            <StatCard label="Avg word count" value={stats.avg_word_count} sub="per note" />
+            <StatCard label="With attachments" value={stats.notes_with_attachments} />
+            <StatCard label="AI-generated" value={stats.ai_generated_notes} />
+            <StatCard label="Uncategorized" value={stats.uncategorized_notes} sub="no tags" />
+            <StatCard label="Created this week" value={stats.created_this_week} sub="last 7 days" />
+            <StatCard label="Updated this week" value={stats.updated_this_week} sub="last 7 days" />
+            <StatCard label="Overdue tasks" value={stats.overdue_tasks} sub="past due, not done" />
+            <StatCard label="Core priority" value={stats.core_priority_notes} />
+            <StatCard label="Scheduled for deletion" value={stats.scheduled_for_deletion} sub="in trash, pending purge" />
           </div>
         </section>
       )}

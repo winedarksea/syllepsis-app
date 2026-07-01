@@ -5,7 +5,7 @@
 //! is unit-testable without a running app and shared across delivery targets (platform-infra.md
 //! "share as much code as possible").
 
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
@@ -16,6 +16,7 @@ use crate::embeddings::{read_sidecar, StoredEmbedding};
 use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::markdown::dialect;
+use crate::model::classification::Priority;
 use crate::model::metadata::{FlexDate, LockMode, Metadata};
 use crate::model::{
     Category, ClassificationKind, Note, NoteStatus, NoteVisibility, ObjectType, PriorEdge, PriorRef,
@@ -39,6 +40,15 @@ pub struct BookStats {
     pub notes_by_category: HashMap<String, usize>,
     pub total_categories: usize,
     pub notes_with_location: usize,
+    pub avg_word_count: usize,
+    pub notes_with_attachments: usize,
+    pub ai_generated_notes: usize,
+    pub uncategorized_notes: usize,
+    pub created_this_week: usize,
+    pub updated_this_week: usize,
+    pub overdue_tasks: usize,
+    pub core_priority_notes: usize,
+    pub scheduled_for_deletion: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -233,6 +243,8 @@ fn escape_html_attr(value: &str) -> String {
 pub fn book_stats(book: &Book) -> CoreResult<BookStats> {
     let all_notes = book.store.read_all_notes()?;
     let categories = all_categories(book)?;
+    let now = Utc::now();
+    let week_ago = now - Duration::days(7);
 
     let mut stats = BookStats {
         total_notes: 0,
@@ -245,13 +257,25 @@ pub fn book_stats(book: &Book) -> CoreResult<BookStats> {
         notes_by_category: HashMap::new(),
         total_categories: categories.len(),
         notes_with_location: 0,
+        avg_word_count: 0,
+        notes_with_attachments: 0,
+        ai_generated_notes: 0,
+        uncategorized_notes: 0,
+        created_this_week: 0,
+        updated_this_week: 0,
+        overdue_tasks: 0,
+        core_priority_notes: 0,
+        scheduled_for_deletion: 0,
     };
+
+    let mut total_words: usize = 0;
 
     for note in &all_notes {
         if note.object_type == ObjectType::Commentary {
             continue;
         }
         if note.metadata.lifecycle.marked_for_deletion_at.is_some() {
+            stats.scheduled_for_deletion += 1;
             continue;
         }
         stats.total_notes += 1;
@@ -277,8 +301,55 @@ pub fn book_stats(book: &Book) -> CoreResult<BookStats> {
         for cat in &note.categories {
             *stats.notes_by_category.entry(cat.clone()).or_insert(0) += 1;
         }
+
+        total_words += note.body.split_whitespace().count();
+        if note.asset.is_some() {
+            stats.notes_with_attachments += 1;
+        }
+        if note.metadata.authorship.ai_generated {
+            stats.ai_generated_notes += 1;
+        }
+        if note.categories.is_empty() {
+            stats.uncategorized_notes += 1;
+        }
+        if note.metadata.dates.created >= week_ago {
+            stats.created_this_week += 1;
+        }
+        if note.metadata.dates.updated >= week_ago {
+            stats.updated_this_week += 1;
+        }
+        if note.metadata.classification.priority == Priority::Core {
+            stats.core_priority_notes += 1;
+        }
+        if is_overdue(note, now) {
+            stats.overdue_tasks += 1;
+        }
     }
+
+    stats.avg_word_count = if stats.total_notes > 0 {
+        total_words / stats.total_notes
+    } else {
+        0
+    };
+
     Ok(stats)
+}
+
+/// A note is an overdue task when it carries an absolute `due` date in the past and hasn't been
+/// completed. Relative/anchor-based due dates are left undated here, matching the same
+/// simplification `graph_analysis::resolve_note_ms` already makes.
+fn is_overdue(note: &Note, now: DateTime<Utc>) -> bool {
+    let Some(due_date) = note.metadata.dates.due.as_ref().and_then(|d| d.date) else {
+        return false;
+    };
+    if note.metadata.status == Some(NoteStatus::Done) || note.metadata.dates.completed.is_some() {
+        return false;
+    }
+    let Some(due_midnight) = due_date.and_hms_opt(0, 0, 0) else {
+        return false;
+    };
+    let due_utc: DateTime<Utc> = chrono::TimeZone::from_utc_datetime(&Utc, &due_midnight);
+    due_utc < now
 }
 
 /// The unsorted queue: quick captures awaiting organization. Excludes hidden (archived/private)
@@ -991,6 +1062,46 @@ mod tests {
         assert!(book.store.read_category("legacy").is_ok());
         assert!(book.store.read_category("chapter").is_ok());
         assert_eq!(book_stats(&book).unwrap().total_categories, 2);
+    }
+
+    #[test]
+    fn book_stats_computes_new_overview_counters() {
+        let (_dir, book) = book();
+
+        // Core-priority, AI-generated, uncategorized note with a body for word count.
+        let mut core_note = create_note(&book, ObjectType::Note, "core", None).unwrap();
+        core_note.body = "one two three four five".to_string();
+        core_note.metadata.classification.priority = Priority::Core;
+        core_note.metadata.authorship.ai_generated = true;
+        update_note(&book, core_note).unwrap();
+
+        // Categorized note.
+        let mut categorized = create_note(&book, ObjectType::Note, "categorized", None).unwrap();
+        categorized.categories = vec!["science".into()];
+        update_note(&book, categorized).unwrap();
+
+        // Overdue, not-done task.
+        let mut overdue = create_note(&book, ObjectType::Note, "overdue", None).unwrap();
+        overdue.metadata.dates.due = Some(FlexDate {
+            date: NaiveDate::from_ymd_opt(2020, 1, 1),
+            ..Default::default()
+        });
+        update_note(&book, overdue).unwrap();
+
+        // Trashed note: soft-deleted and pending purge, not merely scheduled to self-destruct.
+        let trashed = create_note(&book, ObjectType::Note, "trashed", None).unwrap();
+        crate::app::lifecycle::request_deletion(&book, &trashed.id).unwrap();
+
+        let stats = book_stats(&book).unwrap();
+        assert_eq!(stats.core_priority_notes, 1);
+        assert_eq!(stats.ai_generated_notes, 1);
+        assert_eq!(stats.scheduled_for_deletion, 1);
+        assert_eq!(stats.overdue_tasks, 1);
+        // core_note + overdue are uncategorized; categorized has a category; trashed is excluded entirely.
+        assert_eq!(stats.uncategorized_notes, 2);
+        assert_eq!(stats.created_this_week, 3);
+        assert_eq!(stats.updated_this_week, 3);
+        assert!(stats.avg_word_count > 0);
     }
 
     #[test]

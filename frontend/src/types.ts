@@ -1217,6 +1217,15 @@ export interface BookStats {
   notes_by_category: Record<string, number>;
   total_categories: number;
   notes_with_location: number;
+  avg_word_count: number;
+  notes_with_attachments: number;
+  ai_generated_notes: number;
+  uncategorized_notes: number;
+  created_this_week: number;
+  updated_this_week: number;
+  overdue_tasks: number;
+  core_priority_notes: number;
+  scheduled_for_deletion: number;
 }
 
 // ── Style cards (mirrors syllepsis_core::model::style_card) ──
