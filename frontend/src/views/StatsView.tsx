@@ -1,6 +1,6 @@
 // Statistics & analytics dashboard: note counts, category usage, and other book health metrics.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { PageHeader } from '../components/PageHeader';
 import type { BookStats, LocalAiStatus, LocalAiDevicePolicy, OperationalActivitySummary } from '../types';
@@ -89,6 +89,15 @@ export function StatsView() {
     }
   }, [policy]);
 
+  const typeEntries = useMemo(
+    () => Object.entries(stats?.notes_by_type ?? {}).sort((a, b) => b[1] - a[1]),
+    [stats],
+  );
+  const categoryEntries = useMemo(
+    () => Object.entries(stats?.notes_by_category ?? {}).sort((a, b) => b[1] - a[1]),
+    [stats],
+  );
+
   if (loading) return <div className="stats-state">Computing stats…</div>;
   if (error) return <div className="stats-state stats-error">{error}</div>;
   if (!stats) return null;
@@ -97,8 +106,6 @@ export function StatsView() {
     ? Math.round((stats.sorted_notes / stats.total_notes) * 100)
     : 0;
 
-  const typeEntries = Object.entries(stats.notes_by_type).sort((a, b) => b[1] - a[1]);
-  const categoryEntries = Object.entries(stats.notes_by_category).sort((a, b) => b[1] - a[1]);
 
   return (
     <div className="stats-root">

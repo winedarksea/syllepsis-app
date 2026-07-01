@@ -366,7 +366,12 @@ impl SearchEngine {
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();
         for idx in indices {
             for cat in &self.notes[idx].categories {
-                *counts.entry(cat.clone()).or_insert(0) += 1;
+                match counts.get_mut(cat.as_str()) {
+                    Some(count) => *count += 1,
+                    None => {
+                        counts.insert(cat.clone(), 1);
+                    }
+                }
             }
         }
         let mut facets: Vec<FacetCount> = counts

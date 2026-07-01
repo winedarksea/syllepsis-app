@@ -42,7 +42,12 @@ impl Bm25Index {
                 *freqs.entry(token).or_insert(0) += 1;
             }
             for term in freqs.keys() {
-                *doc_freq.entry(term.clone()).or_insert(0) += 1;
+                match doc_freq.get_mut(term.as_str()) {
+                    Some(count) => *count += 1,
+                    None => {
+                        doc_freq.insert(term.clone(), 1);
+                    }
+                }
             }
             doc_lengths.push(freqs.values().map(|c| *c as usize).sum());
             term_freqs.push(freqs);

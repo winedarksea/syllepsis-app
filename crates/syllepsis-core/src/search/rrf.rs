@@ -26,12 +26,17 @@ where
 
     for ranking in rankings {
         for (rank, id) in ranking.iter().enumerate() {
-            *scores.entry(id.clone()).or_insert(0.0) += 1.0 / (k + rank as f32 + 1.0);
-            first_seen.entry(id.clone()).or_insert_with(|| {
-                let o = order;
+            let increment = 1.0 / (k + rank as f32 + 1.0);
+            match scores.get_mut(id) {
+                Some(score) => *score += increment,
+                None => {
+                    scores.insert(id.clone(), increment);
+                }
+            }
+            if !first_seen.contains_key(id) {
+                first_seen.insert(id.clone(), order);
                 order += 1;
-                o
-            });
+            }
         }
     }
 

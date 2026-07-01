@@ -206,6 +206,10 @@ interface CompletionItem {
   insert: string;
 }
 
+// Hoisted so the editor's per-keystroke update listener doesn't reconstruct this regex literal
+// on every text change.
+const AUTOCOMPLETE_TOKEN_PATTERN = /(#([\w-]*)|@([\w-]*)|(?:due|start|done|loc|waiting|blocked-by):([\w-]*))$/;
+
 function AutocompletePlugin({
   categories,
   notes,
@@ -230,7 +234,7 @@ function AutocompletePlugin({
       }
       const anchor = selection.anchor;
       const text = anchor.getNode().getTextContent().slice(0, anchor.offset);
-      const match = text.match(/(#([\w-]*)|@([\w-]*)|(?:due|start|done|loc|waiting|blocked-by):([\w-]*))$/);
+      const match = text.match(AUTOCOMPLETE_TOKEN_PATTERN);
       setToken(match?.[0] ?? '');
     });
   }), [editor]);

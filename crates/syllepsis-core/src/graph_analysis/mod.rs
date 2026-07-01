@@ -50,7 +50,7 @@ impl SemanticGraphCorpus {
                     && note.metadata.is_visible_in_default_views()
             })
             .collect();
-        notes.sort_by(|left, right| left.id.to_string().cmp(&right.id.to_string()));
+        notes.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
         let provider_id = configured_model_fingerprint(&book.config.embedding)?.model_id;
         let fingerprint = corpus_fingerprint(book, &notes, &embedding_source_cache_key(book))?;
         let loaded = load_embedding_corpus(book, &notes)?;

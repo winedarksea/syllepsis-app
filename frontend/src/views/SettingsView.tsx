@@ -5,7 +5,7 @@
 // (read only for explicit credential actions); book config → _config.yaml via section updaters.
 // App-level sections always render; book-level sections only when a book is open.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
@@ -370,7 +370,7 @@ function useSectionDraft<T>(value: T, save: (draft: T) => Promise<void>, onError
   const [draft, setDraft] = useState<T>(value);
   const [saving, setSaving] = useState(false);
   useEffect(() => { setDraft(value); }, [value]);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(value);
+  const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(value), [draft, value]);
   const commit = useCallback(async () => {
     setSaving(true);
     try { await save(draft); }
