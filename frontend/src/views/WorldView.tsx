@@ -10,6 +10,10 @@ import './WorldView.css';
 
 const IMAGE_FILTER = [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }];
 
+function lastWorldKey(bookPath: string | undefined): string | null {
+  return bookPath ? `syllepsis.lastWorld.${bookPath}` : null;
+}
+
 export function WorldView() {
   const {
     activeWorld, setActiveWorld, openEditor, setActiveCategory, setView, book,
@@ -23,13 +27,16 @@ export function WorldView() {
   const reloadWorlds = useCallback(async (preferredWorldId?: string) => {
     const loadedWorlds = await api.listWorlds();
     setWorlds(loadedWorlds);
+    const storageKey = lastWorldKey(book?.path);
+    const lastViewed = storageKey ? localStorage.getItem(storageKey) : null;
     const nextWorld = preferredWorldId
       ?? activeWorld
-      ?? loadedWorlds.find((world) => world.kind === 'image')?.id
+      ?? (lastViewed && loadedWorlds.some((world) => world.id === lastViewed) ? lastViewed : null)
+      ?? loadedWorlds.find((world) => world.kind === 'geo')?.id
       ?? loadedWorlds[0]?.id
       ?? null;
     if (nextWorld) setActiveWorld(nextWorld);
-  }, [activeWorld, setActiveWorld]);
+  }, [activeWorld, book?.path, setActiveWorld]);
 
   useEffect(() => {
     // Initial asynchronous load for the selected book.
@@ -47,7 +54,9 @@ export function WorldView() {
         setError(null);
       })
       .catch((caught) => setError(String(caught)));
-  }, [activeWorld]);
+    const storageKey = lastWorldKey(book?.path);
+    if (storageKey) localStorage.setItem(storageKey, activeWorld);
+  }, [activeWorld, book?.path]);
 
   const selectedWorld = worlds.find((world) => world.id === activeWorld);
   const gridStorageKey = book && activeWorld
