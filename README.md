@@ -13,48 +13,56 @@ plain markdown on your device, synced to your own cloud (Google Drive, GitHub). 
 
 **Note types**
 - Prose notes, quotes, references, to-dos, Q&A, tables, code blocks, pictures, drawings
+- Drawings embed excalidraw for creating user drawing
 
 **Organization**
-- Hashtag categories with icons and display names
+- Notebox inbox: capture quickly, then sort and categorize later
+- Book view: flatten the sorted tree into a continuous narrative document for easy readability
+- Organize by categories, with icons and display names
+- Link notes together for easy reference
 - Prior-relationship tree for hierarchical note ordering
-- Notebox inbox — capture first, categorize later
-- Book view — flatten the sorted tree into a continuous narrative document
+- A simple Kanban board allows tracking progress when needed
 
 **Search and discovery**
 - Powerful search: three types of search (exact match, BM25, and RAG retrieval) fused to help you find all the relevant content for a query.
 - Semantic graph: three visualization modes: categories, clustering, and timeline allow you to view the patterns of your notes to find and utilize the connections between your ideas.
 - Related notes carousel: easily connect to the similar notes from the current note you are on, like the product recommendation system of an ecommerce site, but speeding up connections among your own ideas.
-- Related notes , duplicate detection, and embedding coverage diagnostics
+- Duplicate detection and embedding coverage diagnostics help clean up and refine the knowledge base
 
 **AI and LLM**
 - Summarize, expand, rewrite (style-guided), fix grammar, fact-check, and devil's advocate
-- All LLM operations produce non-destructive proposals — accept or reject individually
 - Custom style cards and editable prompts per task allow easy, repeatable formatting of ideas.
+- All LLM operations produce non-destructive proposals — accept or reject individually
 - Routes tasks to local ONNX models (Qwen3-0.6B, EmbeddingGemma 300M Q4) or cloud providers
 - Local models are efficient and fully bundled, avoiding the usual hassle of Local LLM deployments
+- Because notes are markdown, they can easily be read and integrated by other AI tools with preexisting, native tools and connectors
 
 **Spatial worlds**
 - Tag your notes to specific locations and view them on a map
 - The default map is Earth, but you can also map onto imported images (floor plans, fantasy maps, memory palaces)
 - `loc:` grammar resolves coordinates, named places, and CSV lookup tables at render time
 
+**Sync and storage**
+- Plain markdown on disk — human readable, easy to move documents
+- Note importing tool to assist loading in outside documents
+- Cloud app-managed sync options (Google Drive, Dropbox) backs up and shares your files between devices
+- Conflict management allows editing synced files across multiple devices (or from other apps) without worry
+- Use of loro also allows you to do 'unmanaged' cloud sync. Drop your book into a folder tracked by your builtin cloud provider (ie iCloud) and allow it to sync your notes for you across devices. As long as each device points at the local location of the cloud sync, note sync should work seamlessly.
+- optional git integration allows versioned note releases and rollbacks, while also allowing another sync and sharing option via platforms like GitHub
+- Cloud sync tokens and LLM API tokens are saved securely in your device's keychain/credential manager. However this may mean you are annoyed by prompts to unlock said keychain.
+
+
 **Privacy and lifecycle**
 - Private, archived, locked, and mark-for-deletion states per note or category
 - 24-hour timed unlock gate with optional fact-check requirement allow users to protect their most critical notes from accidental or impulsive updates.
-- Managed `.gitignore` block automatically excludes private notes from git publishes
-
-**Sync and storage**
-- Plain markdown on disk — no proprietary database
-- LWW-register CRDT with optional fine-grained Loro text CRDT
-- Local folder sync by default; Google Drive and GitHub sync providers planned
-- Conflict copies for binary assets; loop-prevention for re-syncs
+- Statistics page to review status across the book.
 
 **Export and publishing**
-- Knowledge packs — portable versioned JSON bundles for sharing note collections
+- Knowledge packs — portable versioned JSON bundles for sharing note collections to other's books
 - Static site export — self-contained HTML with private content filtered out
 
 **Extensibility**
-- Sandboxed plugin system (Extism) allows users to develop customizations to the app
+- Sandboxed plugin system allows users to develop customizations to the app
 - Themes allow you to easily customize the colors and icons of the app for your own person look
 
 See [`docs/`](docs/) for the full design and the implementation roadmap.
@@ -62,7 +70,7 @@ See [`docs/`](docs/) for the full design and the implementation roadmap.
 ## Architecture
 
 A Cargo workspace with a platform-agnostic Rust **core** and a thin Tauri shell; the React +
-Lexical frontend talks to the core through typed Tauri command wrappers. Cloud sync is managed through OpenDAL, with Loro for CRDT. ONNX runtimes are used for local embedding and LLM models. 
+Lexical frontend talks to the core through typed Tauri command wrappers. Cloud sync is managed through OpenDAL, with Loro for CRDT. ONNX runtimes are used for local embedding and LLM models. Extism for plugins.
 
 ```
 crates/
