@@ -34,6 +34,13 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+// Inline per-tab loading/error state, shown while a tab's data is still absent.
+function TabPlaceholder({ loading, error }: { loading: boolean; error: string | null }) {
+  if (error) return <div className="stats-state stats-error">{error}</div>;
+  if (loading) return <div className="stats-state">Computing stats…</div>;
+  return null;
+}
+
 function formatJobLabel(raw: string | null): string {
   if (!raw) return 'Idle';
   if (raw.startsWith('embedding:note:')) return 'Embedding a note';
@@ -48,31 +55,80 @@ export function StatsView() {
   const [operational, setOperational] = useState<OperationalActivitySummary | null>(null);
   const [localAi, setLocalAi] = useState<LocalAiStatus | null>(null);
   const [policy, setPolicy] = useState<LocalAiDevicePolicy | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // Each tab loads its own data independently so the fast Overview isn't blocked behind the heavy
+  // git status (Activity) or embedding coverage (Local AI). Errors are per-source too, so one
+  // failing tab doesn't blank the page.
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [localAiLoading, setLocalAiLoading] = useState(false);
+  const [localAiError, setLocalAiError] = useState<string | null>(null);
+  const [operationalLoading, setOperationalLoading] = useState(false);
+  const [operationalError, setOperationalError] = useState<string | null>(null);
+
+  const loadStats = useCallback(async () => {
+    setStatsLoading(true);
+    setStatsError(null);
     try {
-      const [bookStats, operationalSummary, localAiStatus, devicePolicy] = await Promise.all([
-        api.bookStats(),
-        api.operationalActivitySummary(),
-        api.localAiStatus(),
-        api.getLocalAiDevicePolicy(),
-      ]);
-      setStats(bookStats);
-      setOperational(operationalSummary);
-      setLocalAi(localAiStatus);
-      setPolicy(devicePolicy);
+      setStats(await api.bookStats());
     } catch (e) {
-      setError(String(e));
+      setStatsError(String(e));
     } finally {
-      setLoading(false);
+      setStatsLoading(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadLocalAi = useCallback(async () => {
+    setLocalAiLoading(true);
+    setLocalAiError(null);
+    try {
+      const [localAiStatus, devicePolicy] = await Promise.all([
+        api.localAiStatus(),
+        api.getLocalAiDevicePolicy(),
+      ]);
+      setLocalAi(localAiStatus);
+      setPolicy(devicePolicy);
+    } catch (e) {
+      setLocalAiError(String(e));
+    } finally {
+      setLocalAiLoading(false);
+    }
+  }, []);
+
+  const loadOperational = useCallback(async () => {
+    setOperationalLoading(true);
+    setOperationalError(null);
+    try {
+      setOperational(await api.operationalActivitySummary());
+    } catch (e) {
+      setOperationalError(String(e));
+    } finally {
+      setOperationalLoading(false);
+    }
+  }, []);
+
+  // Overview (the default tab) needs only book stats, so fetch that eagerly on mount.
+  useEffect(() => { loadStats(); }, [loadStats]);
+
+  // Lazily fetch a heavier tab's data the first time it's opened. The error guards stop an auto
+  // refetch loop after a failure — the Refresh button is the retry path.
+  useEffect(() => {
+    if (tab === 'local-ai' && localAi === null && !localAiLoading && localAiError === null) {
+      loadLocalAi();
+    } else if (tab === 'activity' && operational === null && !operationalLoading && operationalError === null) {
+      loadOperational();
+    }
+  }, [
+    tab, localAi, operational, localAiLoading, operationalLoading,
+    localAiError, operationalError, loadLocalAi, loadOperational,
+  ]);
+
+  // Refresh only what the current tab shows (plus book stats, which back Overview/Distribution).
+  const refresh = useCallback(() => {
+    loadStats();
+    if (tab === 'local-ai') loadLocalAi();
+    else if (tab === 'activity') loadOperational();
+  }, [tab, loadStats, loadLocalAi, loadOperational]);
 
   const togglePolicy = useCallback(async (
     key: 'generate_note_embeddings' | 'pause_note_embeddings_on_battery',
@@ -98,11 +154,7 @@ export function StatsView() {
     [stats],
   );
 
-  if (loading) return <div className="stats-state">Computing stats…</div>;
-  if (error) return <div className="stats-state stats-error">{error}</div>;
-  if (!stats) return null;
-
-  const sortedPercent = stats.total_notes > 0
+  const sortedPercent = stats && stats.total_notes > 0
     ? Math.round((stats.sorted_notes / stats.total_notes) * 100)
     : 0;
 
@@ -125,11 +177,11 @@ export function StatsView() {
           </div>
         }
       >
-        <button className="stats-refresh-btn" onClick={load}>Refresh</button>
+        <button className="stats-refresh-btn" onClick={refresh}>Refresh</button>
       </PageHeader>
 
       <div className="stats-body">
-      {tab === 'overview' && (
+      {tab === 'overview' && (stats ? (
         <section className="stats-section">
           <h3 className="stats-section-title">Overview</h3>
           <div className="stats-grid">
@@ -152,9 +204,9 @@ export function StatsView() {
             <StatCard label="Scheduled for deletion" value={stats.scheduled_for_deletion} sub="in trash, pending purge" />
           </div>
         </section>
-      )}
+      ) : <TabPlaceholder loading={statsLoading} error={statsError} />)}
 
-      {tab === 'local-ai' && localAi && (
+      {tab === 'local-ai' && (localAi ? (
         <LocalAiSection
           localAi={localAi}
           policy={policy}
@@ -164,12 +216,12 @@ export function StatsView() {
               await api.downloadBuiltinModel(localAi.embedding_model_id);
             }
             await api.enqueueAllStaleEmbeddings();
-            await load();
+            await loadLocalAi();
           }}
         />
-      )}
+      ) : <TabPlaceholder loading={localAiLoading} error={localAiError} />)}
 
-      {tab === 'activity' && operational && (
+      {tab === 'activity' && (operational ? (
         <>
           <section className="stats-section">
             <h3 className="stats-section-title">Operational activity</h3>
@@ -251,9 +303,9 @@ export function StatsView() {
             )}
           </section>
         </>
-      )}
+      ) : <TabPlaceholder loading={operationalLoading} error={operationalError} />)}
 
-      {tab === 'distribution' && (
+      {tab === 'distribution' && (stats ? (
         <>
           {typeEntries.length > 0 && (
             <section className="stats-section">
@@ -301,7 +353,7 @@ export function StatsView() {
             </section>
           )}
         </>
-      )}
+      ) : <TabPlaceholder loading={statsLoading} error={statsError} />)}
       </div>
     </div>
   );

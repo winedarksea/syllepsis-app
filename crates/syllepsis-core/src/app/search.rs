@@ -31,6 +31,17 @@ fn engine_for(
     book: &Book,
     visibility: NoteVisibility,
 ) -> CoreResult<(SearchEngine, EmbeddingCoverage)> {
+    let notes = searchable_notes(book, visibility)?;
+    let loaded = load_embedding_corpus(book, &notes)?;
+    Ok((
+        SearchEngine::build_from_vectors(notes, loaded.vectors, &book.config),
+        loaded.coverage,
+    ))
+}
+
+/// The book's searchable notes for a given visibility, sorted by id — the shared prelude for both
+/// [`engine_for`] and coverage-only callers.
+fn searchable_notes(book: &Book, visibility: NoteVisibility) -> CoreResult<Vec<Note>> {
     let mut notes: Vec<Note> = book
         .store
         .read_all_notes()?
@@ -38,11 +49,7 @@ fn engine_for(
         .filter(|n| note_matches_searchable(n, visibility))
         .collect();
     notes.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
-    let loaded = load_embedding_corpus(book, &notes)?;
-    Ok((
-        SearchEngine::build_from_vectors(notes, loaded.vectors, &book.config),
-        loaded.coverage,
-    ))
+    Ok(notes)
 }
 
 /// A note belongs in the search engine for `visibility`. Layers the `exclude_from_search` capability
@@ -96,7 +103,10 @@ pub fn embedding_diagnostics(book: &Book) -> CoreResult<EmbeddingDiagnostics> {
 }
 
 pub fn embedding_coverage(book: &Book) -> CoreResult<EmbeddingCoverage> {
-    Ok(engine_for(book, NoteVisibility::Active)?.1)
+    // Coverage only needs the loaded vector corpus, not a built engine — skip the BM25 index and
+    // per-doc lowercasing that `engine_for`/`SearchEngine::build_from_vectors` would otherwise do.
+    let notes = searchable_notes(book, NoteVisibility::Active)?;
+    Ok(load_embedding_corpus(book, &notes)?.coverage)
 }
 
 /// Embedding coverage for a single category.
@@ -285,6 +295,27 @@ mod tests {
         let id = &hits.hits[0].note_id;
         let related = related_notes(&book, id).unwrap();
         assert!(related.iter().any(|r| r.title == "Compost B"));
+    }
+
+    #[test]
+    fn coverage_only_path_matches_engine_coverage() {
+        let (_d, book) = book();
+        add(&book, "Embedded", "compost soil garden", &["garden"]);
+        add(&book, "Also embedded", "garden compost watering", &["garden"]);
+        add(&book, "Missing vector", "electrical breaker panel", &["electrical"]);
+        // Only write sidecars for the first two notes, leaving the third "missing".
+        let notes = book.store.read_all_notes().unwrap();
+        let embedded: Vec<_> = notes
+            .into_iter()
+            .filter(|n| n.title != "Missing vector")
+            .collect();
+        crate::embeddings::repository::write_test_sidecars(&book, &embedded);
+
+        let coverage_only = embedding_coverage(&book).unwrap();
+        let engine_coverage = engine_for(&book, NoteVisibility::Active).unwrap().1;
+        assert_eq!(coverage_only, engine_coverage);
+        assert_eq!(coverage_only.total_notes, 3);
+        assert_eq!(coverage_only.missing_notes, 1);
     }
 
     #[test]
