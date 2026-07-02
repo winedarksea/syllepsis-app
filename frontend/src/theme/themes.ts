@@ -19,15 +19,19 @@ export interface ThemeStyle {
   flavorLang?: 'icelandic' | 'latin';
 }
 
-// Safe per-slot SVG override: only path-data + viewBox, rendered as controlled <svg><path>.
-// No raw markup ever touches the DOM — only the listed fields reach the renderer.
-export type ThemeIcon = { viewBox?: string; path: string | string[] };
+// Safe per-slot SVG override: only path-data + viewBox + stroke cap, rendered as controlled
+// <svg><path>. No raw markup ever touches the DOM — only the listed fields reach the renderer.
+export type ThemeIcon = { viewBox?: string; path: string | string[]; cap?: 'butt' | 'round' | 'square' };
 
 // The named nav/signature slots that themes may override with custom glyphs.
-export type SignatureSlot = 'book' | 'unsorted' | 'search' | 'graph' | 'worlds' | 'packs' | 'new' | 'sync';
+// 'sync' is the cloud-sync state; 'sync_git' and 'sync_off' are its git-mode and
+// offline-mode variants so themed sets keep the sync-state information visible.
+export type SignatureSlot =
+  | 'book' | 'unsorted' | 'search' | 'graph' | 'worlds' | 'packs' | 'new'
+  | 'sync' | 'sync_git' | 'sync_off';
 
 export const SIGNATURE_SLOTS: readonly SignatureSlot[] = [
-  'book', 'unsorted', 'search', 'graph', 'worlds', 'packs', 'new', 'sync',
+  'book', 'unsorted', 'search', 'graph', 'worlds', 'packs', 'new', 'sync', 'sync_git', 'sync_off',
 ];
 
 // Material Symbols fallback ligature name for each slot (used when no icon set / override).
@@ -39,7 +43,9 @@ export const SLOT_FALLBACK: Record<SignatureSlot, string> = {
   worlds: 'map',
   packs: 'inventory_2',
   new: 'add',
-  sync: 'cloud_off',
+  sync: 'cloud_sync',
+  sync_git: 'merge',
+  sync_off: 'cloud_off',
 };
 
 export type ThemeIcons = Partial<Record<SignatureSlot, ThemeIcon>>;

@@ -316,7 +316,7 @@ export function Sidebar({
         >
           <Icon
             name={syncMode === 'cloud' ? 'cloud_sync' : syncMode === 'git' ? 'merge' : 'cloud_off'}
-            slot="sync"
+            slot={syncMode === 'cloud' ? 'sync' : syncMode === 'git' ? 'sync_git' : 'sync_off'}
             size={18}
           />
         </button>

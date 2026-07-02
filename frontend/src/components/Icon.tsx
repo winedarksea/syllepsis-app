@@ -23,6 +23,8 @@ interface IconProps {
 function SvgIcon({ icon, size, className, title }: { icon: ThemeIcon; size?: number; className?: string; title?: string }) {
   const paths = Array.isArray(icon.path) ? icon.path : [icon.path];
   const px = size ?? 20;
+  // Only known linecap values reach the DOM (icon data may come from imported themes).
+  const cap = icon.cap === 'butt' || icon.cap === 'square' ? icon.cap : 'round';
   return (
     <svg
       viewBox={icon.viewBox ?? '0 0 24 24'}
@@ -31,8 +33,8 @@ function SvgIcon({ icon, size, className, title }: { icon: ThemeIcon; size?: num
       fill="none"
       stroke="currentColor"
       strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      strokeLinecap={cap}
+      strokeLinejoin={cap === 'round' ? 'round' : 'miter'}
       className={className}
       aria-hidden={title ? undefined : true}
       role={title ? 'img' : undefined}
