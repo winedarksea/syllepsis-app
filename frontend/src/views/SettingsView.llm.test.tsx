@@ -57,6 +57,7 @@ function config(): BookConfig {
         grammar: localRef,
         category_suggest: localRef,
         rewrite: localRef,
+        import_split: localRef,
       },
     },
     sync: {
@@ -109,7 +110,7 @@ describe('LlmDefaultsPanel', () => {
     const saved = mocks.updateLlmConfig.mock.calls[0][0];
     expect(saved.provider).toBe('openai_compatible');
     expect(Object.values(saved.routing)).toEqual(
-      Array(6).fill({ provider: 'openai_compatible', model: 'gpt-5.4-mini' }),
+      Array(7).fill({ provider: 'openai_compatible', model: 'gpt-5.4-mini' }),
     );
   });
 
@@ -132,7 +133,7 @@ describe('LlmDefaultsPanel', () => {
     await waitFor(() => expect(mocks.updateLlmConfig).toHaveBeenCalledTimes(1));
     const saved = mocks.updateLlmConfig.mock.calls[0][0];
     expect(Object.values(saved.routing)).toEqual(
-      Array(6).fill({ provider: 'openai_compatible', model: 'gpt-5.4-lab' }),
+      Array(7).fill({ provider: 'openai_compatible', model: 'gpt-5.4-lab' }),
     );
   });
 });

@@ -197,6 +197,34 @@ pub(crate) fn generate_cloud_proposal_for_state(
     proposal_from_completed_prompt(state, prompt, content)
 }
 
+/// Generate a cloud proposal for a transient note that is not stored in the book (import
+/// chunks). The proposal is wrapped directly since there is no stored target to validate.
+pub(crate) fn generate_cloud_proposal_for_inline_note(
+    state: &AppState,
+    note: &syllepsis_core::model::Note,
+    task: LlmTask,
+    model_override: Option<ModelRef>,
+    options: &LlmTaskOptions,
+) -> Result<Proposal, String> {
+    let prompt = {
+        let guard = state.book.lock().unwrap();
+        let book = guard
+            .as_ref()
+            .ok_or_else(|| "no book is open".to_string())?;
+        app::prepare_cloud_prompt_for_note_with_options(book, note, task, model_override, options)
+            .map_err(|e| e.to_string())?
+    };
+    let mut store = KeyringVaultStore::new();
+    let content = execute_cloud_prompt(state, &mut store, &prompt)?;
+    Ok(Proposal::new(
+        note.id.clone(),
+        task,
+        ModelRef::new(prompt.provider, prompt.model),
+        content,
+        true,
+    ))
+}
+
 fn provider_descriptors() -> Vec<CloudLlmProviderDescriptor> {
     vec![
         CloudLlmProviderDescriptor {

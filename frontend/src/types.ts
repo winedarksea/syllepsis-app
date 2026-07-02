@@ -615,7 +615,8 @@ export type LlmTask =
   | 'grammar'
   | 'category_suggest'
   | 'rewrite'
-  | 'generate_from_summary';
+  | 'generate_from_summary'
+  | 'import_split';
 
 export type SummaryVariant = 'plain' | 'mnemonic' | 'acrostic';
 export type RewriteMode = 'standard' | 'simplify';
@@ -762,6 +763,7 @@ export interface LlmRouting {
   grammar: ModelRef;
   category_suggest: ModelRef;
   rewrite: ModelRef;
+  import_split: ModelRef;
 }
 
 export interface LlmConfig {
@@ -1129,7 +1131,7 @@ export interface ImportReport {
 
 // ── Text import (mirrors syllepsis_core::app::text_import) ──
 
-export type TextImportSplitMode = 'one_note' | 'non_empty_line' | 'paragraph' | 'smart';
+export type TextImportSplitMode = 'one_note' | 'non_empty_line' | 'paragraph' | 'smart' | 'outline';
 export type TextImportBlockKind = 'paragraph' | 'list' | 'table' | 'code';
 export type TextImportPriorPreviewTarget = 'none' | 'previous_imported_note' | 'category' | 'existing_note';
 
@@ -1140,6 +1142,11 @@ export interface TextImportOptions {
   detect_tables: boolean;
   detect_code_blocks: boolean;
   convert_indented_lists: boolean;
+  outline_promote_min_lines: number;
+  outline_promote_min_chars: number;
+  outline_promote_max_depth: number;
+  outline_category_min_children: number;
+  outline_group_loose_lines: boolean;
 }
 
 export interface TextImportPriorPreview {
@@ -1156,6 +1163,9 @@ export interface TextImportPreviewItem {
   category_context?: string | null;
   intended_prior?: TextImportPriorPreview | null;
   warnings: string[];
+  categories: string[];
+  parent_index?: number | null;
+  depth: number;
 }
 
 export interface TextImportCategoryPreview {
@@ -1185,6 +1195,48 @@ export interface TextImportReport {
   imported: string[];
   created_categories: string[];
   first_note_id?: string | null;
+}
+
+// Deterministic keyword suggestion over preview items (text_import::keywords).
+export interface TextImportCategorySuggestion {
+  name: string;
+  label: string;
+  score: number;
+  item_indices: number[];
+}
+
+// LLM chunking of preview items (text_import::chunks).
+export interface TextImportLlmChunk {
+  index: number;
+  heading?: string | null;
+  text: string;
+  item_indices: number[];
+  warnings: string[];
+}
+
+// One note proposed by an import_split LLM run (llm::service::ProposedImportNote).
+export interface ProposedImportNote {
+  title: string;
+  body: string;
+  categories: string[];
+}
+
+// Import-split job queue (commands::text_import_llm).
+export interface ImportLlmChunkRequest {
+  chunk_index: number;
+  heading?: string | null;
+  text: string;
+  model_override?: ModelRef | null;
+  prompt_override?: string | null;
+}
+
+export interface ImportLlmJobResult {
+  job_id: string;
+  chunk_index: number;
+  status: QueuedLlmJobStatus;
+  proposed: ProposedImportNote[];
+  raw_output?: string | null;
+  error?: string | null;
 }
 
 // ── Plugins (mirrors syllepsis_core::app::plugin::PluginDescriptor) ──

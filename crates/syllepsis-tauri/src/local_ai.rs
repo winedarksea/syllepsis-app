@@ -20,6 +20,7 @@ use syllepsis_core::embeddings::{
 use syllepsis_core::id::NoteId;
 use syllepsis_core::llm::prompts::LlmTaskOptions;
 use syllepsis_core::llm::{select_llm_provider, LlmService, LlmTask, Proposal};
+use syllepsis_core::model::Note;
 use syllepsis_core::storage::{Book, NoteStore};
 
 use power::detect_power_source;
@@ -65,10 +66,17 @@ pub struct LocalAiWorkerStatus {
     pub recent_failures: Vec<LocalAiFailure>,
 }
 
+/// What an LLM job runs over: a note stored in the book (loaded from disk by id when the job
+/// executes) or a transient note carried inline (import chunks that are not stored notes).
+enum LlmJobPayload {
+    Stored(String),
+    Inline(Box<Note>),
+}
+
 struct LlmJob {
     book_root: PathBuf,
     models_root: PathBuf,
-    note_id: String,
+    payload: LlmJobPayload,
     task: LlmTask,
     model_override: Option<ModelRef>,
     options: LlmTaskOptions,
@@ -273,29 +281,18 @@ impl LocalAiWorker {
         model_override: Option<ModelRef>,
         options: LlmTaskOptions,
     ) -> Result<Proposal, String> {
-        let (response_tx, response_rx) = mpsc::sync_channel(1);
         let models_root = book
             .models_root()
             .ok_or_else(|| "local model directory unavailable".to_string())?
             .to_path_buf();
-        self.shared
-            .state
-            .lock()
-            .unwrap()
-            .llm_jobs
-            .push_back(LlmJob {
-                book_root: book.root.clone(),
-                models_root,
-                note_id,
-                task,
-                model_override,
-                options,
-                response: response_tx,
-            });
-        self.shared.wake.notify_all();
-        response_rx
-            .recv()
-            .map_err(|_| "local AI worker stopped".to_string())?
+        self.submit_llm_job(
+            book.root.clone(),
+            models_root,
+            LlmJobPayload::Stored(note_id),
+            task,
+            model_override,
+            options,
+        )
     }
 
     pub fn submit_llm_path(
@@ -303,6 +300,45 @@ impl LocalAiWorker {
         book_root: PathBuf,
         models_root: PathBuf,
         note_id: String,
+        task: LlmTask,
+        model_override: Option<ModelRef>,
+        options: LlmTaskOptions,
+    ) -> Result<Proposal, String> {
+        self.submit_llm_job(
+            book_root,
+            models_root,
+            LlmJobPayload::Stored(note_id),
+            task,
+            model_override,
+            options,
+        )
+    }
+
+    /// Run an LLM task over a transient note that is not stored in the book (import chunks).
+    pub fn submit_llm_inline_path(
+        &self,
+        book_root: PathBuf,
+        models_root: PathBuf,
+        note: Note,
+        task: LlmTask,
+        model_override: Option<ModelRef>,
+        options: LlmTaskOptions,
+    ) -> Result<Proposal, String> {
+        self.submit_llm_job(
+            book_root,
+            models_root,
+            LlmJobPayload::Inline(Box::new(note)),
+            task,
+            model_override,
+            options,
+        )
+    }
+
+    fn submit_llm_job(
+        &self,
+        book_root: PathBuf,
+        models_root: PathBuf,
+        payload: LlmJobPayload,
         task: LlmTask,
         model_override: Option<ModelRef>,
         options: LlmTaskOptions,
@@ -316,7 +352,7 @@ impl LocalAiWorker {
             .push_back(LlmJob {
                 book_root,
                 models_root,
-                note_id,
+                payload,
                 task,
                 model_override,
                 options,
@@ -499,14 +535,26 @@ fn process_llm_job(runtime: &mut RuntimeCache, job: &LlmJob) -> Result<Proposal,
     let RuntimeCache::Llm { service, .. } = runtime else {
         unreachable!()
     };
-    app::llm::generate_proposal_with_service_and_options(
-        &book,
-        service.as_ref(),
-        &job.note_id,
-        job.task,
-        job.model_override.clone(),
-        &job.options,
-    )
+    match &job.payload {
+        LlmJobPayload::Stored(note_id) => app::llm::generate_proposal_with_service_and_options(
+            &book,
+            service.as_ref(),
+            note_id,
+            job.task,
+            job.model_override.clone(),
+            &job.options,
+        ),
+        LlmJobPayload::Inline(note) => {
+            app::llm::generate_proposal_for_note_with_service_and_options(
+                &book,
+                service.as_ref(),
+                note,
+                job.task,
+                job.model_override.clone(),
+                &job.options,
+            )
+        }
+    }
     .map_err(|error| error.to_string())
 }
 

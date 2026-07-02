@@ -14,7 +14,7 @@ import { GraphView } from './views/GraphView';
 import { WorldView } from './views/WorldView';
 import { PrivacyView } from './views/PrivacyView';
 import { PacksView } from './views/PacksView';
-import { TextImportView } from './views/TextImportView';
+import { TextImportView } from './views/text-import/TextImportView';
 import { Diagnostics } from './views/Diagnostics';
 import { StatsView } from './views/StatsView';
 import { StyleCardsView } from './views/StyleCardsView';

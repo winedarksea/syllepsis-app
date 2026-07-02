@@ -3,7 +3,11 @@
 use tauri::State;
 
 use syllepsis_core::app::text_import::{
-    self as app, TextImportCommitRequest, TextImportOptions, TextImportPreview, TextImportReport,
+    self as app,
+    chunks::{self, TextImportLlmChunk},
+    keywords::{self, TextImportCategorySuggestion},
+    TextImportCommitRequest, TextImportOptions, TextImportPreview, TextImportPreviewItem,
+    TextImportReport,
 };
 
 use crate::state::AppState;
@@ -29,6 +33,24 @@ pub fn preview_text_import(
     options: TextImportOptions,
 ) -> Result<TextImportPreview, String> {
     Ok(app::preview_text_import(&source_text, &options))
+}
+
+/// Deterministic keyword-based category suggestions over the current preview items.
+#[tauri::command]
+pub fn suggest_text_import_categories(
+    items: Vec<TextImportPreviewItem>,
+    max: usize,
+) -> Result<Vec<TextImportCategorySuggestion>, String> {
+    Ok(keywords::suggest_categories(&items, max))
+}
+
+/// Pack preview items into LLM-sized chunks (sections stay intact by construction).
+#[tauri::command]
+pub fn chunk_text_import_for_llm(
+    items: Vec<TextImportPreviewItem>,
+    max_chars: usize,
+) -> Result<Vec<TextImportLlmChunk>, String> {
+    Ok(chunks::chunk_items_for_llm(&items, max_chars))
 }
 
 #[tauri::command]

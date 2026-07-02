@@ -26,6 +26,9 @@ export default defineConfig([
       'react-hooks/set-state-in-effect': 'off',
       'react-hooks/refs': 'off',
       'react-hooks/purity': 'off',
+      // Allow a leading underscore to mark a destructured binding as intentionally unused
+      // (e.g. `const { accepted: _accepted, ...rest } = item` to drop a field before sending).
+      '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_', argsIgnorePattern: '^_' }],
     },
   },
 ])

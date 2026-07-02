@@ -236,10 +236,16 @@
   font-family: var(--font-mono);
 }
 
-.ti-preview-list {
+/* The whole right pane scrolls (panels + list); the list itself just stacks. */
+.ti-preview-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.ti-preview-list {
   display: grid;
   align-content: start;
   gap: var(--sp-3);
@@ -320,5 +326,238 @@
   .ti-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+
+/* ── Outline mode & new import panels ─────────────────────────────────────── */
+
+.ti-outline-options {
+  margin-top: var(--sp-2);
+}
+
+.ti-subpanel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  padding: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.ti-subpanel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.ti-subpanel-header h4 {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.ti-btn-small {
+  min-height: 28px;
+  padding: 0 var(--sp-2);
+  font-size: var(--font-size-xs);
+}
+
+/* Keyword suggestions */
+.ti-suggestion-list {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ti-suggestion {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.ti-suggestion-meta {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  flex: 1;
+  min-width: 0;
+}
+
+.ti-suggestion-exists {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+/* Item cards: accept/reject, promotion badge, category chips editor */
+.ti-item-rejected {
+  opacity: 0.45;
+}
+
+.ti-item-header-spacer {
+  flex: 1;
+}
+
+.ti-preview-item-header .ti-icon-btn {
+  margin-left: 0;
+}
+
+.ti-accept-btn-on {
+  color: var(--color-accent);
+}
+
+.ti-chip-primary {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.ti-chip-split {
+  gap: 4px;
+  background: var(--color-tag-bg);
+  color: var(--color-accent);
+}
+
+.ti-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+}
+
+.ti-category-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.ti-chip-add input {
+  border: 1px dashed var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  padding: 3px 10px;
+  width: 110px;
+}
+
+.ti-compact-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-sm);
+}
+
+.ti-compact-preview span {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ti-show-all {
+  margin-top: var(--sp-3);
+  align-self: center;
+}
+
+/* AI split panel */
+.ti-override-input {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.ti-llm-run-row {
+  margin-top: var(--sp-3);
+  align-items: flex-end;
+}
+
+.ti-chunk-size-field {
+  max-width: 160px;
+}
+
+.ti-chunk {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  padding: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.ti-chunk-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.ti-chunk-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.ti-chunk-side {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.ti-chunk-side-chosen {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.ti-chunk-side-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 700;
+  font-size: var(--font-size-sm);
+}
+
+.ti-chunk-note-list {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+  font-size: var(--font-size-sm);
+}
+
+.ti-proposal {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+.ti-proposal-body {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.ti-raw-output {
+  margin-top: var(--sp-2);
+  font-size: var(--font-size-xs);
+}
+
+.ti-raw-output pre {
+  max-height: 220px;
+  overflow: auto;
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 900px) {
+  .ti-chunk-compare {
+    grid-template-columns: 1fr;
   }
 }

@@ -95,6 +95,14 @@ fn system_prompt(task: LlmTask) -> &'static str {
             "You are a skilled writer. Generate a complete note body from the note's title and \
              summary. Preserve any #tags or @refs already present. Output only the generated body in valid markdown text."
         }
+        LlmTask::ImportSplit => {
+            "You split imported text into small, focused notes. Respond with ONLY a JSON array, \
+             no commentary, where each element is an object: \
+             {\"title\": string of at most 72 characters, \"body\": markdown string, \
+             \"categories\": array of 1-3 short lowercase tag names}. \
+             Preserve the original wording and every detail of the source text; split it, do not \
+             summarize or paraphrase. Prefer many small focused notes over few large ones."
+        }
     }
 }
 
@@ -141,7 +149,9 @@ pub fn build_with_options(
         note_text(note)
     };
 
-    if task == LlmTask::CategorySuggest && !known_categories.is_empty() {
+    if matches!(task, LlmTask::CategorySuggest | LlmTask::ImportSplit)
+        && !known_categories.is_empty()
+    {
         user.push_str("\n\nExisting categories to prefer when relevant: ");
         user.push_str(&known_categories.join(", "));
     }
@@ -152,6 +162,17 @@ pub fn build_with_options(
 }
 
 fn append_task_options(user: &mut String, task: LlmTask, options: &LlmTaskOptions) {
+    // Import splitting reuses the style_overrides slot as a free-form per-run prompt override.
+    if task == LlmTask::ImportSplit {
+        if let Some(overrides) = &options.style_overrides {
+            if !overrides.trim().is_empty() {
+                user.push_str("\n\nAdditional instructions for this run:\n");
+                user.push_str(overrides.trim());
+            }
+        }
+        return;
+    }
+
     if task == LlmTask::Summarize {
         match options.summary_variant {
             SummaryVariant::Plain => {}
@@ -254,6 +275,27 @@ mod tests {
         assert!(user.contains("Short sentences."));
         assert!(user.contains("Prefer bullet-like paragraphs."));
         assert!(user.contains("simplify"));
+    }
+
+    #[test]
+    fn import_split_prompt_fixes_json_contract_and_offers_categories() {
+        let cats = vec!["electrical".to_string(), "garden".to_string()];
+        let (sys, user) = build(LlmTask::ImportSplit, &note(), &cats);
+        assert!(sys.contains("ONLY a JSON array"));
+        assert!(sys.contains("\"title\""));
+        assert!(sys.contains("do not summarize"));
+        assert!(user.contains("Existing categories to prefer when relevant: electrical, garden"));
+    }
+
+    #[test]
+    fn import_split_prompt_appends_per_run_override() {
+        let options = LlmTaskOptions {
+            style_overrides: Some("Keep every measurement exactly as written.".into()),
+            ..Default::default()
+        };
+        let (_sys, user) = build_with_options(LlmTask::ImportSplit, &note(), &[], &options);
+        assert!(user.contains("Additional instructions for this run:"));
+        assert!(user.contains("Keep every measurement exactly as written."));
     }
 
     #[test]

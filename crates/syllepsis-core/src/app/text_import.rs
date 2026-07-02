@@ -13,6 +13,10 @@ use crate::markdown::dialect;
 use crate::model::{Category, Note, ObjectType, PriorEdge, PriorKind};
 use crate::storage::{Book, NoteStore};
 
+pub mod chunks;
+pub mod keywords;
+pub mod outline;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TextImportSplitMode {
@@ -20,6 +24,7 @@ pub enum TextImportSplitMode {
     NonEmptyLine,
     Paragraph,
     Smart,
+    Outline,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,6 +35,44 @@ pub struct TextImportOptions {
     pub detect_tables: bool,
     pub detect_code_blocks: bool,
     pub convert_indented_lists: bool,
+    /// Outline mode: a subtree with at least this many lines is promoted to its own note.
+    #[serde(default = "default_outline_promote_min_lines")]
+    pub outline_promote_min_lines: usize,
+    /// Outline mode: ...or at least this many characters.
+    #[serde(default = "default_outline_promote_min_chars")]
+    pub outline_promote_min_chars: usize,
+    /// Outline mode: only nodes within this relative depth of their note root are promoted.
+    /// `0` disables promotion entirely.
+    #[serde(default = "default_outline_promote_max_depth")]
+    pub outline_promote_max_depth: usize,
+    /// Outline mode: a top-level node needs at least this many direct children to become a
+    /// category section instead of a single note.
+    #[serde(default = "default_outline_category_min_children")]
+    pub outline_category_min_children: usize,
+    /// Outline mode: merge consecutive childless top-level lines (between blank lines) into one
+    /// bulleted note. Off imports one note per line.
+    #[serde(default = "default_outline_group_loose_lines")]
+    pub outline_group_loose_lines: bool,
+}
+
+fn default_outline_promote_min_lines() -> usize {
+    6
+}
+
+fn default_outline_promote_min_chars() -> usize {
+    400
+}
+
+fn default_outline_promote_max_depth() -> usize {
+    3
+}
+
+fn default_outline_category_min_children() -> usize {
+    2
+}
+
+fn default_outline_group_loose_lines() -> bool {
+    true
 }
 
 impl Default for TextImportOptions {
@@ -41,6 +84,11 @@ impl Default for TextImportOptions {
             detect_tables: true,
             detect_code_blocks: true,
             convert_indented_lists: false,
+            outline_promote_min_lines: default_outline_promote_min_lines(),
+            outline_promote_min_chars: default_outline_promote_min_chars(),
+            outline_promote_max_depth: default_outline_promote_max_depth(),
+            outline_category_min_children: default_outline_category_min_children(),
+            outline_group_loose_lines: default_outline_group_loose_lines(),
         }
     }
 }
@@ -79,6 +127,15 @@ pub struct TextImportPreviewItem {
     pub category_context: Option<String>,
     pub intended_prior: Option<TextImportPriorPreview>,
     pub warnings: Vec<String>,
+    /// Extra categories applied on commit beyond `category_context` (keyword/AI suggestions).
+    #[serde(default)]
+    pub categories: Vec<String>,
+    /// Index of the preview item this note was promoted out of (outline mode).
+    #[serde(default)]
+    pub parent_index: Option<usize>,
+    /// UI indent level for promoted notes (0 for regular items).
+    #[serde(default)]
+    pub depth: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +196,16 @@ pub fn preview_text_import(source_text: &str, options: &TextImportOptions) -> Te
         TextImportSplitMode::NonEmptyLine => parse_non_empty_lines(&normalized, options),
         TextImportSplitMode::Paragraph => parse_paragraphs(&normalized, options),
         TextImportSplitMode::Smart => parse_smart_blocks(&normalized, options),
+        // The outline parser assigns priors itself (each section starts its own chain), so it
+        // returns finished preview items instead of blocks for the mapping loop below.
+        TextImportSplitMode::Outline => {
+            let (items, categories, warnings) = outline::parse_outline(&normalized, options);
+            return TextImportPreview {
+                items,
+                categories,
+                warnings,
+            };
+        }
     };
 
     let items = blocks
@@ -169,6 +236,9 @@ pub fn preview_text_import(source_text: &str, options: &TextImportOptions) -> Te
                 category_context: block.category_context,
                 intended_prior: target,
                 warnings: block.warnings,
+                categories: Vec::new(),
+                parent_index: None,
+                depth: 0,
             }
         })
         .collect();
@@ -227,7 +297,13 @@ pub fn commit_text_import(
         note.metadata.dates.created = note.metadata.dates.updated;
 
         note.prior = if let Some(previous) = previous_note_id.clone() {
-            Some(PriorEdge::follows(previous, intended_kind(item)))
+            // An item explicitly marked as a category start (outline sections) begins its own
+            // chain instead of following the previous imported note.
+            if let Some(category) = intended_category_start(item) {
+                Some(PriorEdge::starts_category(category))
+            } else {
+                Some(PriorEdge::follows(previous, intended_kind(item)))
+            }
         } else if index == 0 {
             match &request.placement {
                 TextImportPlacement::Unsorted => {
@@ -830,10 +906,27 @@ fn intended_kind(item: &TextImportPreviewItem) -> PriorKind {
         .unwrap_or(PriorKind::NewParagraph)
 }
 
+/// The category this item explicitly starts, when its intended prior targets a category.
+fn intended_category_start(item: &TextImportPreviewItem) -> Option<String> {
+    let prior = item.intended_prior.as_ref()?;
+    if prior.target != TextImportPriorPreviewTarget::Category {
+        return None;
+    }
+    prior
+        .target_label
+        .clone()
+        .or_else(|| item.category_context.clone())
+}
+
 fn categories_for_item(item: &TextImportPreviewItem) -> Vec<String> {
     let mut categories = Vec::new();
     if let Some(category) = &item.category_context {
         categories.push(category.clone());
+    }
+    for category in &item.categories {
+        if !category.trim().is_empty() && !categories.contains(category) {
+            categories.push(category.clone());
+        }
     }
     for category in dialect::extract_categories(&item.body) {
         if !categories.contains(&category) {
@@ -931,6 +1024,75 @@ mod tests {
             .items
             .iter()
             .any(|item| item.body.contains("- child")));
+    }
+
+    #[test]
+    fn outline_commit_starts_a_chain_per_section() {
+        let dir = tempdir().unwrap();
+        let book = Book::create(dir.path().join("book"), "Book").unwrap();
+        let input = "Section one\n\tfirst note\n\tsecond note\nSection two\n\tthird note\n\tfourth note\n";
+        let preview = preview_text_import(input, &defaults(TextImportSplitMode::Outline));
+        assert_eq!(preview.items.len(), 4);
+        let report = commit_text_import(
+            &book,
+            TextImportCommitRequest {
+                items: preview.items,
+                categories: preview.categories,
+                placement: TextImportPlacement::Unsorted,
+            },
+        )
+        .unwrap();
+        assert_eq!(report.imported.len(), 4);
+        let note = |i: usize| {
+            book.store
+                .read_note(&NoteId::parse(&report.imported[i]).unwrap())
+                .unwrap()
+        };
+        // Each section head starts its own category chain; followers chain to the previous note.
+        assert!(matches!(
+            note(0).prior.as_ref().unwrap().target,
+            PriorRef::Category(ref name) if name == "section-one"
+        ));
+        assert!(matches!(
+            note(1).prior.as_ref().unwrap().target,
+            PriorRef::Note(ref id) if id == &note(0).id
+        ));
+        assert!(matches!(
+            note(2).prior.as_ref().unwrap().target,
+            PriorRef::Category(ref name) if name == "section-two"
+        ));
+        assert!(matches!(
+            note(3).prior.as_ref().unwrap().target,
+            PriorRef::Note(ref id) if id == &note(2).id
+        ));
+    }
+
+    #[test]
+    fn commit_merges_extra_item_categories() {
+        let dir = tempdir().unwrap();
+        let book = Book::create(dir.path().join("book"), "Book").unwrap();
+        let preview = preview_text_import("One note body.", &defaults(TextImportSplitMode::OneNote));
+        let mut items = preview.items;
+        items[0].categories = vec!["concrete".to_string(), "insulation".to_string()];
+        let report = commit_text_import(
+            &book,
+            TextImportCommitRequest {
+                items,
+                categories: preview.categories,
+                placement: TextImportPlacement::Unsorted,
+            },
+        )
+        .unwrap();
+        let note = book
+            .store
+            .read_note(&NoteId::parse(&report.imported[0]).unwrap())
+            .unwrap();
+        assert!(note.categories.contains(&"concrete".to_string()));
+        assert!(note.categories.contains(&"insulation".to_string()));
+        assert!(report.created_categories.contains(&"concrete".to_string()));
+        assert!(report
+            .created_categories
+            .contains(&"insulation".to_string()));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! the reply as a [`Proposal`]. This is the one object the app layer drives for LLM features; it
 //! owns the provider seam and the routing config so callers never touch either directly.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{LlmRouting, ModelRef};
 use crate::error::{CoreError, CoreResult};
@@ -174,6 +174,56 @@ pub fn parse_category_list(text: &str) -> Vec<String> {
     out
 }
 
+/// One proposed note from an [`LlmTask::ImportSplit`] response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProposedImportNote {
+    pub title: String,
+    pub body: String,
+    #[serde(default, alias = "tags")]
+    pub categories: Vec<String>,
+}
+
+/// Parse an import-split reply into proposed notes. Accepts fenced JSON, prose-wrapped arrays
+/// (first `[` to last `]`), and a bare single object. Category names are normalized like
+/// [`parse_category_list`] entries. `Err` carries a message; callers keep the deterministic
+/// items and surface the raw output.
+pub fn parse_import_split_response(text: &str) -> Result<Vec<ProposedImportNote>, String> {
+    let stripped = strip_code_fences(text);
+    let candidate = match (stripped.find('['), stripped.rfind(']')) {
+        (Some(start), Some(end)) if start < end => &stripped[start..=end],
+        _ => stripped,
+    };
+    let parsed: Vec<ProposedImportNote> = serde_json::from_str(candidate)
+        .or_else(|array_err| {
+            // Some models reply with a single object instead of a one-element array.
+            serde_json::from_str::<ProposedImportNote>(stripped)
+                .map(|note| vec![note])
+                .map_err(|_| format!("could not parse import-split JSON: {array_err}"))
+        })?;
+    let notes: Vec<ProposedImportNote> = parsed
+        .into_iter()
+        .map(|note| ProposedImportNote {
+            title: note.title.trim().to_string(),
+            body: note.body.trim().to_string(),
+            categories: note
+                .categories
+                .iter()
+                .flat_map(|raw| parse_category_list(raw))
+                .fold(Vec::new(), |mut acc, tag| {
+                    if !acc.contains(&tag) {
+                        acc.push(tag);
+                    }
+                    acc
+                }),
+        })
+        .filter(|note| !note.body.is_empty() || !note.title.is_empty())
+        .collect();
+    if notes.is_empty() {
+        return Err("import-split response contained no usable notes".to_string());
+    }
+    Ok(notes)
+}
+
 /// Parse a fact-check YAML response into an assessment enum and a notes string.
 ///
 /// Accepts optional leading/trailing markdown code fences. Block scalars with missing
@@ -338,6 +388,53 @@ mod tests {
     fn category_parser_normalizes_messy_model_output() {
         let parsed = parse_category_list("#Electrical, Main Panel ; safety\nsafety");
         assert_eq!(parsed, vec!["electrical", "main-panel", "safety"]);
+    }
+
+    #[test]
+    fn import_split_parser_handles_clean_json_array() {
+        let raw = r#"[{"title": "Hot tub", "body": "Simple concrete wall.", "categories": ["garden"]}]"#;
+        let notes = parse_import_split_response(raw).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].title, "Hot tub");
+        assert_eq!(notes[0].categories, vec!["garden"]);
+    }
+
+    #[test]
+    fn import_split_parser_strips_fences_and_prose() {
+        let raw = "Here are the notes:\n```json\n[{\"title\": \"A\", \"body\": \"a body\"}]\n```\nDone!";
+        let notes = parse_import_split_response(raw).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].body, "a body");
+        assert!(notes[0].categories.is_empty());
+    }
+
+    #[test]
+    fn import_split_parser_wraps_a_bare_single_object() {
+        let raw = r#"{"title": "Solo", "body": "one note", "categories": ["misc"]}"#;
+        let notes = parse_import_split_response(raw).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].title, "Solo");
+    }
+
+    #[test]
+    fn import_split_parser_accepts_tags_alias_and_normalizes_categories() {
+        let raw = r##"[{"title": "T", "body": "b", "tags": ["#Hot Tub", "garden", "garden"]}]"##;
+        let notes = parse_import_split_response(raw).unwrap();
+        assert_eq!(notes[0].categories, vec!["hot-tub", "garden"]);
+    }
+
+    #[test]
+    fn import_split_parser_drops_empty_entries() {
+        let raw = r#"[{"title": "", "body": ""}, {"title": "Keep", "body": "kept"}]"#;
+        let notes = parse_import_split_response(raw).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].title, "Keep");
+    }
+
+    #[test]
+    fn import_split_parser_rejects_garbage_with_error() {
+        assert!(parse_import_split_response("I could not do that.").is_err());
+        assert!(parse_import_split_response("").is_err());
     }
 
     #[test]

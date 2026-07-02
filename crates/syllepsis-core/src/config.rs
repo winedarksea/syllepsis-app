@@ -334,6 +334,7 @@ pub struct LlmRouting {
     pub grammar: ModelRef,
     pub category_suggest: ModelRef,
     pub rewrite: ModelRef,
+    pub import_split: ModelRef,
 }
 
 impl Default for LlmRouting {
@@ -345,7 +346,21 @@ impl Default for LlmRouting {
             devils_advocate: local.clone(),
             grammar: local.clone(),
             category_suggest: local.clone(),
-            rewrite: local,
+            rewrite: local.clone(),
+            import_split: local,
         }
+    }
+}
+
+#[cfg(test)]
+mod llm_routing_tests {
+    use super::*;
+
+    #[test]
+    fn old_configs_without_import_split_deserialize_to_the_local_default() {
+        let json = r#"{"summarize": {"provider": "anthropic", "model": "claude-sonnet"}}"#;
+        let routing: LlmRouting = serde_json::from_str(json).unwrap();
+        assert_eq!(routing.summarize.provider, "anthropic");
+        assert_eq!(routing.import_split, ModelRef::local_builtin());
     }
 }

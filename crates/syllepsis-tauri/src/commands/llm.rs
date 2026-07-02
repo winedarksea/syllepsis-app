@@ -41,7 +41,7 @@ macro_rules! with_book {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum EffectiveLlmExecution {
+pub(crate) enum EffectiveLlmExecution {
     Local { model_ref: ModelRef },
     Cloud { model_ref: ModelRef },
 }
@@ -351,7 +351,7 @@ fn run_queued_llm_job_inner(
     }
 }
 
-fn effective_llm_execution(
+pub(crate) fn effective_llm_execution(
     state: &AppState,
     task: LlmTask,
     model_override: Option<ModelRef>,

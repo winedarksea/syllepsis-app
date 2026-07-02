@@ -27,6 +27,8 @@ pub enum LlmTask {
     Rewrite,
     /// Expand the current summary into a note body, optionally following a style card.
     GenerateFromSummary,
+    /// Split a chunk of imported text into small notes (JSON array of title/body/categories).
+    ImportSplit,
 }
 
 impl LlmTask {
@@ -40,6 +42,7 @@ impl LlmTask {
             LlmTask::CategorySuggest => "category_suggest",
             LlmTask::Rewrite => "rewrite",
             LlmTask::GenerateFromSummary => "generate_from_summary",
+            LlmTask::ImportSplit => "import_split",
         }
     }
 
@@ -55,6 +58,7 @@ impl LlmTask {
             // Use the rewrite route until routing config grows a dedicated slot. This keeps the
             // task available without changing existing book config schemas.
             LlmTask::GenerateFromSummary => &routing.rewrite,
+            LlmTask::ImportSplit => &routing.import_split,
         }
     }
 

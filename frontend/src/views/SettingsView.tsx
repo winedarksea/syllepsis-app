@@ -734,7 +734,7 @@ export function LlmDefaultsPanel({ config, providers, onSaved, onError }: {
       provider,
       routing: {
         summarize: ref, fact_check: ref, devils_advocate: ref,
-        grammar: ref, category_suggest: ref, rewrite: ref,
+        grammar: ref, category_suggest: ref, rewrite: ref, import_split: ref,
       },
     };
     setSaving(true);

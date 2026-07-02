@@ -19,6 +19,7 @@ use crate::llm::prompts::LlmTaskOptions;
 use crate::llm::selection::select_llm_provider;
 use crate::llm::service::parse_category_list;
 use crate::llm::{LlmService, LlmTask, Proposal};
+use crate::model::Note;
 use crate::onnx::{manifest, ModelCache};
 use crate::storage::{Book, NoteStore};
 
@@ -210,14 +211,26 @@ pub fn prepare_cloud_prompt_with_options(
     options: &LlmTaskOptions,
 ) -> CoreResult<CloudLlmPrompt> {
     let note = book.store.read_note(&NoteId::parse(note_id)?)?;
+    prepare_cloud_prompt_for_note_with_options(book, &note, task, model_override, options)
+}
+
+/// Prepare a routed cloud prompt for a note that is not stored in the book (e.g. a transient
+/// note wrapping an import chunk). The stored-note path above delegates here after `read_note`.
+pub fn prepare_cloud_prompt_for_note_with_options(
+    book: &Book,
+    note: &Note,
+    task: LlmTask,
+    model_override: Option<ModelRef>,
+    options: &LlmTaskOptions,
+) -> CoreResult<CloudLlmPrompt> {
     let model_ref =
         model_override.unwrap_or_else(|| task.model_ref(&book.config.llm.routing).clone());
     reject_non_cloud_route(task, &model_ref)?;
     let known_categories = known_categories(book)?;
-    let (system, user) = prompts::build_with_options(task, &note, &known_categories, options);
+    let (system, user) = prompts::build_with_options(task, note, &known_categories, options);
 
     Ok(CloudLlmPrompt {
-        target_note_id: note_id.to_string(),
+        target_note_id: note.id.to_string(),
         task,
         provider: model_ref.provider,
         model: model_ref.model,
@@ -274,21 +287,36 @@ pub fn generate_proposal_with_service_and_options(
     options: &LlmTaskOptions,
 ) -> CoreResult<Proposal> {
     let note = book.store.read_note(&NoteId::parse(note_id)?)?;
-    let known_categories: Vec<String> = book
-        .store
-        .categories()?
-        .into_iter()
-        .map(|c| c.name)
-        .collect();
+    generate_proposal_for_note_with_service_and_options(
+        book,
+        service,
+        &note,
+        task,
+        model_override,
+        options,
+    )
+}
+
+/// Generate a proposal for a note that is not stored in the book (e.g. a transient note wrapping
+/// an import chunk). The stored-note path above delegates here after `read_note`.
+pub fn generate_proposal_for_note_with_service_and_options(
+    book: &Book,
+    service: &LlmService,
+    note: &Note,
+    task: LlmTask,
+    model_override: Option<ModelRef>,
+    options: &LlmTaskOptions,
+) -> CoreResult<Proposal> {
+    let known_categories = known_categories(book)?;
     match model_override {
         Some(model_ref) => service.generate_with_model_ref_and_options(
             task,
             model_ref,
-            &note,
+            note,
             &known_categories,
             options,
         ),
-        None => service.generate_with_options(task, &note, &known_categories, options),
+        None => service.generate_with_options(task, note, &known_categories, options),
     }
 }
 
@@ -318,7 +346,7 @@ fn reject_non_cloud_route(task: LlmTask, model_ref: &ModelRef) -> CoreResult<()>
     Ok(())
 }
 
-const LLM_TASKS: [LlmTask; 7] = [
+const LLM_TASKS: [LlmTask; 8] = [
     LlmTask::Summarize,
     LlmTask::FactCheck,
     LlmTask::DevilsAdvocate,
@@ -326,6 +354,7 @@ const LLM_TASKS: [LlmTask; 7] = [
     LlmTask::CategorySuggest,
     LlmTask::Rewrite,
     LlmTask::GenerateFromSummary,
+    LlmTask::ImportSplit,
 ];
 
 fn route_execution_mode(book: &Book, model_ref: &ModelRef) -> (LlmExecutionMode, bool) {
@@ -364,6 +393,7 @@ fn output_contract(task: LlmTask) -> &'static str {
         LlmTask::CategorySuggest => "comma_separated_categories",
         LlmTask::Rewrite => "plain_text_rewritten_body",
         LlmTask::GenerateFromSummary => "plain_text_generated_body",
+        LlmTask::ImportSplit => "json_import_notes",
     }
 }
 
@@ -416,6 +446,13 @@ pub fn accept_proposal(
         }
         LlmTask::FactCheck | LlmTask::DevilsAdvocate => {
             crate::app::commentary::create_proposal_commentary(book, proposal, None, None)?;
+        }
+        // Import-split proposals are reviewed and committed by the text-import flow, never
+        // applied to an existing note.
+        LlmTask::ImportSplit => {
+            return Err(CoreError::Llm(
+                "import_split proposals are committed through the text import flow".to_string(),
+            ));
         }
     }
 

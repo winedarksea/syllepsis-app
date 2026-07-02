@@ -11,7 +11,7 @@ pub mod state;
 use commands::{
     book::*, categories::*, cloud_llm::*, commentary::*, config::*, lifecycle::*, llm::*,
     local_ai::*, notes::*, pack::*, plugins::*, publish::*, search::*, serve::*, spatial::*,
-    style_cards::*, sync::*, text_import::*,
+    style_cards::*, sync::*, text_import::*, text_import_llm::*,
 };
 use state::AppState;
 use tauri::Manager;
@@ -235,6 +235,12 @@ pub fn run() {
             read_text_import_file,
             preview_text_import,
             commit_text_import,
+            suggest_text_import_categories,
+            chunk_text_import_for_llm,
+            enqueue_import_llm_chunk,
+            get_import_llm_job,
+            list_import_llm_jobs,
+            clear_import_llm_jobs,
             // plugins (WASM)
             list_plugins,
             set_plugin_enabled,

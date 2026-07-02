@@ -1,5 +1,6 @@
 //! Global application state threaded through Tauri commands via [`tauri::State`].
 
+use crate::commands::text_import_llm::ImportLlmJobResult;
 use crate::local_ai::LocalAiWorker;
 use crate::server::ServerHandle;
 use std::collections::HashMap;
@@ -61,6 +62,8 @@ pub struct AppState {
     pub file_watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub local_ai: LocalAiWorker,
     pub llm_jobs: Arc<Mutex<HashMap<String, QueuedLlmJobRecord>>>,
+    /// Import-split chunk jobs (session-scoped, pre-note flow — never commentary notes).
+    pub import_llm_jobs: Arc<Mutex<HashMap<String, ImportLlmJobResult>>>,
     pub cloud_llm_models: Arc<Mutex<HashMap<String, CachedCloudLlmModels>>>,
     pub cloud_llm_credentials: Arc<Mutex<HashMap<String, CachedCloudLlmCredentials>>>,
     pub cloud_sync_credentials: Arc<Mutex<HashMap<String, CachedCloudSyncCredentials>>>,
@@ -90,6 +93,7 @@ impl AppState {
             file_watcher: Mutex::new(None),
             local_ai: LocalAiWorker::new(),
             llm_jobs: Arc::new(Mutex::new(HashMap::new())),
+            import_llm_jobs: Arc::new(Mutex::new(HashMap::new())),
             cloud_llm_models: Arc::new(Mutex::new(HashMap::new())),
             cloud_llm_credentials: Arc::new(Mutex::new(HashMap::new())),
             cloud_sync_credentials: Arc::new(Mutex::new(HashMap::new())),

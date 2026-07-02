@@ -21,6 +21,8 @@ import type {
   PublishReport, GitignoreReport,
   BookStats, StyleCard, CrossBookNote, SearchFilter, CreateNoteOptions, NoteVisibility,
   TextImportOptions, TextImportPreview, TextImportCommitRequest, TextImportReport,
+  TextImportPreviewItem, TextImportCategorySuggestion, TextImportLlmChunk,
+  ImportLlmChunkRequest, ImportLlmJobResult,
   PluginDescriptor, CommentaryKind, CommentarySummary, ApplyCommentaryOptions,
   SearchApiStatus,
   NoteStatus,
@@ -260,6 +262,16 @@ export const api = {
     invoke<TextImportPreview>('preview_text_import', { sourceText, options }),
   commitTextImport: (request: TextImportCommitRequest) =>
     invoke<TextImportReport>('commit_text_import', { request }),
+  suggestTextImportCategories: (items: TextImportPreviewItem[], max: number) =>
+    invoke<TextImportCategorySuggestion[]>('suggest_text_import_categories', { items, max }),
+  chunkTextImportForLlm: (items: TextImportPreviewItem[], maxChars: number) =>
+    invoke<TextImportLlmChunk[]>('chunk_text_import_for_llm', { items, maxChars }),
+  enqueueImportLlmChunk: (request: ImportLlmChunkRequest) =>
+    invoke<ImportLlmJobResult>('enqueue_import_llm_chunk', { request }),
+  getImportLlmJob: (jobId: string) =>
+    invoke<ImportLlmJobResult | null>('get_import_llm_job', { jobId }),
+  listImportLlmJobs: () => invoke<ImportLlmJobResult[]>('list_import_llm_jobs'),
+  clearImportLlmJobs: () => invoke<void>('clear_import_llm_jobs'),
 
   // Plugins (WASM)
   listPlugins: () => invoke<PluginDescriptor[]>('list_plugins'),
