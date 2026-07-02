@@ -452,22 +452,44 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const isLockedRef = useRef(false);
   isLockedRef.current = !!(note?.metadata.lifecycle?.lock && note.metadata.lifecycle.lock !== 'none');
 
-  const handleEditorChange = useCallback((state: EditorState, _editor: LexicalEditor, tags: Set<string>) => {
+  // Serializing the whole document to markdown (and walking every text node for the find-in-note
+  // index) is O(document size), so doing it synchronously on every keystroke is the dominant cost
+  // of typing in a large note. Coalesce it: keep only the latest EditorState in a ref and convert
+  // at most once per short pause, not once per keystroke. `flushPendingBody` lets any code path
+  // that needs the *current* markdown right now (save, in particular) force that conversion
+  // immediately, so a save can never observe a stale body regardless of debounce timing.
+  const pendingEditorStateRef = useRef<EditorState | null>(null);
+  const bodyComputeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushPendingBody = useCallback(() => {
+    if (bodyComputeTimerRef.current) {
+      clearTimeout(bodyComputeTimerRef.current);
+      bodyComputeTimerRef.current = null;
+    }
+    const state = pendingEditorStateRef.current;
+    if (!state) return;
+    pendingEditorStateRef.current = null;
     state.read(() => {
       const markdown = $convertToMarkdownString(transformersRef.current);
       const editorPlainText = $getRoot().getAllTextNodes().map((node) => node.getTextContent()).join('');
       getCurrentBody.current = () => markdown;
       setEditModeSearchText(editorPlainText);
-      if (!tags.has('init-body')) {
-        if (isLockedRef.current) {
-          // Body edits on locked notes are held as drafts — don't trigger autosave.
-          setProposalDraftDirty(true);
-        } else {
-          markDirty();
-        }
-      }
     });
-  }, [markDirty, setProposalDraftDirty]);
+  }, []);
+
+  const handleEditorChange = useCallback((state: EditorState, _editor: LexicalEditor, tags: Set<string>) => {
+    pendingEditorStateRef.current = state;
+    if (bodyComputeTimerRef.current) clearTimeout(bodyComputeTimerRef.current);
+    bodyComputeTimerRef.current = setTimeout(flushPendingBody, 250);
+    if (!tags.has('init-body')) {
+      if (isLockedRef.current) {
+        // Body edits on locked notes are held as drafts — don't trigger autosave.
+        setProposalDraftDirty(true);
+      } else {
+        markDirty();
+      }
+    }
+  }, [markDirty, setProposalDraftDirty, flushPendingBody]);
   const rawTextRef = useRef('');
   rawTextRef.current = rawText;
   const rowsRef = useRef<string[][]>([]);
@@ -481,6 +503,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
 
   const save = useCallback(async () => {
     if (!note || savingRef.current) return false;
+    // Guarantee the body reflects every keystroke so far, even if the coalescing timer in
+    // handleEditorChange hasn't fired yet (e.g. Cmd+S right after typing).
+    flushPendingBody();
     savingRef.current = true;
     setSaving(true);
     setError(null);
@@ -535,7 +560,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [note, title, summary, noteId, setCategories]);
+  }, [note, title, summary, noteId, setCategories, flushPendingBody]);
 
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -561,6 +586,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   // mid-edit, which clears the autosave debounce). Without this, up to 1.5s of edits could be lost.
   useEffect(() => () => {
     if (dirtyRef.current) void saveRef.current();
+    if (bodyComputeTimerRef.current) clearTimeout(bodyComputeTimerRef.current);
     void api.noteEditingFinished(noteId);
   }, [noteId]);
 

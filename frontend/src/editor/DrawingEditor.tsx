@@ -192,6 +192,7 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
   const [initialData, setInitialData] = useState<ExcalidrawInitialDataState | null>(null);
   const [isViewOnly, setIsViewOnly] = useState(false);
   const [viewOnlyReason, setViewOnlyReason] = useState<string | null>(null);
+  const [viewOnlyImage, setViewOnlyImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // The note picker doubles as both flows: `tag` links the pre-selected canvas element(s),
@@ -219,14 +220,27 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
     setInitialData(null);
     setIsViewOnly(false);
     setViewOnlyReason(null);
+    setViewOnlyImage(null);
+    // Falls back to a plain image render (like a Picture note) when the SVG has no editable
+    // scene — externally-imported SVGs are still classified as Drawing notes but can't be
+    // opened on the Excalidraw canvas.
+    const fallBackToImage = (reason: string) => {
+      if (cancelled) return;
+      setIsViewOnly(true);
+      setViewOnlyReason(reason);
+      if (note.asset) {
+        api.assetData(note.asset.uuid).then((data) => {
+          if (!cancelled) setViewOnlyImage(data);
+        }).catch(() => {});
+      }
+      setLoading(false);
+    };
     api.readDrawingSvg(note.id)
       .then(async (svg) => {
         if (cancelled) return;
         const sceneJson = extractSceneFromSvg(svg);
         if (!sceneJson) {
-          setIsViewOnly(true);
-          setViewOnlyReason('No Excalidraw scene found in SVG metadata.');
-          setLoading(false);
+          fallBackToImage('No Excalidraw scene found in SVG metadata.');
           return;
         }
         try {
@@ -246,10 +260,8 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
             lastSceneHashRef.current = hashElementsVersion(data.elements ?? []);
           }
         } catch (e) {
-          if (!cancelled) {
-            setIsViewOnly(true);
-            setViewOnlyReason(String(e));
-          }
+          fallBackToImage(String(e));
+          return;
         }
         if (!cancelled) setLoading(false);
       })
@@ -257,7 +269,7 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
         if (!cancelled) { setError(String(e)); setLoading(false); }
       });
     return () => { cancelled = true; };
-  }, [note.id]);
+  }, [note.id, note.asset]);
 
   useEffect(() => {
     api.listNotes().then(setAllNotes).catch(() => {});
@@ -436,16 +448,19 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
 
   if (isViewOnly) {
     return (
-      <div className="drawing-editor-viewonly">
-        <div className="drawing-editor-viewonly-body">
-          <strong className="drawing-editor-viewonly-title">No editable drawing data</strong>
-          {viewOnlyReason && (
-            <code className="drawing-editor-viewonly-reason">{viewOnlyReason}</code>
+      <div className="editor-image-object">
+        <div className="editor-image-preview">
+          {viewOnlyImage ? (
+            <img src={viewOnlyImage} alt={note.title || note.asset?.original_filename || 'Imported drawing'} />
+          ) : (
+            <div className="editor-image-missing">Image asset is missing.</div>
           )}
-          <span className="drawing-editor-viewonly-detail">
-            This SVG has no embedded Excalidraw scene, so it can't be edited here.
-            It was likely imported from an external source rather than created in Syllepsis.
-          </span>
+        </div>
+        <div className="editor-image-facts">
+          This SVG has no embedded Excalidraw scene, so it can't be edited here — showing it as a
+          plain image instead. It was likely imported from an external source rather than
+          created in Syllepsis.
+          {viewOnlyReason && <code className="drawing-editor-viewonly-reason"> ({viewOnlyReason})</code>}
         </div>
       </div>
     );

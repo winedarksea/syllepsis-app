@@ -46,6 +46,23 @@ impl Embedding {
         }
     }
 
+    /// A unit-length copy. A zero vector copies through unchanged.
+    pub fn normalized(&self) -> Embedding {
+        let mut copy = self.clone();
+        copy.normalize();
+        copy
+    }
+
+    /// Plain dot product, with no magnitude normalization. Equal to cosine similarity when both
+    /// operands are already unit-length. Mismatched lengths yield `0.0`, matching
+    /// [`cosine_similarity`](Self::cosine_similarity)'s "no signal" behavior.
+    pub fn dot(&self, other: &Embedding) -> f32 {
+        if self.0.len() != other.0.len() {
+            return 0.0;
+        }
+        self.0.iter().zip(&other.0).map(|(a, b)| a * b).sum()
+    }
+
     /// Cosine similarity in `[-1, 1]` (1 = identical direction). Mismatched lengths or a
     /// zero-magnitude operand yield `0.0` — "no signal" rather than a panic or NaN, so a blank
     /// note never poisons a ranking.
@@ -126,6 +143,23 @@ mod tests {
         let mut v = Embedding::new(vec![3.0, 4.0]);
         v.normalize();
         assert!((v.magnitude() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn dot_of_normalized_vectors_matches_cosine_similarity() {
+        let a = Embedding::new(vec![3.0, 4.0, 0.0]);
+        let b = Embedding::new(vec![1.0, 2.0, 2.0]);
+        let expected = a.cosine_similarity(&b);
+        let actual = a.normalized().dot(&b.normalized());
+        assert!((expected - actual).abs() < 1e-5);
+    }
+
+    #[test]
+    fn normalized_leaves_original_untouched() {
+        let a = Embedding::new(vec![3.0, 4.0]);
+        let unit = a.normalized();
+        assert_eq!(a.0, vec![3.0, 4.0]);
+        assert!((unit.magnitude() - 1.0).abs() < 1e-6);
     }
 
     #[test]

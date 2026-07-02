@@ -86,16 +86,27 @@ function highlightLiteralMatches(container: HTMLElement, pattern: string, active
     cursor = end;
   }
 
-  for (let rangeIndex = textNodeRanges.length - 1; rangeIndex >= 0; rangeIndex--) {
-    const range = textNodeRanges[rangeIndex];
-    const segments = matches
-      .map((match, index) => ({ match, index }))
-      .filter(({ match }) => range.end > match.start && range.start < match.end)
-      .map(({ match, index }) => ({
-        start: Math.max(0, match.start - range.start),
-        end: Math.min(range.node.data.length, match.end - range.start),
-        active: index === activeIndex,
-      }));
+  // Both `matches` and `textNodeRanges` are already in document order, so a single advancing
+  // pointer pairs each range with its overlapping matches in O(matches + nodes) instead of
+  // re-filtering the entire match list for every text node.
+  let matchIndex = 0;
+  for (const range of textNodeRanges) {
+    // A match that ended before this range started can never overlap any later range either
+    // (ranges only move forward), so it is safe to retire for good.
+    while (matchIndex < matches.length && matches[matchIndex].end <= range.start) {
+      matchIndex++;
+    }
+    const segments: Array<{ start: number; end: number; active: boolean }> = [];
+    for (let i = matchIndex; i < matches.length && matches[i].start < range.end; i++) {
+      const match = matches[i];
+      if (range.end > match.start && range.start < match.end) {
+        segments.push({
+          start: Math.max(0, match.start - range.start),
+          end: Math.min(range.node.data.length, match.end - range.start),
+          active: i === activeIndex,
+        });
+      }
+    }
     wrapTextNodeRanges(range.node, segments);
   }
 

@@ -6,6 +6,7 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../lib/store';
 import { api } from '../lib/api';
+import { humanize } from '../lib/utils';
 import { Icon } from '../components/Icon';
 import { WorldLocationHelper } from '../components/WorldLocationHelper';
 import type {
@@ -25,10 +26,6 @@ const NOTE_STATUSES: NoteStatus[] = [
 const PRIOR_KINDS: PriorKind[] = [
   'new_paragraph', 'same_paragraph', 'indented_new_paragraph', 'bullet_point', 'numbered_list',
 ];
-
-function humanize(value: string): string {
-  return value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 function flexDateValue(d?: FlexDate): string {
   return d?.date ? d.date.slice(0, 10) : '';

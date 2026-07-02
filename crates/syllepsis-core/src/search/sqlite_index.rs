@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::embeddings::Embedding;
 use crate::error::{CoreError, CoreResult};
-use crate::search::exact::match_exact;
+use crate::search::exact::match_exact_lowered;
 use crate::search::filter::SearchFilter;
 use crate::search::results::{FacetCount, SearchHit, SearchRankingSignals, SearchResults};
 use crate::search::rrf::reciprocal_rank_fusion;
@@ -112,7 +112,7 @@ impl SqliteSearchIndex {
         filter: &SearchFilter,
         query_embedding: Option<&Embedding>,
     ) -> CoreResult<SearchResults> {
-        let exact = ids_only(match_exact(engine.documents(), query));
+        let exact = ids_only(match_exact_lowered(engine.documents_lower(), query));
         let fts = self.fts_ranked_indices(query)?;
         let vector_scored = match query_embedding {
             Some(emb) => self.vector_ranked_indices(emb)?,

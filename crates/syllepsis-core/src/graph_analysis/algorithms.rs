@@ -12,15 +12,17 @@ use crate::embeddings::Embedding;
 use crate::error::{CoreError, CoreResult};
 
 pub(super) fn cosine_distance_matrix(vectors: &[Embedding]) -> Vec<Vec<f32>> {
-    vectors
-        .iter()
-        .map(|a| {
-            vectors
-                .iter()
-                .map(|b| (1.0 - a.cosine_similarity(b)).clamp(0.0, 2.0))
-                .collect()
-        })
-        .collect()
+    let count = vectors.len();
+    let normalized: Vec<Embedding> = vectors.iter().map(Embedding::normalized).collect();
+    let mut matrix = vec![vec![0.0_f32; count]; count];
+    for i in 0..count {
+        for j in (i + 1)..count {
+            let distance = (1.0 - normalized[i].dot(&normalized[j])).clamp(0.0, 2.0);
+            matrix[i][j] = distance;
+            matrix[j][i] = distance;
+        }
+    }
+    matrix
 }
 
 pub(super) fn exact_knn(
@@ -51,6 +53,7 @@ pub(super) fn exact_knn(
 
 pub(super) fn umap_layout(
     vectors: &[Embedding],
+    distances: &[Vec<f32>],
     requested_neighbors: usize,
 ) -> CoreResult<Vec<(f32, f32)>> {
     if vectors.len() < 3 {
@@ -63,8 +66,7 @@ pub(super) fn umap_layout(
         ));
     }
 
-    let distances = cosine_distance_matrix(vectors);
-    let (knn_indices, knn_distances) = exact_knn(&distances, requested_neighbors);
+    let (knn_indices, knn_distances) = exact_knn(distances, requested_neighbors);
     let neighbor_count = knn_indices[0].len();
     let flat_data: Vec<f32> = vectors
         .iter()

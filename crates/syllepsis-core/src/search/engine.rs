@@ -13,10 +13,11 @@ use std::collections::{BTreeMap, HashMap};
 use crate::config::{Config, SearchConfig};
 use crate::embeddings::note::{embed_notes, NoteVectors};
 use crate::embeddings::provider::EmbeddingProvider;
+use crate::embeddings::vector::Embedding;
 use crate::markdown::dialect::strip_comments;
 use crate::model::Note;
 use crate::search::bm25::Bm25Index;
-use crate::search::exact::match_exact;
+use crate::search::exact::match_exact_lowered;
 use crate::search::filter::SearchFilter;
 use crate::search::results::{
     BlindSpot, DuplicatePair, EmbeddingDiagnostics, EmptyNote, FacetCount, RelatedNote, SearchHit,
@@ -34,10 +35,15 @@ pub struct SearchEngine {
     notes: Vec<Note>,
     /// Combined title+summary+body (comments stripped) per note, for exact matching.
     documents: Vec<String>,
+    /// Lowercased once at build time — search fires per keystroke, so exact match must not
+    /// re-lowercase every document on every query.
+    documents_lower: Vec<String>,
     bm25: Bm25Index,
     vectors: Vec<NoteVectors>,
     provider: Box<dyn EmbeddingProvider>,
     search_cfg: SearchConfig,
+    /// note id (string form) -> index into `notes`/`vectors`, for O(1) lookup by [`related`](Self::related).
+    note_id_index: HashMap<String, usize>,
 }
 
 impl SearchEngine {
@@ -49,15 +55,19 @@ impl SearchEngine {
         config: &Config,
     ) -> SearchEngine {
         let documents: Vec<String> = notes.iter().map(document_text).collect();
+        let documents_lower: Vec<String> = documents.iter().map(|d| d.to_lowercase()).collect();
         let bm25 = Bm25Index::build(&documents);
         let vectors = embed_notes(provider.as_ref(), &notes, &config.embedding);
+        let note_id_index = build_note_id_index(&notes);
         SearchEngine {
             notes,
             documents,
+            documents_lower,
             bm25,
             vectors,
             provider,
             search_cfg: config.search.clone(),
+            note_id_index,
         }
     }
 
@@ -69,14 +79,18 @@ impl SearchEngine {
     ) -> SearchEngine {
         debug_assert_eq!(notes.len(), vectors.len());
         let documents: Vec<String> = notes.iter().map(document_text).collect();
+        let documents_lower: Vec<String> = documents.iter().map(|d| d.to_lowercase()).collect();
         let bm25 = Bm25Index::build(&documents);
+        let note_id_index = build_note_id_index(&notes);
         SearchEngine {
             notes,
             documents,
+            documents_lower,
             bm25,
             vectors,
             provider: Box::new(crate::embeddings::HashingEmbedder::new(0)),
             search_cfg: config.search.clone(),
+            note_id_index,
         }
     }
 
@@ -94,7 +108,7 @@ impl SearchEngine {
         category_filter: &[String],
         query_embedding: Option<&crate::embeddings::Embedding>,
     ) -> SearchResults {
-        let exact = ids_only(match_exact(&self.documents, query));
+        let exact = ids_only(match_exact_lowered(&self.documents_lower, query));
         let bm25 = ids_only(self.bm25.score(query, &self.search_cfg));
         let vector_scored: Vec<(usize, f32)> = query_embedding
             .map(|embedding| self.vector_ranking_embedding(embedding))
@@ -137,6 +151,10 @@ impl SearchEngine {
 
     pub fn documents(&self) -> &[String] {
         &self.documents
+    }
+
+    pub fn documents_lower(&self) -> &[String] {
+        &self.documents_lower
     }
 
     pub fn vectors(&self) -> &[NoteVectors] {
@@ -231,7 +249,10 @@ impl SearchEngine {
             .enumerate()
             .filter(|(i, _)| *i != target)
             .filter_map(|(i, v)| {
-                let raw = v.centroid.cosine_similarity(target_vec);
+                // Both centroids are already unit-length (Embedding::average / the embedding
+                // providers normalize their output), so the dot product alone is the cosine
+                // similarity here — no need to re-divide by magnitudes.
+                let raw = v.centroid.dot(target_vec);
                 if raw <= 0.0 {
                     return None;
                 }
@@ -255,25 +276,43 @@ impl SearchEngine {
             })
             .collect();
 
+        // Top-k without a full sort: partition the top `related_limit` by similarity, then sort
+        // just that slice. `related()` is a per-request UI carousel call, not per-keystroke, but
+        // this is a cheap, isolated win since we're already touching every line here.
+        let limit = self.search_cfg.related_limit.min(scored.len());
+        if limit < scored.len() {
+            scored.select_nth_unstable_by(limit.saturating_sub(1), |a, b| {
+                b.similarity.total_cmp(&a.similarity)
+            });
+            scored.truncate(limit);
+        }
         scored.sort_by(|a, b| b.similarity.total_cmp(&a.similarity));
-        scored.truncate(self.search_cfg.related_limit);
         scored
     }
 
     /// Embedding health: near-duplicate pairs and weakly connected "blind spot" notes.
+    ///
+    /// Duplicate detection and blind-spot detection both need every pairwise similarity among
+    /// embeddable notes, so they share a single upper-triangle pass: each pair's similarity is
+    /// computed once (as a dot product of pre-normalized centroids) and fed to both a duplicate
+    /// check and a running per-row max (the nearest-neighbor similarity blind-spot needs).
     pub fn diagnostics(&self) -> EmbeddingDiagnostics {
+        let count = self.vectors.len();
+        let normalized: Vec<Option<Embedding>> = self
+            .vectors
+            .iter()
+            .map(|v| {
+                (v.centroid.magnitude() > f32::EPSILON).then(|| v.centroid.normalized())
+            })
+            .collect();
+
         let mut duplicates = Vec::new();
-        for i in 0..self.vectors.len() {
-            if self.vectors[i].centroid.magnitude() <= f32::EPSILON {
-                continue;
-            }
-            for j in (i + 1)..self.vectors.len() {
-                if self.vectors[j].centroid.magnitude() <= f32::EPSILON {
-                    continue;
-                }
-                let sim = self.vectors[i]
-                    .centroid
-                    .cosine_similarity(&self.vectors[j].centroid);
+        let mut nearest = vec![f32::NEG_INFINITY; count];
+        for i in 0..count {
+            let Some(a) = &normalized[i] else { continue };
+            for j in (i + 1)..count {
+                let Some(b) = &normalized[j] else { continue };
+                let sim = a.dot(b);
                 if sim >= self.search_cfg.duplicate_similarity {
                     duplicates.push(DuplicatePair {
                         a_id: self.notes[i].id.to_string(),
@@ -283,22 +322,22 @@ impl SearchEngine {
                         similarity: sim,
                     });
                 }
+                if sim > nearest[i] {
+                    nearest[i] = sim;
+                }
+                if sim > nearest[j] {
+                    nearest[j] = sim;
+                }
             }
         }
         duplicates.sort_by(|a, b| b.similarity.total_cmp(&a.similarity));
 
         let mut blind_spots = Vec::new();
-        for i in 0..self.vectors.len() {
-            if self.vectors[i].centroid.magnitude() <= f32::EPSILON {
+        for i in 0..count {
+            if normalized[i].is_none() {
                 continue;
             }
-            let nearest = self
-                .vectors
-                .iter()
-                .enumerate()
-                .filter(|(j, v)| *j != i && v.centroid.magnitude() > f32::EPSILON)
-                .map(|(_, v)| v.centroid.cosine_similarity(&self.vectors[i].centroid))
-                .fold(f32::NEG_INFINITY, f32::max);
+            let nearest = nearest[i];
             // NEG_INFINITY means no other embeddable note exists; not a blind spot, just alone.
             if nearest.is_finite() && nearest < self.search_cfg.blind_spot_similarity {
                 blind_spots.push(BlindSpot {
@@ -351,7 +390,7 @@ impl SearchEngine {
     }
 
     fn index_of(&self, note_id: &str) -> Option<usize> {
-        self.notes.iter().position(|n| n.id.to_string() == note_id)
+        self.note_id_index.get(note_id).copied()
     }
 
     fn passes_category_slice(&self, idx: usize, filter: &[String]) -> bool {
@@ -452,6 +491,14 @@ fn ranking_signals(
         total,
         vector_similarity,
     }
+}
+
+fn build_note_id_index(notes: &[Note]) -> HashMap<String, usize> {
+    notes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.id.to_string(), i))
+        .collect()
 }
 
 /// The text BM25 and exact match see: title, summary, and body with comments removed.

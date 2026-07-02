@@ -3,6 +3,7 @@ import type { DragEvent, PointerEvent, ReactNode } from 'react';
 import { Icon } from '../components/Icon';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
+import { humanize } from '../lib/utils';
 import type { GraphAnalysisNode, KanbanColorBy, NoteDto, NoteStatus, Priority } from '../types';
 import {
   filterKanbanNodes,
@@ -479,10 +480,6 @@ function sectionUnderPointer(clientX: number, clientY: number): KanbanSectionId 
   return KANBAN_SECTIONS.some((section) => section.id === sectionId)
     ? sectionId as KanbanSectionId
     : null;
-}
-
-function humanize(value: string): string {
-  return value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function formatShortDate(value: string): string {

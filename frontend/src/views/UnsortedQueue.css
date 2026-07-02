@@ -213,3 +213,8 @@
   color: var(--color-text-tertiary);
   margin-top: var(--sp-1);
 }
+
+/* Windowing sentinel — invisible, just triggers IntersectionObserver */
+.uq-sentinel {
+  height: 1px;
+}

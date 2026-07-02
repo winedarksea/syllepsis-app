@@ -1,7 +1,7 @@
 // Notebox — capture surface showing unsorted notes by default, with an "All notes" toggle.
 // The sidebar badge always reflects the unsorted-only count regardless of the filter.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
@@ -20,6 +20,8 @@ const SORT_FIELDS: { id: TimelineDateField; label: string }[] = [
 ];
 
 type FilterMode = 'unsorted' | 'all' | 'uncategorized';
+
+const WINDOW_SIZE = 30;
 
 const CLASSIFICATION_LABELS: Record<ClassificationKind | 'all', string> = {
   all: 'All classifications',
@@ -150,6 +152,12 @@ export function UnsortedQueue() {
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [classificationFilter, setClassificationFilter] = useState<ClassificationKind | 'all'>('all');
 
+  // Windowing: the full note list can be large, so only the first `visibleCount` cards render,
+  // growing by WINDOW_SIZE as the sentinel scrolls into view (same pattern as SearchView).
+  const [visibleCount, setVisibleCount] = useState(WINDOW_SIZE);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
   const refresh = useCallback(() => {
     setLoading(true);
     const fetch = visibility === 'active'
@@ -199,6 +207,27 @@ export function UnsortedQueue() {
       ? sorted
       : sorted.filter((n) => n.metadata.classification.kind === classificationFilter);
   }, [notes, filterMode, visibility, sortField, sortDir, classificationFilter]);
+
+  // Reset the window whenever the filtered/sorted set changes underneath it.
+  useEffect(() => { setVisibleCount(WINDOW_SIZE); }, [sortedNotes]);
+
+  // IntersectionObserver for windowed reveal (same pattern as SearchView).
+  useEffect(() => {
+    if (observerRef.current) observerRef.current.disconnect();
+    if (visibleCount >= sortedNotes.length) return;
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((c) => Math.min(c + WINDOW_SIZE, sortedNotes.length));
+        }
+      },
+      { threshold: 0.1 },
+    );
+    if (sentinelRef.current) observerRef.current.observe(sentinelRef.current);
+    return () => observerRef.current?.disconnect();
+  }, [sortedNotes, visibleCount]);
+
+  const shownNotes = sortedNotes.slice(0, visibleCount);
 
   if (loading) return <div className="uq-state">Loading…</div>;
   if (error) return <div className="uq-state uq-error">{error}</div>;
@@ -302,7 +331,7 @@ export function UnsortedQueue() {
         </div>
       ) : (
         <div className="uq-list">
-          {sortedNotes.map((note) => (
+          {shownNotes.map((note) => (
             <div
               key={note.id}
               className="uq-card selectable"
@@ -337,6 +366,10 @@ export function UnsortedQueue() {
               </div>
             </div>
           ))}
+          {/* Intersection sentinel for windowed reveal */}
+          {visibleCount < sortedNotes.length && (
+            <div ref={sentinelRef} className="uq-sentinel" aria-hidden="true" />
+          )}
         </div>
       )}
     </div>

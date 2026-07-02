@@ -8,16 +8,27 @@
 
 /// Rank documents containing `query` as a case-insensitive substring, by occurrence count,
 /// descending. Documents without the substring are omitted. A blank query matches nothing.
+///
+/// Lowercases every document on every call — fine for tests and one-off callers, but search
+/// fires per keystroke, so [`SearchEngine`](crate::search::engine::SearchEngine) precomputes
+/// lowercased documents once and calls [`match_exact_lowered`] instead.
 pub fn match_exact(documents: &[String], query: &str) -> Vec<(usize, f32)> {
+    let lowered: Vec<String> = documents.iter().map(|doc| doc.to_lowercase()).collect();
+    match_exact_lowered(&lowered, query)
+}
+
+/// Same ranking as [`match_exact`], but takes documents that are already lowercased (the needle
+/// is still lowercased here, once, per query).
+pub fn match_exact_lowered(documents_lower: &[String], query: &str) -> Vec<(usize, f32)> {
     let needle = query.trim().to_lowercase();
     if needle.is_empty() {
         return Vec::new();
     }
-    let mut ranked: Vec<(usize, f32)> = documents
+    let mut ranked: Vec<(usize, f32)> = documents_lower
         .iter()
         .enumerate()
         .filter_map(|(i, doc)| {
-            let count = doc.to_lowercase().matches(&needle).count();
+            let count = doc.matches(&needle).count();
             (count > 0).then_some((i, count as f32))
         })
         .collect();

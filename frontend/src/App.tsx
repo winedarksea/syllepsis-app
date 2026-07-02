@@ -624,8 +624,11 @@ function Workspace() {
     desktopSidebarHidden ? 'desktop-sidebar-collapsed' : '',
   ].filter(Boolean).join(' ');
 
-  // Refresh sidebar data on view change (i.e. when returning from the editor).
+  // Refresh sidebar data on view change (i.e. when returning from the editor). Entering the
+  // editor itself can't have changed anything yet, so skip the redundant fetch on that
+  // transition — it would otherwise refire on both the way in and the way out of every edit.
   useEffect(() => {
+    if (view === 'editor') return;
     api.allCategories().then(setCategories).catch(console.error);
     api.unsortedNotes().then((ns) => setUnsortedCount(ns.length)).catch(console.error);
   }, [view, setCategories, setUnsortedCount]);

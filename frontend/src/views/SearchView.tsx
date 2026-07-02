@@ -174,22 +174,23 @@ export function SearchView() {
     return () => { if (debounce.current) clearTimeout(debounce.current); };
   }, [query, categories, freshnessIndex, lengthIndex, objectTypes, classifications, starredOnly, allBooks, visibility, run]);
 
-  // IntersectionObserver for windowed reveal
+  // IntersectionObserver for windowed reveal — shared between current-book hits and cross-book
+  // results since only one of the two is ever populated at a time (mutually exclusive on `allBooks`).
   useEffect(() => {
     if (observerRef.current) observerRef.current.disconnect();
-    const hits = results?.hits ?? [];
-    if (visibleCount >= hits.length) return;
+    const total = allBooks ? (crossBookResults?.length ?? 0) : (results?.hits.length ?? 0);
+    if (visibleCount >= total) return;
     observerRef.current = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
-          setVisibleCount((c) => Math.min(c + WINDOW_SIZE, hits.length));
+          setVisibleCount((c) => Math.min(c + WINDOW_SIZE, total));
         }
       },
       { threshold: 0.1 },
     );
     if (sentinelRef.current) observerRef.current.observe(sentinelRef.current);
     return () => observerRef.current?.disconnect();
-  }, [results, visibleCount]);
+  }, [results, crossBookResults, visibleCount, allBooks]);
 
   const toggleCategory = useCallback((cat: string) => {
     setCategories((prev) =>
@@ -236,6 +237,8 @@ export function SearchView() {
 
   const hits = results?.hits ?? [];
   const shownHits = hits.slice(0, visibleCount);
+  const crossBookHits = crossBookResults ?? [];
+  const shownCrossBookHits = crossBookHits.slice(0, visibleCount);
 
   return (
     <div className="sv-root">
@@ -496,7 +499,7 @@ export function SearchView() {
         )}
         {allBooks && crossBookResults && crossBookResults.length > 0 && (
           <div className="sv-results">
-            {crossBookResults.map((hit) => (
+            {shownCrossBookHits.map((hit) => (
               <div key={`${hit.book_path}/${hit.note_id}`} className="sv-hit sv-hit-cross-book">
                 <div className="sv-hit-header">
                   <span className="sv-hit-title">{displayTitle(hit.title, hit.summary)}</span>
@@ -508,6 +511,10 @@ export function SearchView() {
                 </div>
               </div>
             ))}
+            {/* Intersection sentinel for windowed reveal */}
+            {visibleCount < crossBookHits.length && (
+              <div ref={sentinelRef} className="sv-sentinel" aria-hidden="true" />
+            )}
           </div>
         )}
       </div>

@@ -53,4 +53,29 @@ describe('MarkdownRenderer find highlighting', () => {
     });
     expect(container.querySelector('mark')?.textContent).toBe('a.b');
   });
+
+  it('highlights a match that spans multiple text nodes across inline markup', async () => {
+    // Text nodes after parsing: "al", "pha", " beta alpha" — concatenated: "alpha beta alpha".
+    // Two logical matches: the first split across the "al"/"pha" node boundary (<em> inserts a
+    // node break mid-word), the second entirely inside the trailing text node.
+    mocks.renderNoteMarkdown.mockResolvedValueOnce('<p>al<em>pha</em> beta alpha</p>');
+    const onMatchCount = vi.fn();
+
+    const { container } = render(
+      <MarkdownRenderer markdown="al*pha* beta alpha" findPattern="alpha" findMatchIndex={0} onMatchCount={onMatchCount} />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('mark.note-find-hit')).toHaveLength(3);
+    });
+    const marks = container.querySelectorAll('mark.note-find-hit');
+    expect(marks[0].textContent).toBe('al');
+    expect(marks[1].textContent).toBe('pha');
+    expect(marks[2].textContent).toBe('alpha');
+    // findMatchIndex={0} selects the first logical match (split across marks[0] and marks[1]).
+    expect(marks[0].classList.contains('active')).toBe(true);
+    expect(marks[1].classList.contains('active')).toBe(true);
+    expect(marks[2].classList.contains('active')).toBe(false);
+    expect(onMatchCount).toHaveBeenLastCalledWith(2);
+  });
 });

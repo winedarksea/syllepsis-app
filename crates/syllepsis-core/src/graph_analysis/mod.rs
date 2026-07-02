@@ -135,10 +135,14 @@ impl SemanticGraphCorpus {
         }
         .clamp(2, 100);
 
+        // Shared by every mode below: umap_layout always needs it, and Communities needs it again
+        // for Louvain. Computing it once here avoids paying for it twice per graph render.
+        let distances = cosine_distance_matrix(&embedded_vectors);
+
         let (positions, embedded_cluster_labels, embedded_outliers) = match request.mode {
             GraphMode::Categories => unreachable!("category mode is handled before this match"),
             GraphMode::Pillars => {
-                let positions = umap_layout(&embedded_vectors, requested_neighbors)?;
+                let positions = umap_layout(&embedded_vectors, &distances, requested_neighbors)?;
                 let requested_k = if request.automatic_cluster_defaults {
                     automatic_theme_count(embedded_count)
                 } else {
@@ -157,8 +161,7 @@ impl SemanticGraphCorpus {
                 )
             }
             GraphMode::Communities => {
-                let positions = umap_layout(&embedded_vectors, requested_neighbors)?;
-                let distances = cosine_distance_matrix(&embedded_vectors);
+                let positions = umap_layout(&embedded_vectors, &distances, requested_neighbors)?;
                 let mut labels =
                     louvain_labels(&distances, requested_neighbors, request.louvain_resolution);
                 if request.automatic_cluster_defaults
@@ -183,7 +186,7 @@ impl SemanticGraphCorpus {
                 )
             }
             GraphMode::Density => {
-                let positions = umap_layout(&embedded_vectors, requested_neighbors)?;
+                let positions = umap_layout(&embedded_vectors, &distances, requested_neighbors)?;
                 let minimum_cluster_size = if request.automatic_cluster_defaults {
                     automatic_minimum_cluster_size(embedded_count)
                 } else {
