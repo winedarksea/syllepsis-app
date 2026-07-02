@@ -72,10 +72,6 @@ To-Do: No Status, Open, Deferred, Needs Clarification
 In-Progress: Active
 Done: Cancelled, Done (cancelled notes would go below the done notes vertically, and be grayed out or otherwise styled in a reduced manner)
 
-Link note to drawing doesn't work
-
-Show more of the editing section in editor view. Be able to collapse it down
-
 Improve layout of Notebox topbar
 
 Improve note importer (with house example)

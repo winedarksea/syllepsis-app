@@ -5,6 +5,20 @@
   overflow: hidden;
 }
 
+.uq-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.uq-toolbar-utility {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
 .uq-filter-toggle {
   display: flex;
   border: 1px solid var(--color-border);
@@ -45,6 +59,10 @@
   font-size: var(--font-size-sm);
 }
 
+.uq-classification-select {
+  min-width: 160px;
+}
+
 .uq-sort-dir {
   display: grid;
   place-items: center;
@@ -61,50 +79,37 @@
   background: var(--color-surface-raised);
 }
 
-.uq-add-btn {
-  padding: var(--sp-1) var(--sp-4);
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  transition: background var(--transition-fast);
-}
-.uq-add-btn:hover { background: var(--color-accent-hover); }
-
-.uq-new-form {
-  display: flex;
-  gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-6);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-  flex-shrink: 0;
-}
-
-.uq-new-input {
-  flex: 1;
-  padding: var(--sp-2) var(--sp-3);
+.uq-archive-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 28px;
+  padding: 0 var(--sp-2);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-size: var(--font-size-base);
-  outline: none;
-  transition: border-color var(--transition-fast);
-}
-.uq-new-input:focus { border-color: var(--color-border-focus); }
-
-.uq-new-btn {
-  padding: var(--sp-2) var(--sp-4);
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
-  font-weight: 500;
-  transition: background var(--transition-fast);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
 }
-.uq-new-btn:hover:not(:disabled) { background: var(--color-accent-hover); }
-.uq-new-btn:disabled { opacity: 0.45; cursor: default; }
+
+.uq-archive-toggle:hover {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.uq-archive-toggle.active {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-focus);
+  color: var(--color-accent);
+}
+
+.uq-archive-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
 
 .uq-state {
   display: flex;
@@ -170,6 +175,14 @@
   color: var(--color-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.6px;
+}
+
+.uq-card-type--archived {
+  color: var(--color-text-secondary);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--sp-2);
 }
 
 .uq-card-star {

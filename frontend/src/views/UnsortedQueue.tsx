@@ -1,4 +1,4 @@
-// Notebox — capture surface showing unsorted notes by default, with an "All notes" toggle.
+// Notebox — review surface showing unsorted notes by default, with an "All notes" toggle.
 // The sidebar badge always reflects the unsorted-only count regardless of the filter.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -7,7 +7,7 @@ import { displayTitle } from '../lib/utils';
 import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
-import type { ClassificationKind, NoteDto, TimelineDateField, NoteVisibility } from '../types';
+import type { ClassificationKind, NoteDto, TimelineDateField } from '../types';
 import './UnsortedQueue.css';
 
 const SORT_FIELDS: { id: TimelineDateField; label: string }[] = [
@@ -68,76 +68,10 @@ function noteSortKey(note: NoteDto, field: TimelineDateField): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-interface NewNoteFormProps {
-  onCreate: (note: NoteDto) => void;
-}
-
-function NewNoteForm({ onCreate }: NewNoteFormProps) {
-  const [title, setTitle] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [vanishing, setVanishing] = useState(false);
-  const [vanishDays, setVanishDays] = useState(180);
-
-  useEffect(() => {
-    api.getBookConfig()
-      .then((config) => setVanishDays(config.cleanup.default_vanish_days))
-      .catch(() => {});
-  }, []);
-
-  const submit = async () => {
-    const t = title.trim();
-    if (!t) return;
-    setBusy(true);
-    try {
-      const note = await api.createNote('note', t, undefined, {
-        vanishing,
-        vanish_days: vanishing ? vanishDays : undefined,
-      });
-      setTitle('');
-      onCreate(note);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="uq-new-form">
-      <input
-        className="uq-new-input"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && submit()}
-        placeholder="Quick capture — type and press Enter…"
-        disabled={busy}
-        autoFocus
-      />
-      <button className="uq-new-btn" onClick={submit} disabled={busy || !title.trim()}>
-        Add
-      </button>
-      <label className="uq-sort">
-        <input
-          type="checkbox"
-          checked={vanishing}
-          onChange={(e) => setVanishing(e.target.checked)}
-          disabled={busy}
-        />
-        Vanishing
-      </label>
-      {vanishing && (
-        <label className="uq-sort">
-          <span className="uq-sort-label">Days</span>
-          <input
-            className="uq-sort-select"
-            type="number"
-            min={1}
-            value={vanishDays}
-            onChange={(e) => setVanishDays(Math.max(1, Number(e.target.value) || 1))}
-            disabled={busy}
-          />
-        </label>
-      )}
-    </div>
-  );
+function mergeNotesById(primaryNotes: NoteDto[], secondaryNotes: NoteDto[]): NoteDto[] {
+  const notesById = new Map<string, NoteDto>();
+  [...primaryNotes, ...secondaryNotes].forEach((note) => notesById.set(note.id, note));
+  return [...notesById.values()];
 }
 
 export function UnsortedQueue() {
@@ -145,9 +79,8 @@ export function UnsortedQueue() {
   const [notes, setNotes] = useState<NoteDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
   const [filterMode, setFilterMode] = useState<FilterMode>('unsorted');
-  const [visibility, setVisibility] = useState<NoteVisibility>('active');
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [sortField, setSortField] = useState<TimelineDateField>('updated');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [classificationFilter, setClassificationFilter] = useState<ClassificationKind | 'all'>('all');
@@ -160,38 +93,23 @@ export function UnsortedQueue() {
 
   const refresh = useCallback(() => {
     setLoading(true);
-    const fetch = visibility === 'active'
-      ? (filterMode === 'unsorted' ? api.unsortedNotes() : api.listNotes('active'))
-      : api.listNotes(visibility);
-    fetch
-      .then((ns) => {
-        setNotes(ns);
-        if (filterMode !== 'unsorted' || visibility !== 'active') {
-          api.unsortedNotes().then((us) => setUnsortedCount(us.length)).catch(console.error);
-        } else {
-          setUnsortedCount(ns.length);
-        }
+    setError(null);
+    const archivedNotesPromise = includeArchived ? api.listNotes('archived') : Promise.resolve([]);
+    Promise.all([api.listNotes('active'), archivedNotesPromise, api.unsortedNotes()])
+      .then(([activeNotes, archivedNotes, activeUnsortedNotes]) => {
+        setNotes(mergeNotesById(activeNotes, archivedNotes));
+        setUnsortedCount(activeUnsortedNotes.length);
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [filterMode, visibility, setUnsortedCount]);
+  }, [includeArchived, setUnsortedCount]);
 
   useEffect(() => { refresh(); }, [refresh]);
-  useEffect(() => {
-    if (visibility !== 'active') setShowForm(false);
-  }, [visibility]);
-
-  const handleCreate = useCallback((note: NoteDto) => {
-    setNotes((prev) => [note, ...prev]);
-    setUnsortedCount(notes.length + 1);
-    setShowForm(false);
-    openEditor(note.id, 'edit');
-  }, [openEditor, setUnsortedCount, notes.length]);
 
   const sortedNotes = useMemo(() => {
     const direction = sortDir === 'asc' ? 1 : -1;
-    const modeFiltered = visibility !== 'active'
-      ? notes
+    const modeFiltered = filterMode === 'unsorted'
+      ? notes.filter((n) => !n.sorted)
       : filterMode === 'uncategorized'
       ? notes.filter((n) => n.categories.length === 0)
       : notes;
@@ -206,7 +124,7 @@ export function UnsortedQueue() {
     return classificationFilter === 'all'
       ? sorted
       : sorted.filter((n) => n.metadata.classification.kind === classificationFilter);
-  }, [notes, filterMode, visibility, sortField, sortDir, classificationFilter]);
+  }, [notes, filterMode, sortField, sortDir, classificationFilter]);
 
   // Reset the window whenever the filtered/sorted set changes underneath it.
   useEffect(() => { setVisibleCount(WINDOW_SIZE); }, [sortedNotes]);
@@ -235,7 +153,8 @@ export function UnsortedQueue() {
   return (
     <div className="uq-root">
       <PageHeader title="Notebox">
-          <div className="uq-filter-toggle">
+        <div className="uq-toolbar">
+          <div className="uq-filter-toggle" aria-label="Note mode">
             <button
               className={`uq-filter-btn ${filterMode === 'unsorted' ? 'active' : ''}`}
               onClick={() => setFilterMode('unsorted')}
@@ -251,83 +170,57 @@ export function UnsortedQueue() {
             <button
               className={`uq-filter-btn ${filterMode === 'uncategorized' ? 'active' : ''}`}
               onClick={() => setFilterMode('uncategorized')}
-              disabled={visibility !== 'active'}
             >
               Uncategorized
             </button>
           </div>
-          <div className="uq-filter-toggle">
-            <button
-              className={`uq-filter-btn ${visibility === 'active' ? 'active' : ''}`}
-              onClick={() => setVisibility('active')}
-            >
-              Active
-            </button>
-            <button
-              className={`uq-filter-btn ${visibility === 'archived' ? 'active' : ''}`}
-              onClick={() => setVisibility('archived')}
-            >
-              Archived
-            </button>
-            <button
-              className={`uq-filter-btn ${visibility === 'trash' ? 'active' : ''}`}
-              onClick={() => setVisibility('trash')}
-            >
-              Trash
-            </button>
-          </div>
-          <label className="uq-sort">
-            <span className="uq-sort-label">Sort</span>
+          <div className="uq-toolbar-utility">
             <select
-              className="uq-sort-select"
-              value={sortField}
-              onChange={(e) => setSortField(e.target.value as TimelineDateField)}
-            >
-              {SORT_FIELDS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-            </select>
-            <button
-              className="uq-sort-dir"
-              type="button"
-              title={sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
-              aria-label={sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
-              onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
-            >
-              <Icon name={sortDir === 'desc' ? 'arrow_downward' : 'arrow_upward'} size={16} />
-            </button>
-          </label>
-          <label className="uq-sort">
-            <span className="uq-sort-label">Classification</span>
-            <select
-              className="uq-sort-select"
+              className="uq-sort-select uq-classification-select"
               value={classificationFilter}
+              aria-label="Classification"
               onChange={(e) => setClassificationFilter(e.target.value as ClassificationKind | 'all')}
             >
               {ALL_CLASSIFICATIONS.map((t) => (
                 <option key={t} value={t}>{CLASSIFICATION_LABELS[t]}</option>
               ))}
             </select>
-          </label>
-          {visibility === 'active' && (
-            <button className="uq-add-btn" onClick={() => setShowForm((s) => !s)}>
-              {showForm ? 'Cancel' : '+ New Note'}
-            </button>
-          )}
+            <label className={`uq-archive-toggle ${includeArchived ? 'active' : ''}`}>
+              <input
+                type="checkbox"
+                checked={includeArchived}
+                onChange={(e) => setIncludeArchived(e.target.checked)}
+              />
+              Include archived
+            </label>
+            <label className="uq-sort">
+              <span className="uq-sort-label">Sort</span>
+              <select
+                className="uq-sort-select"
+                value={sortField}
+                onChange={(e) => setSortField(e.target.value as TimelineDateField)}
+              >
+                {SORT_FIELDS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+              <button
+                className="uq-sort-dir"
+                type="button"
+                title={sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
+                aria-label={sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
+                onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
+              >
+                <Icon name={sortDir === 'desc' ? 'arrow_downward' : 'arrow_upward'} size={16} />
+              </button>
+            </label>
+          </div>
+        </div>
       </PageHeader>
 
-      {showForm && visibility === 'active' && (
-        <NewNoteForm onCreate={handleCreate} />
-      )}
-
-      {sortedNotes.length === 0 && !showForm ? (
+      {sortedNotes.length === 0 ? (
         <div className="uq-empty">
-          {visibility === 'archived' && <p>No archived notes.</p>}
-          {visibility === 'trash' && <p>Trash is empty.</p>}
-          {visibility === 'active' && filterMode === 'unsorted' && <p>All caught up! Every note has been organised.</p>}
-          {visibility === 'active' && filterMode === 'all' && <p>No notes yet. Capture your first thought below.</p>}
-          {visibility === 'active' && filterMode === 'uncategorized' && <p>No uncategorized notes — all notes have at least one category.</p>}
-          {visibility === 'active' && (
-            <button className="uq-add-btn" onClick={() => setShowForm(true)}>+ Capture a thought</button>
-          )}
+          {filterMode === 'unsorted' && <p>All caught up! Every note has been organised.</p>}
+          {filterMode === 'all' && <p>No notes to show.</p>}
+          {filterMode === 'uncategorized' && <p>No uncategorized notes. All notes have at least one category.</p>}
         </div>
       ) : (
         <div className="uq-list">
@@ -344,6 +237,9 @@ export function UnsortedQueue() {
                 <span className="uq-card-title">{displayTitle(note.title, note.summary, note.body)}</span>
                 {note.metadata.classification.starred && (
                   <Icon name="star" size={14} fill className="uq-card-star" title="Starred" />
+                )}
+                {includeArchived && note.metadata.lifecycle?.archived && (
+                  <span className="uq-card-type uq-card-type--archived">Archived</span>
                 )}
                 <span className="uq-card-type">{CLASSIFICATION_LABELS[note.metadata.classification.kind]}</span>
                 {note.type !== 'note' && <span className="uq-card-type">{note.type}</span>}
