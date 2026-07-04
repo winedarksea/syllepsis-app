@@ -23,7 +23,7 @@ use crate::model::{
 };
 use crate::publish;
 use crate::sort::{self, RenderItem};
-use crate::storage::{layout, Book, NoteStore};
+use crate::storage::{layout, write_atomic, Book, NoteStore};
 use pulldown_cmark::Options;
 use regex::Regex;
 
@@ -394,6 +394,13 @@ pub fn list_notes_with_visibility(
     Ok(notes.iter().map(NoteDto::from_note).collect())
 }
 
+/// Note files that failed to load on the last scan (bad frontmatter, unparseable id or body,
+/// etc). Call after `list_notes`/`unsorted_notes` (which populate this) to surface a warning —
+/// the affected files are left untouched on disk, never deleted or moved.
+pub fn note_load_issues(book: &Book) -> Vec<crate::storage::NoteLoadIssue> {
+    book.store.load_issues()
+}
+
 pub fn note_neighbors(book: &Book, id: &str) -> CoreResult<NoteNeighbors> {
     let target = NoteId::parse(id)?;
     let items = book_view(book)?;
@@ -486,7 +493,7 @@ pub fn create_note_with_options(
     if object_type == ObjectType::Table {
         let empty: Vec<Vec<String>> = vec![vec![String::new(); 3]; 5];
         let csv_path = layout::table_companion_csv_path(&book.root, &note.id);
-        std::fs::write(csv_path, encode_csv(&empty))?;
+        write_atomic(&csv_path, encode_csv(&empty).as_bytes())?;
     }
     Ok(NoteDto::from_note(&note))
 }
@@ -509,7 +516,12 @@ fn starter_template_for_classification(classification: ClassificationKind) -> &'
 /// from direct edits (privacy-security.md — body changes must go through unlock or a proposed
 /// rewrite), and editing a knowledge-pack note marks it `locally_modified` so a later pack-version
 /// re-import will not overwrite the user's change (core-concepts.md).
+///
+/// When `dto.baseline_body` is present (the body the editor loaded), the save is folded through
+/// the CRDT sidecar instead of a blind overwrite — see [`reconcile_crdt_on_save`] — so a stale
+/// editor tab merges against concurrent changes rather than silently destroying them.
 pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
+    let baseline_body = dto.baseline_body.clone();
     let mut note = dto.into_note(book.config.markdown.dialect_version.clone())?;
     if matches!(note.object_type, ObjectType::Picture | ObjectType::Drawing)
         && note.metadata.lifecycle.archived
@@ -520,7 +532,8 @@ pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
     }
     // Refresh the cosmetic slug so the filename tracks the current title.
     note.id = note.id.with_regenerated_slug(&note.title);
-    if let Ok(stored) = book.store.read_note(&note.id) {
+    let stored = book.store.read_note(&note.id).ok();
+    if let Some(stored) = &stored {
         if stored.metadata.lifecycle.lock != LockMode::None && stored.body != note.body {
             crate::app::commentary::create_commentary(
                 book,
@@ -538,13 +551,123 @@ pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
             .filter(|c| !new_body_cats.contains(c))
             .collect();
         note.categories.retain(|c| !dropped.contains(c));
+        // Arm the flag the doc comment above already promises: a body edit to a pack member marks
+        // it so a later re-import doesn't overwrite the change. Defense-in-depth alongside the
+        // manifest-baseline hash check in `pack::note_import_status` — this flag travels with the
+        // note's frontmatter (unlike the device-local `_packs/` manifest), so it survives sync to
+        // a second device even before that device has its own manifest baseline.
+        if !stored.metadata.packs.packs.is_empty() && stored.body != note.body {
+            note.metadata.packs.locally_modified = true;
+        }
     }
     note.metadata.dates.updated = Utc::now();
     merge_inline_categories(&mut note);
     ensure_categories_declared(book, &note.categories)?;
+    if let Some(baseline_body) = baseline_body {
+        reconcile_crdt_on_save(book, &mut note, stored.as_ref(), &baseline_body)?;
+    }
     book.save_note(&note)?;
     cleanup_unused_default_categories(book)?;
     Ok(NoteDto::from_note(&note))
+}
+
+/// Fold an in-app save through the note's CRDT sidecar rather than a blind last-write-wins
+/// overwrite, so Loro/LWW genuinely mediates concurrent *in-app* edits (not just sync passes).
+///
+/// `baseline_body` is the body the editor loaded. If `stored` still has that same body, this is
+/// the ordinary case: the sidecar is simply kept current so the next sync pass has an accurate
+/// record. If `stored`'s body has since diverged (another window saved, a plugin wrote through
+/// `update_note`, or an external tool edited the file and a refresh picked it up), this performs a
+/// three-way merge — seeding a CRDT document from `baseline_body`, forking one replica onto the
+/// disk body and one onto the editor's body, then merging them through the configured backend.
+/// Loro folds both edits together; the LWW default can only pick one whole-body winner, so the
+/// loser is preserved as a commentary `Proposal` (the same mechanism used for locked notes above)
+/// rather than silently discarded.
+fn reconcile_crdt_on_save(
+    book: &Book,
+    note: &mut Note,
+    stored: Option<&Note>,
+    baseline_body: &str,
+) -> CoreResult<()> {
+    let backend = crate::crdt::select_crdt_backend(&book.config.sync);
+    let actor = crate::sync::actor_id_for(&book.root)?;
+    let sidecar_path = layout::crdt_sidecar_path(&book.root, &note.id);
+
+    let Some(stored) = stored else {
+        // Brand-new note: nothing to merge against, just seed a fresh sidecar for its body.
+        let doc = backend.new_document(&actor, &note.body);
+        write_atomic(&sidecar_path, &doc.snapshot()?)?;
+        return Ok(());
+    };
+
+    if stored.body == baseline_body {
+        // Not stale, the common case: keep the sidecar current with this edit.
+        let mut doc = load_or_rebuild_sidecar(backend.as_ref(), &actor, &sidecar_path, &note.body)?;
+        doc.set_text(&note.body);
+        write_atomic(&sidecar_path, &doc.snapshot()?)?;
+        return Ok(());
+    }
+
+    // Stale: the disk body moved on since the editor loaded it. Three-way merge through the CRDT
+    // backend, seeded from the common ancestor the editor actually saw.
+    let editor_body = note.body.clone();
+    let ancestor_snapshot = backend.new_document(&actor, baseline_body).snapshot()?;
+
+    let disk_actor = crate::crdt::ActorId::new(format!("{}-disk", actor.as_str()));
+    let mut disk_doc = backend.load_document(&disk_actor, &ancestor_snapshot)?;
+    disk_doc.set_text(&stored.body);
+
+    let editor_actor = crate::crdt::ActorId::new(format!("{}-editor", actor.as_str()));
+    let mut editor_doc = backend.load_document(&editor_actor, &ancestor_snapshot)?;
+    editor_doc.set_text(&editor_body);
+
+    disk_doc.merge(&editor_doc.snapshot()?)?;
+    let merged_body = disk_doc.text();
+
+    if backend.name() == crate::crdt::LWW_BACKEND {
+        // LWW keeps exactly one whole-body winner; whichever side merge didn't pick lost its edit
+        // outright. Preserve that loser as a proposal instead of letting it vanish — the user can
+        // review and reapply it. (If the two bodies happened to be identical there's no loser.)
+        let loser_body = if merged_body == editor_body {
+            (stored.body != merged_body).then_some(stored.body.as_str())
+        } else {
+            Some(editor_body.as_str())
+        };
+        if let Some(loser_body) = loser_body {
+            crate::app::commentary::create_commentary(
+                book,
+                stored.id.as_str(),
+                crate::model::CommentaryKind::Proposal,
+                loser_body,
+            )?;
+        }
+    }
+
+    note.body = merged_body;
+    // Re-derive the live sidecar from the resolved body under this device's normal actor (not the
+    // throwaway disk/editor replicas above), still seeded from the shared ancestor so a later sync
+    // pass can continue merging against remote history.
+    let mut live_doc = backend.load_document(&actor, &ancestor_snapshot)?;
+    live_doc.set_text(&note.body);
+    write_atomic(&sidecar_path, &live_doc.snapshot()?)?;
+    Ok(())
+}
+
+/// Load the note's CRDT sidecar, or seed a fresh one from `fallback_text` if it's absent or
+/// corrupt (markdown is always the source of truth — see the sync engine's identical fallback).
+fn load_or_rebuild_sidecar(
+    backend: &dyn crate::crdt::CrdtBackend,
+    actor: &crate::crdt::ActorId,
+    sidecar_path: &std::path::Path,
+    fallback_text: &str,
+) -> CoreResult<Box<dyn crate::crdt::NoteCrdt>> {
+    if sidecar_path.exists() {
+        Ok(backend
+            .load_document(actor, &std::fs::read(sidecar_path)?)
+            .unwrap_or_else(|_| backend.new_document(actor, fallback_text)))
+    } else {
+        Ok(backend.new_document(actor, fallback_text))
+    }
 }
 
 /// Metadata-only workflow status update for Kanban interactions. This avoids sending a stale body
@@ -881,7 +1004,7 @@ pub fn read_table_data(book: &Book, id: &str) -> CoreResult<Vec<Vec<String>>> {
 pub fn save_table_data(book: &Book, id: &str, rows: Vec<Vec<String>>) -> CoreResult<()> {
     let id = NoteId::parse(id)?;
     let path = layout::table_companion_csv_path(&book.root, &id);
-    std::fs::write(path, encode_csv(&rows))?;
+    write_atomic(&path, encode_csv(&rows).as_bytes())?;
     Ok(())
 }
 
@@ -998,6 +1121,152 @@ mod tests {
         assert_eq!(cleared.metadata.status, None);
         assert!(cleared.metadata.dates.started.is_some());
         assert!(cleared.metadata.dates.completed.is_some());
+    }
+
+    #[test]
+    fn editing_a_pack_members_body_arms_the_locally_modified_flag() {
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "compost", None).unwrap();
+        note.body = "v1 body".into();
+        note.metadata.packs.packs.push("garden-pack".into());
+        let note = update_note(&book, note).unwrap();
+        assert!(!note.metadata.packs.locally_modified);
+
+        // A body-changing edit to an existing pack member arms the flag, even though nothing in
+        // this call path goes through the pack-import machinery directly.
+        let mut edited = note.clone();
+        edited.body = "my own notes".into();
+        let edited = update_note(&book, edited).unwrap();
+        assert!(edited.metadata.packs.locally_modified);
+
+        // A metadata-only edit (body unchanged) must not arm it.
+        let mut retitled = edited.clone();
+        retitled.metadata.packs.locally_modified = false;
+        retitled.title = "Compost (renamed)".into();
+        let retitled = update_note(&book, retitled).unwrap();
+        assert!(!retitled.metadata.packs.locally_modified);
+    }
+
+    #[test]
+    fn save_without_baseline_uses_legacy_overwrite_behavior() {
+        // No `baseline_body` at all (older callers, plugin writes): blind overwrite, unchanged.
+        let (_dir, book) = book();
+        let mut note = create_note(&book, ObjectType::Note, "n", None).unwrap();
+        note.body = "first".into();
+        let note = update_note(&book, note).unwrap();
+        assert!(note.baseline_body.is_none());
+
+        // Simulate disk moving on without going through this "editor"'s knowledge.
+        let mut disk = note.clone();
+        disk.body = "changed elsewhere".into();
+        update_note(&book, disk).unwrap();
+
+        // A save with no baseline still just overwrites, even though the stored body has moved on.
+        let mut blind = note.clone();
+        blind.body = "blind overwrite".into();
+        let result = update_note(&book, blind).unwrap();
+        assert_eq!(result.body, "blind overwrite");
+    }
+
+    #[test]
+    fn non_stale_save_keeps_body_and_refreshes_sidecar() {
+        let (_dir, mut book) = book();
+        book.config.sync.crdt_backend = crate::crdt::LWW_BACKEND.to_string();
+
+        let mut note = create_note(&book, ObjectType::Note, "n", None).unwrap();
+        note.body = "base".into();
+        let note = update_note(&book, note).unwrap();
+
+        let mut edit = note.clone();
+        edit.baseline_body = Some(note.body.clone());
+        edit.body = "edited normally".into();
+        let result = update_note(&book, edit).unwrap();
+        assert_eq!(result.body, "edited normally");
+
+        // The sidecar reflects the saved body.
+        let sidecar_path = crate::storage::layout::crdt_sidecar_path(
+            &book.root,
+            &crate::id::NoteId::parse(&result.id).unwrap(),
+        );
+        let backend = crate::crdt::select_crdt_backend(&book.config.sync);
+        let actor = crate::sync::actor_id_for(&book.root).unwrap();
+        let doc = backend
+            .load_document(&actor, &std::fs::read(&sidecar_path).unwrap())
+            .unwrap();
+        assert_eq!(doc.text(), "edited normally");
+    }
+
+    #[test]
+    fn stale_save_with_lww_preserves_the_loser_as_a_commentary_proposal() {
+        let (_dir, mut book) = book();
+        book.config.sync.crdt_backend = crate::crdt::LWW_BACKEND.to_string();
+
+        let mut note = create_note(&book, ObjectType::Note, "shared", None).unwrap();
+        note.body = "base".into();
+        let note = update_note(&book, note).unwrap();
+
+        // Window 1 saves first, not stale (its baseline matches disk).
+        let mut window1 = note.clone();
+        window1.baseline_body = Some("base".into());
+        window1.body = "disk edit".into();
+        update_note(&book, window1).unwrap();
+
+        // Window 2 still thinks the note reads "base" and saves its own edit.
+        let mut window2 = note.clone();
+        window2.baseline_body = Some("base".into());
+        window2.body = "editor edit".into();
+        let result = update_note(&book, window2).unwrap();
+
+        // LWW can only keep one whole-body winner.
+        assert!(result.body == "disk edit" || result.body == "editor edit");
+        let loser = if result.body == "disk edit" {
+            "editor edit"
+        } else {
+            "disk edit"
+        };
+
+        // Whichever lost is preserved as a commentary Proposal, never silently discarded.
+        let commentaries = book.read_all_commentary_notes().unwrap();
+        assert!(
+            commentaries.iter().any(|c| c.body == loser),
+            "expected a Proposal preserving {loser:?}, got {commentaries:?}"
+        );
+    }
+
+    #[cfg(feature = "loro")]
+    #[test]
+    fn stale_save_with_loro_yields_both_edits_in_the_merged_body() {
+        let (_dir, mut book) = book();
+        book.config.sync.crdt_backend = crate::crdt::LORO_BACKEND.to_string();
+
+        let mut note = create_note(&book, ObjectType::Note, "shared", None).unwrap();
+        note.body = "base.".into();
+        let note = update_note(&book, note).unwrap();
+
+        // Window 1 saves first, not stale.
+        let mut window1 = note.clone();
+        window1.baseline_body = Some("base.".into());
+        window1.body = "base. APPEND-1".into();
+        update_note(&book, window1).unwrap();
+
+        // Window 2 still thinks the note reads "base." and saves its own edit.
+        let mut window2 = note.clone();
+        window2.baseline_body = Some("base.".into());
+        window2.body = "PREPEND-2 base.".into();
+        let result = update_note(&book, window2).unwrap();
+
+        assert!(
+            result.body.contains("APPEND-1"),
+            "kept window 1's edit: {:?}",
+            result.body
+        );
+        assert!(
+            result.body.contains("PREPEND-2"),
+            "kept window 2's edit: {:?}",
+            result.body
+        );
+        // No data was thrown away into a Proposal — Loro merged it inline.
+        assert!(book.read_all_commentary_notes().unwrap().is_empty());
     }
 
     #[test]

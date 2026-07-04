@@ -32,6 +32,13 @@ pub struct NoteDto {
     /// Convenience flag for the UI (mirrors `prior.is_some()`).
     pub sorted: bool,
     pub metadata: Metadata,
+    /// The body the editor last loaded, sent back alongside an edit so `update_note` can tell a
+    /// normal save from a stale one (the note changed on disk since the editor opened it) and
+    /// fold the save through the CRDT layer instead of blindly overwriting. `None` for callers
+    /// that don't track a baseline (older clients, plugin writes) — those keep the legacy
+    /// overwrite behavior untouched.
+    #[serde(default)]
+    pub baseline_body: Option<String>,
 }
 
 impl NoteDto {
@@ -50,6 +57,7 @@ impl NoteDto {
             commentary: note.commentary.clone(),
             sorted: note.is_sorted(),
             metadata: note.metadata.clone(),
+            baseline_body: None,
         }
     }
 

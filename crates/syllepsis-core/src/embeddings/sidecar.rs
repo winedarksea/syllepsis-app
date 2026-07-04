@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::embeddings::Embedding;
 use crate::error::{CoreError, CoreResult};
 use crate::model::Note;
+use crate::storage::atomic::write_atomic;
 
 const MAGIC: &[u8; 8] = b"SYLVEC01";
 pub const SIDECAR_SCHEMA_VERSION: u32 = 1;
@@ -118,21 +119,7 @@ fn hash_fields(fields: &[&[u8]]) -> [u8; 32] {
 }
 
 pub fn write_sidecar_atomic(path: &Path, sidecar: &NoteEmbeddingSidecar) -> CoreResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let bytes = encode(sidecar)?;
-    let temp = path.with_extension(format!("tmp-{}", std::process::id()));
-    fs::write(&temp, bytes)?;
-    if let Err(error) = fs::rename(&temp, path) {
-        if path.exists() {
-            fs::remove_file(path)?;
-            fs::rename(&temp, path)?;
-        } else {
-            return Err(error.into());
-        }
-    }
-    Ok(())
+    write_atomic(path, &encode(sidecar)?)
 }
 
 pub fn read_sidecar(path: &Path) -> CoreResult<NoteEmbeddingSidecar> {

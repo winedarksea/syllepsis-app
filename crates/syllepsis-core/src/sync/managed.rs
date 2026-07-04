@@ -14,7 +14,7 @@ use crate::config::SyncConfig;
 use crate::crdt::{select_crdt_backend, ActorId};
 use crate::error::{CoreError, CoreResult};
 use crate::model::Note;
-use crate::storage::{layout, Book, NoteStore};
+use crate::storage::{layout, write_atomic, Book, NoteStore};
 use crate::sync::{actor_id_for, append_activity, content_revision, SyncActivityEvent};
 
 const MANIFEST_PATH: &str = "manifest.json";
@@ -276,10 +276,7 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
         // Save the Loro sidecar with the cloud history so reconcile sees it as already up-to-date
         // and upload_local_patches sees no new local ops to emit.
         let sidecar = layout::crdt_sidecar_path(&self.book.root, &note.id);
-        if let Some(parent) = sidecar.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&sidecar, doc.snapshot()?)?;
+        write_atomic(&sidecar, &doc.snapshot()?)?;
 
         // Mark the cloud VV as already exported: these ops came from the cloud, no need to
         // re-upload them.
@@ -310,18 +307,19 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
         let backend = select_crdt_backend(&self.book.config.sync);
         for note in self.book.store.read_all_notes()? {
             let sidecar = layout::crdt_sidecar_path(&self.book.root, &note.id);
-            if let Some(parent) = sidecar.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
             let mut doc = if sidecar.exists() {
-                backend.load_document(actor, &std::fs::read(&sidecar)?)?
+                match backend.load_document(actor, &std::fs::read(&sidecar)?) {
+                    Ok(doc) => doc,
+                    // Corrupt sidecar: markdown is the source of truth, rebuild from it.
+                    Err(_) => backend.new_document(actor, &note.body),
+                }
             } else {
                 backend.new_document(actor, &note.body)
             };
             if doc.text() != note.body {
                 doc.set_text(&note.body);
             }
-            std::fs::write(sidecar, doc.snapshot()?)?;
+            write_atomic(&sidecar, &doc.snapshot()?)?;
         }
         Ok(())
     }
@@ -337,7 +335,11 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
             let ulid = note.id.ulid().to_string();
             let sidecar = layout::crdt_sidecar_path(&self.book.root, &note.id);
             let mut doc = if sidecar.exists() {
-                backend.load_document(actor, &std::fs::read(&sidecar)?)?
+                match backend.load_document(actor, &std::fs::read(&sidecar)?) {
+                    Ok(doc) => doc,
+                    // Corrupt sidecar: markdown is the source of truth, rebuild from it.
+                    Err(_) => backend.new_document(actor, &note.body),
+                }
             } else {
                 backend.new_document(actor, &note.body)
             };
@@ -355,7 +357,7 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
             if changed {
                 note.body = doc.text();
                 self.book.save_note(&note)?;
-                std::fs::write(&sidecar, doc.snapshot()?)?;
+                write_atomic(&sidecar, &doc.snapshot()?)?;
                 // Advance the exported frontier to include the remote peers' ops so the NEXT
                 // upload pass only emits genuinely new local work.
                 if let Ok(vv) = doc.version_vector_json() {
@@ -394,7 +396,11 @@ impl<'a, S: ManagedObjectStore> ManagedCloudSyncEngine<'a, S> {
             let ulid = note.id.ulid().to_string();
             let sidecar = layout::crdt_sidecar_path(&self.book.root, &note.id);
             let doc = if sidecar.exists() {
-                backend.load_document(actor, &std::fs::read(&sidecar)?)?
+                match backend.load_document(actor, &std::fs::read(&sidecar)?) {
+                    Ok(doc) => doc,
+                    // Corrupt sidecar: markdown is the source of truth, rebuild from it.
+                    Err(_) => backend.new_document(actor, &note.body),
+                }
             } else {
                 backend.new_document(actor, &note.body)
             };

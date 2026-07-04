@@ -11,6 +11,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
+use crate::storage::atomic::write_atomic;
 use crate::storage::layout;
 
 /// Per-note baseline recorded at import time.
@@ -49,7 +50,10 @@ impl BookPackManifest {
     }
 
     /// Load the manifest for `pack_id` from `book_root/_packs/{pack_id}.json`. Returns a fresh
-    /// default manifest when the file does not exist yet.
+    /// default manifest when the file does not exist yet, *or* when it exists but fails to parse
+    /// (device-local bookkeeping, not user content — a corrupt manifest must not hard-fail an
+    /// import; `note_import_status`'s no-baseline fallback already treats a missing/empty
+    /// manifest safely, so this degrades to that same safe path).
     pub fn load(book_root: &Path, pack_id: &str) -> CoreResult<Self> {
         let path = layout::pack_manifest_path(book_root, pack_id);
         if !path.exists() {
@@ -58,19 +62,21 @@ impl BookPackManifest {
                 ..Default::default()
             });
         }
-        let json = std::fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&json)?)
+        let fresh = || BookPackManifest {
+            pack_id: pack_id.to_string(),
+            ..Default::default()
+        };
+        Ok(std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_else(fresh))
     }
 
     /// Persist the manifest to `book_root/_packs/{pack_id}.json`, creating the `_packs/`
     /// directory if it doesn't exist yet.
     pub fn save(&self, book_root: &Path) -> CoreResult<()> {
-        let dir = layout::packs_dir(book_root);
-        if !dir.exists() {
-            std::fs::create_dir_all(&dir)?;
-        }
         let path = layout::pack_manifest_path(book_root, &self.pack_id);
-        std::fs::write(path, serde_json::to_string_pretty(self)?)?;
+        write_atomic(&path, serde_json::to_string_pretty(self)?.as_bytes())?;
         Ok(())
     }
 }

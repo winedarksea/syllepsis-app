@@ -26,6 +26,7 @@ import { resolveThemeVars, resolveThemeStyle } from './theme/themes';
 import type {
   BookInfo, TrackedBookInfo, ClassificationKind, ObjectType,
   CloudBookSummary, CloudSyncProviderDescriptor, CloudSyncProviderStatus,
+  NoteLoadIssue,
 } from './types';
 import './App.css';
 
@@ -610,6 +611,34 @@ function readDesktopSidebarShell(): boolean {
     : true;
 }
 
+function NoteLoadIssuesBanner() {
+  const [issues, setIssues] = useState<NoteLoadIssue[]>([]);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    api.noteLoadIssues().then(setIssues).catch(console.error);
+  }, []);
+
+  if (dismissed || issues.length === 0) return null;
+
+  return (
+    <div className="note-load-issues-banner" role="alert">
+      <div className="note-load-issues-banner-text">
+        <strong>{issues.length}</strong> note file{issues.length === 1 ? '' : 's'} could not be
+        read and {issues.length === 1 ? 'was' : 'were'} left untouched on disk:
+        <ul>
+          {issues.map((issue) => (
+            <li key={issue.path}>
+              {issue.path} — {issue.error}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <button type="button" onClick={() => setDismissed(true)}>Dismiss</button>
+    </div>
+  );
+}
+
 function Workspace() {
   const { view, editingNoteId, editingMode, setCategories, setUnsortedCount, openEditor, setPluginRenderLanguages, setPluginsLoaded } = useStore();
   const mobileSidebarOpen = useStore((s) => s.sidebarOpen);
@@ -731,6 +760,7 @@ function Workspace() {
         />
       )}
       <main className="workspace-main">
+        <NoteLoadIssuesBanner />
         {view === 'editor' && editingNoteId ? (
           <Editor noteId={editingNoteId} initialMode={editingMode} />
         ) : view === 'book' ? (

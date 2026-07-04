@@ -19,7 +19,7 @@ import type {
   LockMode, PolicyOverview,
   ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
   PublishReport, GitignoreReport,
-  BookStats, StyleCard, CrossBookNote, SearchFilter, CreateNoteOptions, NoteVisibility,
+  BookStats, StyleCard, CrossBookNote, SearchFilter, CreateNoteOptions, NoteVisibility, NoteLoadIssue,
   TextImportOptions, TextImportPreview, TextImportCommitRequest, TextImportReport,
   TextImportPreviewItem, TextImportCategorySuggestion, TextImportLlmChunk,
   ImportLlmChunkRequest, ImportLlmJobResult,
@@ -76,6 +76,7 @@ export const api = {
   noteNeighbors: (noteId: string) => invoke<NoteNeighbors>('note_neighbors', { noteId }),
   listNotes: (visibility?: NoteVisibility) =>
     invoke<NoteDto[]>('list_notes', { visibility: visibility ?? null }),
+  noteLoadIssues: () => invoke<NoteLoadIssue[]>('note_load_issues'),
   createNote: (objectType: ObjectType, title: string, inheritFrom?: string, options?: CreateNoteOptions) =>
     invoke<NoteDto>('create_note', {
       objectType,

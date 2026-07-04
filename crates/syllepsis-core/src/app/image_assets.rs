@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::app::NoteDto;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{AssetMetadata, Note, ObjectType};
-use crate::storage::{Book, NoteStore};
+use crate::storage::{write_atomic, Book, NoteStore};
 use crate::sync::{assign_asset_uuid, AssetRegistry};
 
 const ASSETS_DIRECTORY: &str = "assets";
@@ -186,16 +186,7 @@ pub fn save_drawing_svg(book: &Book, note_id: &str, svg: &str) -> CoreResult<Not
         .normalized_bytes
         .unwrap_or_else(|| svg.as_bytes().to_vec());
 
-    // Atomic write: temp → rename so a crash never leaves a half-written file.
-    let temp_path = asset_path.with_extension("svg.tmp");
-    std::fs::write(&temp_path, &final_bytes).map_err(|e| {
-        let _ = std::fs::remove_file(&temp_path);
-        CoreError::Io(e)
-    })?;
-    if let Err(e) = std::fs::rename(&temp_path, &asset_path) {
-        let _ = std::fs::remove_file(&temp_path);
-        return Err(CoreError::Io(e));
-    }
+    write_atomic(&asset_path, &final_bytes)?;
 
     // Refresh dimensions in case the canvas was resized.
     let current_asset = note.asset.as_mut().unwrap();

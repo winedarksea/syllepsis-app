@@ -104,6 +104,11 @@ pub fn is_local_only(path: &str) -> bool {
     first == layout::SYNC_DIR
         || first == layout::DERIVED_DIR
         || path.split('/').any(|component| component == ".DS_Store")
+        // Crash leftovers from `storage::write_atomic`'s temp-then-rename: never real content.
+        || path
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name.contains(".tmp-"))
 }
 
 /// True if a path is a CRDT sidecar (`_crdt/*.crdt`). Sidecars are synced, but as *dependents* of

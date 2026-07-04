@@ -21,7 +21,7 @@ use crate::model::{
     Category, CommentaryKind, CommentaryMetadata, CommentarySource, Note, ObjectType,
 };
 use crate::pack::{ExportKind, Pack, PackCommentary, PackManifest, PackNote};
-use crate::storage::{layout, Book, NoteStore};
+use crate::storage::{layout, write_atomic, Book, NoteStore};
 
 /// What to put in an exported pack: the manifest fields plus the note selection. A note is
 /// included if it carries one of `categories` **or** is named directly in `note_ids` (so an author
@@ -565,8 +565,14 @@ fn note_import_status(book: &Book, pack_id: &str, raw_id: &str) -> CoreResult<Im
         }
         return Ok(ImportStatus::Update);
     }
-    // No baseline yet — fall back to the eager flag.
-    if existing.metadata.packs.locally_modified {
+    // No baseline yet (e.g. `_packs/` is device-local and never synced, so a second device has
+    // no manifest for a pack imported elsewhere). The eager `locally_modified` flag is a
+    // best-effort signal, not authoritative — nothing reliably sets it in every edit path, so
+    // treat *any* existing member of this pack as possibly locally modified rather than trusting
+    // an unset flag to mean "unchanged". The default resolution for `LocallyModified` is Skip, so
+    // this fails safe: a real edit is never silently overwritten, at the cost of an extra prompt
+    // when the note genuinely is unchanged.
+    if existing.metadata.packs.packs.iter().any(|p| p == pack_id) {
         return Ok(ImportStatus::LocallyModified);
     }
     if existing.metadata.packs.packs.is_empty() {
@@ -589,12 +595,7 @@ fn capture_baseline(
     let doc = backend.new_document(&actor, body);
     let snapshot = doc.snapshot()?;
     let sidecar = layout::crdt_sidecar_path(&book.root, id);
-    if let Some(parent) = sidecar.parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-    std::fs::write(&sidecar, &snapshot)?;
+    write_atomic(&sidecar, &snapshot)?;
     Ok(NoteBaseline {
         pack_version: pack_version.to_string(),
         base_body_sha256: sha256_hex(body),
@@ -641,13 +642,16 @@ fn try_crdt_merge(
 
     // Load the live local sidecar, fold in the current markdown body, then merge.
     let sidecar = layout::crdt_sidecar_path(&book.root, id);
-    let mut current_doc = if sidecar.exists() {
-        backend.load_document(&actor, &std::fs::read(sidecar)?)?
-    } else {
-        let note = book.store.read_note(id)?;
-        backend.new_document(&actor, &note.body)
-    };
     let current_note = book.store.read_note(id)?;
+    let mut current_doc = if sidecar.exists() {
+        // Corrupt sidecar: markdown is the source of truth, rebuild from it (the equality check
+        // below then folds the current body in, which is a no-op since it's freshly seeded).
+        backend
+            .load_document(&actor, &std::fs::read(&sidecar)?)
+            .unwrap_or_else(|_| backend.new_document(&actor, &current_note.body))
+    } else {
+        backend.new_document(&actor, &current_note.body)
+    };
     if current_doc.text() != current_note.body {
         current_doc.set_text(&current_note.body);
     }
@@ -1105,6 +1109,63 @@ mod tests {
             get_note(&target, &note_id).unwrap().body,
             "user's own careful notes"
         );
+    }
+
+    #[test]
+    fn missing_manifest_defaults_existing_pack_note_to_locally_modified() {
+        // `_packs/` is device-local and never synced, so a second device importing this book has
+        // no manifest baseline even though the note carries `garden-pack` membership in its
+        // frontmatter (which *does* sync). The fallback must not trust the eager flag alone.
+        let (_d, source) = book();
+        let note_id = add(&source, "Compost", "v1 body", &["garden"]);
+        let pack_v1 = build_pack(&source, &spec()).unwrap();
+
+        let (_d2, target) = book();
+        let options = selected_options(&note_id);
+        import_pack(&target, &pack_v1, &options).unwrap();
+        edit_local_body(&target, &note_id, "user's own careful notes");
+
+        // Simulate a second device: the manifest never made it here.
+        std::fs::remove_file(crate::storage::layout::pack_manifest_path(
+            &target.root,
+            "garden-pack",
+        ))
+        .unwrap();
+
+        let status = note_import_status(&target, "garden-pack", &note_id).unwrap();
+        assert_eq!(status, ImportStatus::LocallyModified);
+
+        // The edit survives a re-import with the default (Skip) resolution.
+        let mut v2_spec = spec();
+        v2_spec.version = "2.0.0".into();
+        let pack_v2 = build_pack(&source, &v2_spec).unwrap();
+        let report = import_pack(&target, &pack_v2, &options).unwrap();
+        assert_eq!(report.skipped_locally_modified, vec![note_id.clone()]);
+        assert_eq!(
+            get_note(&target, &note_id).unwrap().body,
+            "user's own careful notes"
+        );
+    }
+
+    #[test]
+    fn corrupt_manifest_is_treated_as_missing_not_fatal() {
+        let (_d, source) = book();
+        let note_id = add(&source, "Compost", "v1 body", &["garden"]);
+        let pack_v1 = build_pack(&source, &spec()).unwrap();
+
+        let (_d2, target) = book();
+        let options = selected_options(&note_id);
+        import_pack(&target, &pack_v1, &options).unwrap();
+
+        let manifest_path = crate::storage::layout::pack_manifest_path(&target.root, "garden-pack");
+        std::fs::write(&manifest_path, b"{ not valid json").unwrap();
+
+        // Loading degrades to a fresh/default manifest instead of erroring...
+        let manifest = BookPackManifest::load(&target.root, "garden-pack").unwrap();
+        assert!(manifest.notes.is_empty());
+
+        // ...and a preview/import against the corrupt manifest doesn't hard-fail.
+        assert!(preview_import(&target, &pack_v1).is_ok());
     }
 
     #[test]

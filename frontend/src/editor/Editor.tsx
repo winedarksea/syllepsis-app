@@ -537,6 +537,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           title,
           summary,
           body: nextBody,
+          // The body this editor last knew to be on disk. If it no longer matches what's
+          // actually there, the backend merges through the CRDT layer instead of overwriting.
+          baseline_body: note.body,
         });
         setNote(updated);
         if (!isNoteLocked && updated.body !== nextBody) {

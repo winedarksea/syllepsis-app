@@ -340,7 +340,10 @@ fn try_crdt_merge_body(
 
     let sidecar = layout::crdt_sidecar_path(&book.root, &parent.id);
     let mut current_doc = if sidecar.exists() {
-        backend.load_document(&actor, &std::fs::read(sidecar)?)?
+        // Corrupt sidecar: markdown is the source of truth, rebuild from it.
+        backend
+            .load_document(&actor, &std::fs::read(sidecar)?)
+            .unwrap_or_else(|_| backend.new_document(&actor, &parent.body))
     } else {
         backend.new_document(&actor, &parent.body)
     };
@@ -359,7 +362,10 @@ fn attach_merge_base(
     let actor = crate::sync::actor_id_for(&book.root)?;
     let sidecar = layout::crdt_sidecar_path(&book.root, &parent.id);
     let doc = if sidecar.exists() {
-        backend.load_document(&actor, &std::fs::read(sidecar)?)?
+        // Corrupt sidecar: markdown is the source of truth, rebuild from it.
+        backend
+            .load_document(&actor, &std::fs::read(sidecar)?)
+            .unwrap_or_else(|_| backend.new_document(&actor, &parent.body))
     } else {
         backend.new_document(&actor, &parent.body)
     };

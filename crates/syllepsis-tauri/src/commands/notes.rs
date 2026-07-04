@@ -103,6 +103,16 @@ pub fn list_notes(
     })
 }
 
+/// Note files that failed to load on the last scan (bad frontmatter, unparseable id or body).
+/// Call after `list_notes`/`unsorted_notes`, which populate this; the affected files are left
+/// untouched on disk.
+#[tauri::command]
+pub fn note_load_issues(
+    state: State<AppState>,
+) -> Result<Vec<syllepsis_core::storage::NoteLoadIssue>, String> {
+    with_book!(state, book, { Ok(app::note_load_issues(book)) })
+}
+
 /// Create a new note, optionally inheriting categories from `inherit_from`.
 #[tauri::command]
 pub fn create_note(
@@ -185,12 +195,79 @@ pub fn fork_note(state: State<AppState>, id: String) -> Result<NoteDto, String> 
     })
 }
 
-/// Permanently delete a note by id.
+/// Delete a note by id, routed through the soft-delete lifecycle rather than removing the file
+/// outright: pictures/drawings are purged immediately (their asset has no separate lifecycle),
+/// everything else is marked for deletion and only purged once the configured delay elapses.
+fn delete_note_via_lifecycle(book: &syllepsis_core::storage::Book, id: &str) -> Result<(), String> {
+    let note_id = syllepsis_core::id::NoteId::parse(id).map_err(|e| e.to_string())?;
+    let note = book.store.read_note(&note_id).map_err(|e| e.to_string())?;
+    if matches!(note.object_type, ObjectType::Picture | ObjectType::Drawing) {
+        syllepsis_core::app::lifecycle::delete_image_object_now(book, id).map_err(|e| e.to_string())
+    } else {
+        syllepsis_core::app::lifecycle::request_deletion(book, id)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Delete a note by id. The frontend never calls this command directly (only `request_deletion`,
+/// `purge_*`, and `delete_image_object_now`), but it stays registered on the IPC surface, so
+/// anything that did call it goes through [`delete_note_via_lifecycle`]'s safety net rather than
+/// an instant, unrecoverable delete.
 #[tauri::command]
 pub fn delete_note(state: State<AppState>, id: String) -> Result<(), String> {
-    with_book!(state, book, {
-        app::delete_note(book, &id).map_err(|e| e.to_string())
-    })
+    with_book!(state, book, { delete_note_via_lifecycle(book, &id) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syllepsis_core::app::commands::create_note;
+    use syllepsis_core::app::lifecycle::restore_note;
+    use syllepsis_core::storage::Book;
+
+    fn book() -> (tempfile::TempDir, Book) {
+        let dir = tempfile::tempdir().unwrap();
+        let book = Book::create(dir.path(), "Test").unwrap();
+        (dir, book)
+    }
+
+    #[test]
+    fn delete_note_marks_for_deletion_instead_of_removing_the_file() {
+        let (_dir, book) = book();
+        let note = create_note(&book, ObjectType::Note, "doomed", None).unwrap();
+
+        delete_note_via_lifecycle(&book, &note.id).unwrap();
+
+        // The file is still on disk (marked, not removed) and can be restored.
+        let stored = book
+            .store
+            .read_note(&syllepsis_core::id::NoteId::parse(&note.id).unwrap())
+            .unwrap();
+        assert!(stored.metadata.lifecycle.marked_for_deletion_at.is_some());
+
+        restore_note(&book, &note.id).unwrap();
+        let restored = book
+            .store
+            .read_note(&syllepsis_core::id::NoteId::parse(&note.id).unwrap())
+            .unwrap();
+        assert!(restored.metadata.lifecycle.marked_for_deletion_at.is_none());
+    }
+
+    #[test]
+    fn delete_note_purges_pictures_and_drawings_immediately() {
+        let (_dir, book) = book();
+        // No tracked asset needed to exercise the routing: pictures/drawings without a
+        // resolvable asset simply skip the file removal and still purge the note itself.
+        let note = create_note(&book, ObjectType::Drawing, "sketch", None).unwrap();
+
+        delete_note_via_lifecycle(&book, &note.id).unwrap();
+
+        assert!(book
+            .store
+            .read_note(&syllepsis_core::id::NoteId::parse(&note.id).unwrap())
+            .is_err());
+    }
 }
 
 /// Export the full book as a single linear markdown manuscript.

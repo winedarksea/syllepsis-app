@@ -14,6 +14,7 @@ use crate::id::NoteId;
 use crate::markdown::frontmatter::{self, split_frontmatter};
 use crate::model::metadata::ForkInfo;
 use crate::model::{CommentaryMetadata, Note, ObjectType};
+use crate::storage::atomic::write_atomic;
 use crate::storage::layout;
 use crate::storage::registry::IdRegistry;
 use crate::storage::store::{FsNoteStore, NoteStore};
@@ -344,9 +345,8 @@ fn default_book_name(root: &Path) -> String {
 
 fn write_commentary_note_at(root: &Path, note: &Note) -> CoreResult<()> {
     let dir = layout::commentary_dir(root);
-    std::fs::create_dir_all(&dir)?;
     let path = dir.join(layout::note_filename(&note.id));
-    std::fs::write(path, frontmatter::serialize_note(note)?)?;
+    write_atomic(&path, frontmatter::serialize_note(note)?.as_bytes())?;
     Ok(())
 }
 
@@ -389,7 +389,10 @@ fn ensure_new_book_root_available(root: &Path) -> CoreResult<()> {
 
 fn write_book_meta(root: &Path, metadata: &BookMetadata) -> CoreResult<()> {
     let yaml = serde_yaml::to_string(metadata)?;
-    std::fs::write(layout::book_meta_path(root), format!("---\n{yaml}---\n"))?;
+    write_atomic(
+        &layout::book_meta_path(root),
+        format!("---\n{yaml}---\n").as_bytes(),
+    )?;
     Ok(())
 }
 
@@ -405,7 +408,10 @@ fn read_book_meta(root: &Path) -> CoreResult<Option<(BookMetadata, bool)>> {
 }
 
 fn write_config(root: &Path, config: &Config) -> CoreResult<()> {
-    std::fs::write(layout::config_path(root), serde_yaml::to_string(config)?)?;
+    write_atomic(
+        &layout::config_path(root),
+        serde_yaml::to_string(config)?.as_bytes(),
+    )?;
     Ok(())
 }
 

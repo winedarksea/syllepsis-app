@@ -109,6 +109,7 @@ pub fn run() {
             render_note_markdown,
             note_neighbors,
             list_notes,
+            note_load_issues,
             create_note,
             update_note,
             set_prior,

@@ -22,6 +22,7 @@ use crate::config::SyncConfig;
 use crate::crdt::{select_crdt_backend, ActorId, CrdtBackend, NoteCrdt};
 use crate::error::CoreResult;
 use crate::markdown::frontmatter;
+use crate::storage::atomic::write_atomic;
 use crate::sync::cloud_index::{is_cloud_index_path, IndexEntry};
 use crate::sync::local_folder::content_revision;
 use crate::sync::plan::{plan, SyncAction};
@@ -41,6 +42,13 @@ pub struct SyncReport {
     pub deleted_local: Vec<String>,
     pub deleted_remote: Vec<String>,
     pub skipped: usize,
+    /// Notes whose markdown failed to parse during sidecar reconciliation — their sidecar was
+    /// left as-is (or absent) rather than failing the whole pass. The file itself still
+    /// participates in the plan as opaque bytes (see [`local_fingerprints`]), so it is never
+    /// mistaken for deleted.
+    pub skipped_unparseable: Vec<String>,
+    /// Sidecars that were corrupt and got rebuilt fresh from the markdown body (source of truth).
+    pub rebuilt_sidecars: Vec<String>,
 }
 
 impl SyncReport {
@@ -124,7 +132,7 @@ impl SyncEngine {
         let mut report = SyncReport::default();
 
         // 1. Markdown → sidecar, so local/external edits are in the CRDT before we diff.
-        self.reconcile_sidecars()?;
+        self.reconcile_sidecars(&mut report)?;
 
         // 2. Fingerprint both sides. Sidecars and device-local dirs are excluded from the planned
         //    set — sidecars ride along with their note, never planned independently.
@@ -224,8 +232,11 @@ impl SyncEngine {
                 report.pulled.push(path);
             }
             SyncAction::Merge(path) => {
-                self.merge_note(&path, remote_all, state)?;
-                report.merged.push(path);
+                if self.merge_note(&path, remote_all, state, report)? {
+                    report.merged.push(path);
+                } else {
+                    report.conflicted.push(path);
+                }
             }
             SyncAction::Conflict(path) => {
                 if is_embedding_sidecar(&path) {
@@ -267,22 +278,39 @@ impl SyncEngine {
     }
 
     /// Step 1: ensure every local note has a sidecar whose CRDT text equals its markdown body.
-    fn reconcile_sidecars(&self) -> CoreResult<()> {
+    /// A note that fails to parse (bad frontmatter) or a sidecar that fails to load (corrupt
+    /// `.crdt` file) must never fail the whole sync pass — the file stays exactly as it is on
+    /// disk (see [`local_fingerprints`]'s invariant) and the issue is reported instead.
+    fn reconcile_sidecars(&self, report: &mut SyncReport) -> CoreResult<()> {
         for rel in self.walk_files()? {
             if !is_note_md(&rel) {
                 continue;
             }
-            let note = frontmatter::parse_note(&std::fs::read_to_string(self.full(&rel))?)?;
+            let note = match frontmatter::parse_note(&std::fs::read_to_string(self.full(&rel))?) {
+                Ok(note) => note,
+                Err(_) => {
+                    report.skipped_unparseable.push(rel);
+                    continue;
+                }
+            };
             let sidecar_rel = match sidecar_rel_path(&rel) {
                 Some(s) => s,
                 None => continue,
             };
             let sidecar_full = self.full(&sidecar_rel);
             if sidecar_full.exists() {
-                let mut doc = self
+                let (mut doc, corrupt) = match self
                     .backend
-                    .load_document(&self.actor, &std::fs::read(&sidecar_full)?)?;
-                if doc.text() != note.body {
+                    .load_document(&self.actor, &std::fs::read(&sidecar_full)?)
+                {
+                    Ok(doc) => (doc, false),
+                    Err(_) => {
+                        // Corrupt sidecar: markdown is the source of truth, rebuild from it.
+                        report.rebuilt_sidecars.push(rel.clone());
+                        (self.backend.new_document(&self.actor, &note.body), true)
+                    }
+                };
+                if corrupt || doc.text() != note.body {
                     doc.set_text(&note.body); // captures the local/external edit (idempotent if equal)
                     self.write_sidecar(&sidecar_full, doc.as_ref())?;
                 }
@@ -298,42 +326,88 @@ impl SyncEngine {
     /// markdown, and push both. The body converges; markdown frontmatter takes the local copy (a
     /// known POC limitation — concurrent *metadata* edits last-writer-win, concurrent *text* edits
     /// merge).
+    ///
+    /// Returns `false` when there is no reliable body to merge against — the local note failed to
+    /// parse, the remote note is not valid UTF-8, or the remote note fails to parse — so this falls
+    /// back to a byte-level [`resolve_conflict`](Self::resolve_conflict) (both variants preserved)
+    /// instead of propagating an error that would fail the whole pass. The caller should report the
+    /// path as conflicted rather than merged in that case. A corrupt *local* sidecar is not such a
+    /// case: markdown is the source of truth, so it is silently rebuilt from the local note body
+    /// (recorded in `report.rebuilt_sidecars`) and the merge proceeds normally.
     fn merge_note(
         &self,
         path: &str,
         remote_all: &BTreeMap<String, String>,
         state: &mut SyncState,
-    ) -> CoreResult<()> {
+        report: &mut SyncReport,
+    ) -> CoreResult<bool> {
         let sidecar_rel = sidecar_rel_path(path).expect("merge target is a note");
         let sidecar_full = self.full(&sidecar_rel);
-        let mut note = frontmatter::parse_note(&std::fs::read_to_string(self.full(path))?)?;
+        let mut note = match frontmatter::parse_note(&std::fs::read_to_string(self.full(path))?) {
+            Ok(note) => note,
+            Err(_) => {
+                self.resolve_conflict(path, state)?;
+                return Ok(false);
+            }
+        };
 
         let mut doc = if sidecar_full.exists() {
-            self.backend
-                .load_document(&self.actor, &std::fs::read(&sidecar_full)?)?
+            match self
+                .backend
+                .load_document(&self.actor, &std::fs::read(&sidecar_full)?)
+            {
+                Ok(doc) => doc,
+                Err(_) => {
+                    // Corrupt local sidecar: markdown is the source of truth, rebuild from it.
+                    report.rebuilt_sidecars.push(path.to_string());
+                    self.backend.new_document(&self.actor, &note.body)
+                }
+            }
         } else {
             self.backend.new_document(&self.actor, &note.body)
         };
 
-        if remote_all.contains_key(&sidecar_rel) {
-            doc.merge(&self.provider.get(&sidecar_rel)?)?;
+        let merged = if remote_all.contains_key(&sidecar_rel) {
+            match doc.merge(&self.provider.get(&sidecar_rel)?) {
+                Ok(()) => true,
+                // Corrupt remote sidecar: fall back to the note-body path below, as if the remote
+                // simply had no sidecar.
+                Err(_) => self.fold_remote_note_body(&mut doc, path)?,
+            }
         } else {
-            // Remote changed the note but has no sidecar (edited by a non-CRDT tool): fold its body
-            // in as a local edit so it still participates in convergence.
-            let remote_note =
-                frontmatter::parse_note(&String::from_utf8_lossy(&self.provider.get(path)?))?;
-            doc.set_text(&remote_note.body);
+            self.fold_remote_note_body(&mut doc, path)?
+        };
+        if !merged {
+            self.resolve_conflict(path, state)?;
+            return Ok(false);
         }
 
         note.body = doc.text();
         self.write_sidecar(&sidecar_full, doc.as_ref())?;
         let serialized = frontmatter::serialize_note(&note)?;
-        std::fs::write(self.full(path), &serialized)?;
+        write_atomic(&self.full(path), serialized.as_bytes())?;
 
         let note_rev = self.provider.put(path, serialized.as_bytes())?;
         state.mark_synced(path, content_revision(serialized.as_bytes()), note_rev);
         self.push_sidecar_of(path, state)?;
-        Ok(())
+        Ok(true)
+    }
+
+    /// Remote changed the note but has no usable sidecar (edited by a non-CRDT tool, or the
+    /// remote sidecar was corrupt): fold the remote body into `doc` as a local edit so it still
+    /// participates in convergence. Requires the remote bytes to be valid UTF-8 and parseable —
+    /// on either failure, returns `false` so the caller falls back to a byte-level conflict rather
+    /// than writing lossy (`U+FFFD`) replacement text back to both sides.
+    fn fold_remote_note_body(&self, doc: &mut Box<dyn NoteCrdt>, path: &str) -> CoreResult<bool> {
+        let remote_bytes = self.provider.get(path)?;
+        let Ok(remote_text) = String::from_utf8(remote_bytes) else {
+            return Ok(false);
+        };
+        let Ok(remote_note) = frontmatter::parse_note(&remote_text) else {
+            return Ok(false);
+        };
+        doc.set_text(&remote_note.body);
+        Ok(true)
     }
 
     /// Both sides changed a non-mergeable file: pick a deterministic winner (greater content hash),
@@ -352,7 +426,7 @@ impl SyncEngine {
         };
         let conflict_rel = conflict_path(path, &self.conflict_marker, &loser_hash);
 
-        std::fs::write(self.full(path), &winner)?;
+        write_atomic(&self.full(path), &winner)?;
         self.write_local(&conflict_rel, &loser)?;
 
         let win_rev = self.provider.put(path, &winner)?;
@@ -445,25 +519,23 @@ impl SyncEngine {
     }
 
     fn write_sidecar(&self, full: &Path, doc: &dyn NoteCrdt) -> CoreResult<()> {
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(full, doc.snapshot()?)?;
-        Ok(())
+        write_atomic(full, &doc.snapshot()?)
     }
 
     fn write_local(&self, rel: &str, bytes: &[u8]) -> CoreResult<()> {
-        let full = self.full(rel);
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(full, bytes)?;
-        Ok(())
+        write_atomic(&self.full(rel), bytes)
     }
 
     /// All syncable local files: every file under the book except device-local bookkeeping
     /// (`_sync/`), ephemeral caches (`_derived/`), and the CRDT sidecars (`_crdt/`, handled with
     /// their notes), each mapped to its content hash.
+    ///
+    /// **Invariant**: this must include *every* on-disk file that isn't excluded above,
+    /// parseable or not — hashed as raw bytes, never opened/parsed. `plan()` treats a path's
+    /// absence here as "deleted locally", so an unparseable note dropping out of this map would
+    /// make sync delete it on the remote. A corrupt note must still show up as present, just
+    /// unmergeable ([`merge_note`](Self::merge_note) and [`reconcile_sidecars`](Self::reconcile_sidecars)
+    /// handle that by falling back to conflict resolution or skipping, never by omission).
     fn local_fingerprints(&self) -> CoreResult<BTreeMap<String, String>> {
         let mut map = BTreeMap::new();
         for rel in self.walk_files()? {
@@ -1002,5 +1074,183 @@ mod tests {
             .load_document(&actor, &std::fs::read(&sidecar).unwrap())
             .unwrap();
         assert_eq!(doc.text(), "edited externally");
+    }
+
+    #[test]
+    fn sync_survives_a_corrupted_local_note_without_deleting_it_remotely() {
+        let (_tmp, a, b) = two_devices();
+        let note = add_note(&a, "n", "hello");
+        a.sync();
+        b.sync();
+        b.book.store.refresh().unwrap();
+        assert_eq!(body_of(&b.book, &note), "hello");
+
+        // Hand-corrupt A's local copy directly on disk (bad YAML), bypassing the store.
+        let note_path = a
+            .book
+            .root
+            .join(crate::storage::layout::note_filename(&note));
+        std::fs::write(&note_path, "---\nid: [ not valid\n---\nhello").unwrap();
+        a.book.store.refresh().unwrap();
+
+        // The pass must not error out, must record the file as skipped-unparseable (not silently
+        // dropped), and must never treat it as deleted.
+        let report = a.engine().sync().unwrap();
+        assert!(report
+            .skipped_unparseable
+            .iter()
+            .any(|p| p.ends_with(&crate::storage::layout::note_filename(&note))));
+        assert!(report.deleted_remote.is_empty());
+
+        // The remote still has a copy of the file (never deleted out from under B).
+        let remote_path = a.remote.join(crate::storage::layout::note_filename(&note));
+        assert!(remote_path.exists());
+
+        // B can still sync without error too.
+        assert!(b.engine().sync().is_ok());
+    }
+
+    #[test]
+    fn merge_falls_back_to_conflict_when_the_local_note_is_unparseable() {
+        let (_tmp, a, b) = two_devices();
+        let note = add_note(&a, "n", "base");
+        a.sync();
+        b.sync();
+        b.book.store.refresh().unwrap();
+
+        // B changes the note normally so the plan will want to Merge on the next pass...
+        let mut eb = b.book.store.read_note(&note).unwrap();
+        eb.body = "edit from B".into();
+        b.book.save_note(&eb).unwrap();
+        b.sync();
+
+        // ...but A's local copy is corrupt, so there's no reliable body to merge against.
+        let note_path = a
+            .book
+            .root
+            .join(crate::storage::layout::note_filename(&note));
+        std::fs::write(&note_path, "---\nid: [ not valid\n---\nhello").unwrap();
+        a.book.store.refresh().unwrap();
+
+        let report = a.engine().sync().unwrap();
+        assert!(report.conflicted.iter().any(|p| p.ends_with(".md")));
+        assert!(report.merged.is_empty());
+
+        // A conflict copy preserving A's corrupt bytes exists alongside the winner.
+        let has_conflict = std::fs::read_dir(a.book.root.as_path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains("conflict"));
+        assert!(has_conflict);
+    }
+
+    #[test]
+    fn merge_falls_back_to_conflict_on_invalid_utf8_remote_note() {
+        let (_tmp, a, b) = two_devices();
+        let note = add_note(&a, "n", "hello");
+        a.sync();
+        b.sync();
+
+        // A edits locally so the plan wants to Merge this note on the next pass.
+        let mut ea = a.book.store.read_note(&note).unwrap();
+        ea.body = "edit from A".into();
+        a.book.save_note(&ea).unwrap();
+        let local_bytes_before_conflict = std::fs::read(
+            a.book
+                .root
+                .join(crate::storage::layout::note_filename(&note)),
+        )
+        .unwrap();
+
+        // Directly corrupt the remote copy with invalid UTF-8 bytes and drop its sidecar, as if
+        // an external tool wrote garbage with no CRDT record for it.
+        let remote_note_path = a.remote.join(crate::storage::layout::note_filename(&note));
+        let corrupt_remote_bytes = vec![b'h', b'i', 0xff, 0xfe];
+        std::fs::write(&remote_note_path, &corrupt_remote_bytes).unwrap();
+        std::fs::remove_file(crate::storage::layout::crdt_sidecar_path(&a.remote, &note)).unwrap();
+
+        let report = a.engine().sync().unwrap();
+        assert!(report.conflicted.iter().any(|p| p.ends_with(".md")));
+        assert!(report.merged.is_empty());
+
+        // Whichever variant "won" the byte-level conflict, it must be exactly one of the two
+        // original byte sequences verbatim — never a synthesized `U+FFFD`-laden merge product.
+        let local_now = std::fs::read(
+            a.book
+                .root
+                .join(crate::storage::layout::note_filename(&note)),
+        )
+        .unwrap();
+        assert!(
+            local_now == local_bytes_before_conflict || local_now == corrupt_remote_bytes,
+            "conflict resolution must preserve one variant byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn corrupt_local_sidecar_is_rebuilt_from_markdown() {
+        let (_tmp, a, _b) = two_devices();
+        let note = add_note(&a, "n", "hello");
+        a.sync(); // creates a good sidecar
+
+        // Corrupt the sidecar directly on disk.
+        let sidecar = crate::storage::layout::crdt_sidecar_path(a.book.root.as_path(), &note);
+        std::fs::write(&sidecar, b"not a valid crdt snapshot").unwrap();
+
+        let report = a.engine().sync().unwrap();
+        assert!(report.rebuilt_sidecars.iter().any(|p| p.ends_with(".md")));
+
+        // The note body itself is untouched by the rebuild.
+        assert_eq!(body_of(&a.book, &note), "hello");
+        // The sidecar is valid again and reflects the current body.
+        let backend = crate::crdt::select_crdt_backend(&a.cfg);
+        let actor = actor_id_for(a.book.root.as_path()).unwrap();
+        let doc = backend
+            .load_document(&actor, &std::fs::read(&sidecar).unwrap())
+            .unwrap();
+        assert_eq!(doc.text(), "hello");
+    }
+
+    #[cfg(feature = "loro")]
+    #[test]
+    fn loro_merge_survives_a_corrupted_local_sidecar() {
+        // A corrupt local sidecar (rebuilt fresh from markdown, losing local CRDT history) merging
+        // against a remote replica with real history must still converge without error or data
+        // loss — the whole point of never propagating the load error out of the sync pass.
+        let cfg = SyncConfig {
+            crdt_backend: crate::crdt::LORO_BACKEND.to_string(),
+            ..SyncConfig::default()
+        };
+        let (_tmp, a, b) = two_devices_with(cfg);
+        let note = add_note(&a, "shared", "base.");
+        a.sync();
+        b.sync();
+        b.book.store.refresh().unwrap();
+
+        let mut eb = b.book.store.read_note(&note).unwrap();
+        eb.body = "PREPEND-B base.".into();
+        b.book.save_note(&eb).unwrap();
+        b.sync();
+
+        // A also edits locally, then its sidecar is corrupted before the merge runs.
+        let mut ea = a.book.store.read_note(&note).unwrap();
+        ea.body = "base. APPEND-A".into();
+        a.book.save_note(&ea).unwrap();
+        let sidecar = crate::storage::layout::crdt_sidecar_path(a.book.root.as_path(), &note);
+        std::fs::write(&sidecar, b"not a valid crdt snapshot").unwrap();
+
+        for _ in 0..4 {
+            assert!(a.engine().sync().is_ok());
+            assert!(b.engine().sync().is_ok());
+        }
+        a.book.store.refresh().unwrap();
+        b.book.store.refresh().unwrap();
+        let final_a = body_of(&a.book, &note);
+        assert_eq!(
+            final_a,
+            body_of(&b.book, &note),
+            "replicas must still converge"
+        );
+        assert!(!final_a.is_empty(), "no data was lost outright");
     }
 }

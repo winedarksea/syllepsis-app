@@ -550,6 +550,32 @@ mod tests {
     }
 
     #[test]
+    fn purge_expired_survives_a_corrupt_note() {
+        let (_d, book) = book();
+        let doomed = create_note(&book, ObjectType::Note, "doomed", None).unwrap();
+        request_deletion(&book, &doomed.id).unwrap();
+
+        // A sibling note with hand-corrupted frontmatter must not take the purge pass down.
+        let corrupt = create_note(&book, ObjectType::Note, "corrupt", None).unwrap();
+        let corrupt_id = NoteId::parse(&corrupt.id).unwrap();
+        let corrupt_path = book
+            .root
+            .join(crate::storage::layout::note_filename(&corrupt_id));
+        std::fs::write(&corrupt_path, "---\nid: not valid frontmatter [\n---\nbody").unwrap();
+        book.store.refresh().unwrap();
+
+        let past_delay =
+            Utc::now() + Duration::days(book.config.cleanup.deletion_delay_days as i64 + 1);
+        let purged = purge_expired(&book, past_delay).unwrap();
+        assert_eq!(purged, vec![doomed.id.clone()]);
+        // The corrupt file is left completely untouched on disk.
+        assert_eq!(
+            std::fs::read_to_string(&corrupt_path).unwrap(),
+            "---\nid: not valid frontmatter [\n---\nbody"
+        );
+    }
+
+    #[test]
     fn restore_cancels_a_pending_deletion() {
         let (_d, book) = book();
         let note = create_note(&book, ObjectType::Note, "saved", None).unwrap();

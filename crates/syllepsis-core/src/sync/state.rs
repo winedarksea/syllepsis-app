@@ -16,6 +16,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
+use crate::storage::atomic::write_atomic;
 use crate::storage::layout;
 use crate::sync::provider::RemoteRevision;
 
@@ -58,10 +59,8 @@ impl SyncState {
 
     /// Persist this state under `_sync/` (creating the directory if needed).
     pub fn save(&self, book_root: &Path) -> CoreResult<()> {
-        let dir = layout::sync_dir(book_root);
-        std::fs::create_dir_all(&dir)?;
         let bytes = serde_json::to_vec_pretty(self)?;
-        std::fs::write(state_path(book_root, &self.provider), bytes)?;
+        write_atomic(&state_path(book_root, &self.provider), &bytes)?;
         Ok(())
     }
 

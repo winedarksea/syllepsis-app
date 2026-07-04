@@ -15,14 +15,28 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::markdown::frontmatter::{self, split_frontmatter};
 use crate::model::{Category, Note, World};
 use crate::spatial::LocationLookup;
+use crate::storage::atomic::write_atomic;
 use crate::storage::layout;
+
+/// A note file that could not be loaded during a scan (bad frontmatter, unparseable id, etc).
+/// The underlying file is never touched — this is reporting only, so a corrupt file can never be
+/// mistaken for a deleted one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteLoadIssue {
+    /// Book-relative path (forward-slash separated) of the offending file.
+    pub path: String,
+    /// The note's id, if the frontmatter id field itself could be parsed.
+    pub ulid: Option<String>,
+    /// Human-readable description of what went wrong.
+    pub error: String,
+}
 
 /// Persistence operations for one book's notes and categories.
 pub trait NoteStore {
@@ -59,6 +73,12 @@ pub struct FsNoteStore {
     root: PathBuf,
     /// ulid → absolute path of the note file. Interior-mutable so the trait can take `&self`.
     index: RwLock<HashMap<String, PathBuf>>,
+    /// Files whose frontmatter id could not be read on the last `refresh()` (so they never made
+    /// it into `index`). Reporting only: nothing in this module ever deletes, moves, or de-indexes
+    /// a file because it appears here.
+    id_scan_issues: RwLock<Vec<NoteLoadIssue>>,
+    /// Indexed files whose full body failed to parse on the last `read_all_notes()`.
+    parse_issues: RwLock<Vec<NoteLoadIssue>>,
 }
 
 impl FsNoteStore {
@@ -67,26 +87,75 @@ impl FsNoteStore {
         let store = FsNoteStore {
             root: root.into(),
             index: RwLock::new(HashMap::new()),
+            id_scan_issues: RwLock::new(Vec::new()),
+            parse_issues: RwLock::new(Vec::new()),
         };
         store.refresh()?;
         Ok(store)
     }
 
     /// Rebuild the ulid → path index by scanning the book directory. Call after an external
-    /// sync pulls in changes. Files whose frontmatter id cannot be parsed are skipped (they
-    /// will surface their error if read directly) rather than failing the whole scan.
+    /// sync pulls in changes. Files whose frontmatter id cannot be parsed are recorded as a
+    /// [`NoteLoadIssue`] (surfaced via [`load_issues`](Self::load_issues)) rather than failing
+    /// the whole scan.
     pub fn refresh(&self) -> CoreResult<()> {
         let mut files = Vec::new();
         collect_note_files(&self.root, &self.root, &mut files)?;
 
         let mut index = HashMap::new();
+        let mut issues = Vec::new();
         for path in files {
-            if let Ok(Some(id)) = read_frontmatter_id(&path) {
-                index.insert(id.ulid().to_string(), path);
+            match read_frontmatter_id(&path) {
+                Ok(Some(id)) => {
+                    index.insert(id.ulid().to_string(), path);
+                }
+                Ok(None) => issues.push(NoteLoadIssue {
+                    path: self.relative_path(&path),
+                    ulid: None,
+                    error: "missing frontmatter".to_string(),
+                }),
+                Err(error) => issues.push(NoteLoadIssue {
+                    path: self.relative_path(&path),
+                    ulid: None,
+                    error: error.to_string(),
+                }),
             }
         }
         *self.index.write().expect("index lock poisoned") = index;
+        *self
+            .id_scan_issues
+            .write()
+            .expect("id_scan_issues lock poisoned") = issues;
         Ok(())
+    }
+
+    /// Files that could not be loaded on the last scan (bad frontmatter, unparseable id or body,
+    /// etc). The underlying files are left untouched on disk.
+    pub fn load_issues(&self) -> Vec<NoteLoadIssue> {
+        let mut issues = self
+            .id_scan_issues
+            .read()
+            .expect("id_scan_issues lock poisoned")
+            .clone();
+        issues.extend(
+            self.parse_issues
+                .read()
+                .expect("parse_issues lock poisoned")
+                .iter()
+                .cloned(),
+        );
+        issues
+    }
+
+    fn relative_path(&self, path: &Path) -> String {
+        path.strip_prefix(&self.root)
+            .map(|rel| {
+                rel.components()
+                    .filter_map(|c| c.as_os_str().to_str())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+            .unwrap_or_else(|_| path.display().to_string())
     }
 
     fn path_for(&self, id: &NoteId) -> Option<PathBuf> {
@@ -141,7 +210,7 @@ impl NoteStore for FsNoteStore {
         fs::create_dir_all(&dir)?;
         let target = dir.join(layout::note_filename(&note.id));
 
-        fs::write(&target, frontmatter::serialize_note(note)?)?;
+        write_atomic(&target, frontmatter::serialize_note(note)?.as_bytes())?;
         // If the slug changed, the old filename is stale — remove it so there is one file.
         if let Some(old) = existing {
             if old != target {
@@ -181,6 +250,7 @@ impl NoteStore for FsNoteStore {
             .collect();
         let mut notes = Vec::with_capacity(indexed_paths.len());
         let mut missing_ulids = Vec::new();
+        let mut parse_issues = Vec::new();
         for (ulid, path) in indexed_paths {
             let content = match fs::read_to_string(&path) {
                 Ok(content) => content,
@@ -190,7 +260,16 @@ impl NoteStore for FsNoteStore {
                 }
                 Err(error) => return Err(error.into()),
             };
-            notes.push(frontmatter::parse_note(&content)?);
+            // A corrupt note (bad frontmatter, bad enum/date field, etc) must never take the
+            // whole book down: report it and leave the file untouched, don't propagate `?`.
+            match frontmatter::parse_note(&content) {
+                Ok(note) => notes.push(note),
+                Err(error) => parse_issues.push(NoteLoadIssue {
+                    path: self.relative_path(&path),
+                    ulid: Some(ulid),
+                    error: error.to_string(),
+                }),
+            }
         }
         if !missing_ulids.is_empty() {
             let mut index = self.index.write().expect("index lock poisoned");
@@ -198,6 +277,10 @@ impl NoteStore for FsNoteStore {
                 index.remove(&ulid);
             }
         }
+        *self
+            .parse_issues
+            .write()
+            .expect("parse_issues lock poisoned") = parse_issues;
         Ok(notes)
     }
 
@@ -233,7 +316,7 @@ impl NoteStore for FsNoteStore {
         let dir = layout::categories_dir(&self.root);
         fs::create_dir_all(&dir)?;
         let path = dir.join(layout::category_filename(&category.name));
-        fs::write(path, serialize_category(category)?)?;
+        write_atomic(&path, serialize_category(category)?.as_bytes())?;
         Ok(())
     }
 
@@ -264,7 +347,7 @@ impl NoteStore for FsNoteStore {
         let dir = layout::worlds_dir(&self.root);
         fs::create_dir_all(&dir)?;
         let path = dir.join(layout::world_filename(&world.id));
-        fs::write(path, serialize_world(world)?)?;
+        write_atomic(&path, serialize_world(world)?.as_bytes())?;
         Ok(())
     }
 
@@ -285,12 +368,17 @@ impl NoteStore for FsNoteStore {
     fn write_location_lookup(&self, lookup: &LocationLookup) -> CoreResult<()> {
         let dir = layout::worlds_dir(&self.root);
         fs::create_dir_all(&dir)?;
-        fs::write(layout::location_lookup_path(&self.root), lookup.to_csv())?;
+        write_atomic(
+            &layout::location_lookup_path(&self.root),
+            lookup.to_csv().as_bytes(),
+        )?;
         Ok(())
     }
 }
 
-/// Read only the frontmatter id of a file (resilient to other fields drifting).
+/// Read only the frontmatter id of a file (resilient to other fields drifting). `Ok(None)` means
+/// the file has no frontmatter block at all; a malformed id (bad YAML or bad id string) is an
+/// `Err` so the caller can report *why* the scan skipped the file.
 fn read_frontmatter_id(path: &Path) -> CoreResult<Option<NoteId>> {
     let content = fs::read_to_string(path)?;
     let Some((frontmatter, _body)) = split_frontmatter(&content) else {
@@ -298,7 +386,7 @@ fn read_frontmatter_id(path: &Path) -> CoreResult<Option<NoteId>> {
     };
     match serde_yaml::from_str::<IdOnly>(&frontmatter) {
         Ok(parsed) => Ok(Some(parsed.id)),
-        Err(_) => Ok(None),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -379,6 +467,56 @@ mod tests {
 
         store.delete_note(&note.id).unwrap();
         assert!(store.read_note(&note.id).is_err());
+    }
+
+    #[test]
+    fn corrupt_note_is_skipped_and_reported_without_touching_the_file() {
+        let (dir, store) = temp_store();
+        let mut good = Note::new(ObjectType::Note, "good", "syllepsis_001");
+        good.body = "fine".into();
+        store.write_note(&good).unwrap();
+
+        // Valid YAML with a valid id, but an unrecognized `type` — the id-only scan (which
+        // ignores unknown fields) succeeds while the full `parse_note` fails.
+        let corrupt_path = dir
+            .path()
+            .join("note-corrupt-01hqzzzzzzzzzzzzzzzzzzzzzz.md");
+        let corrupt_bytes = "---\nid: note-corrupt-01hqzzzzzzzzzzzzzzzzzzzzzz\ntype: definitely_not_a_real_type\n---\nbody";
+        fs::write(&corrupt_path, corrupt_bytes).unwrap();
+        store.refresh().unwrap();
+
+        let notes = store.read_all_notes().unwrap();
+        assert_eq!(
+            notes.len(),
+            1,
+            "the corrupt note must not appear in results"
+        );
+        assert_eq!(notes[0].body, "fine");
+
+        let issues = store.load_issues();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].path, "note-corrupt-01hqzzzzzzzzzzzzzzzzzzzzzz.md");
+        assert_eq!(
+            issues[0].ulid.as_deref(),
+            Some("01hqzzzzzzzzzzzzzzzzzzzzzz")
+        );
+
+        // The file itself is left byte-identical on disk.
+        assert_eq!(fs::read_to_string(&corrupt_path).unwrap(), corrupt_bytes);
+    }
+
+    #[test]
+    fn note_with_unparseable_id_is_reported() {
+        let (dir, store) = temp_store();
+        let bad_id_path = dir.path().join("garbage.md");
+        fs::write(&bad_id_path, "---\nid: not-a-real-id\n---\nbody").unwrap();
+        store.refresh().unwrap();
+
+        assert!(store.read_all_notes().unwrap().is_empty());
+        let issues = store.load_issues();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].path, "garbage.md");
+        assert_eq!(issues[0].ulid, None);
     }
 
     #[test]

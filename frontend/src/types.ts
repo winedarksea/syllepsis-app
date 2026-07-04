@@ -148,6 +148,10 @@ export interface NoteDto {
   commentary?: CommentaryMetadata | null;
   sorted: boolean;
   metadata: Metadata;
+  // The body the editor last loaded, sent back on save so the backend can tell a normal save
+  // from a stale one (disk changed since load) and merge through the CRDT layer instead of
+  // blindly overwriting. Omit for callers that don't track a baseline.
+  baseline_body?: string;
 }
 
 export interface CommentarySummary {
@@ -1254,6 +1258,14 @@ export interface PluginDescriptor {
   import_extensions: string[];
   source: PluginSource;
   enabled: boolean;
+}
+
+// ── Note load issues (mirrors syllepsis_core::storage::NoteLoadIssue) ──
+
+export interface NoteLoadIssue {
+  path: string;
+  ulid: string | null;
+  error: string;
 }
 
 // ── Book statistics (mirrors syllepsis_core::app::commands::BookStats) ──
