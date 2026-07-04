@@ -181,21 +181,38 @@ fn to_markdown_impl(items: &[RenderItem], anchored: bool) -> String {
                 out.push_str("\n\n");
             }
             RenderItem::Note(note) => {
-                let content = if anchored {
-                    format!("{}{}", note_anchor(note), note_content(note))
-                } else {
-                    note_content(note)
-                };
+                let content = note_content(note);
                 if note.list_depth > 0 {
                     flush_paragraph(&mut out, &mut paragraph);
                     let indent = "  ".repeat((note.list_depth - 1) as usize);
                     let marker = if note.numbered { "1." } else { "-" };
-                    out.push_str(&format!("{indent}{marker} {}\n", single_line(&content)));
+                    // The anchor stays inline inside the list item — a block element would break
+                    // the list — and the whole item is collapsed onto one line.
+                    let item = single_line(&content);
+                    let item = if anchored {
+                        format!("{}{item}", note_anchor_inline(note))
+                    } else {
+                        item
+                    };
+                    out.push_str(&format!("{indent}{marker} {item}\n"));
                 } else if note.join == PriorKind::SameParagraph && !paragraph.is_empty() {
                     paragraph.push(' ');
+                    if anchored {
+                        // Mid-paragraph, so the anchor must be inline HTML.
+                        paragraph.push_str(&note_anchor_inline(note));
+                    }
                     paragraph.push_str(content.trim());
                 } else {
                     flush_paragraph(&mut out, &mut paragraph);
+                    // Emit the anchor as its own block, not a leading inline span: a leading inline
+                    // element suppresses CommonMark block recognition, so a note whose body starts
+                    // with a heading, list, code fence, or blockquote would otherwise be swallowed
+                    // into a plain paragraph and lose its formatting.
+                    if anchored {
+                        ensure_blank_separation(&mut out);
+                        out.push_str(&note_anchor_block(note));
+                        out.push_str("\n\n");
+                    }
                     paragraph = content;
                 }
             }
@@ -205,9 +222,18 @@ fn to_markdown_impl(items: &[RenderItem], anchored: bool) -> String {
     out.trim_end().to_string()
 }
 
-/// Zero-width anchor marking a note's start position for deep-linking.
-fn note_anchor(note: &RenderedNote) -> String {
+/// Inline anchor (a zero-width `<span>`) for a note joined into a surrounding paragraph or list
+/// item, where a block-level element would break the enclosing block.
+fn note_anchor_inline(note: &RenderedNote) -> String {
     format!("<span id=\"{}\"></span>", note.id.as_str())
+}
+
+/// Block-level anchor (an empty `<div>`) emitted on its own line before a note that starts a new
+/// block. Unlike a leading inline `<span>`, a block element does not suppress CommonMark
+/// recognition of a following block construct (heading, list, code fence, blockquote), so a note
+/// whose body begins with such a construct still renders correctly while remaining deep-linkable.
+fn note_anchor_block(note: &RenderedNote) -> String {
+    format!("<div id=\"{}\"></div>", note.id.as_str())
 }
 
 /// Prefer the full body; fall back to the summary when the body is empty.
@@ -401,16 +427,31 @@ mod tests {
     }
 
     #[test]
-    fn to_markdown_anchored_prepends_note_id_spans() {
+    fn to_markdown_anchored_marks_each_note_with_a_block_anchor() {
         let cat = Category::new("intro");
         let mut a = note("a", "Hello");
         a.prior = Some(PriorEdge::starts_category("intro"));
         let id = a.id.clone();
         let items = render(vec![a], vec![cat]);
         let md = to_markdown_anchored(&items);
-        assert!(md.contains(&format!("<span id=\"{}\"></span>Hello", id.as_str())));
+        // A paragraph-starting note gets a block-level anchor on its own line so it never
+        // suppresses a following block construct.
+        assert!(md.contains(&format!("<div id=\"{}\"></div>", id.as_str())));
         // Plain to_markdown has no anchors.
-        assert!(!to_markdown(&items).contains("<span id="));
+        assert!(!to_markdown(&items).contains("id=\""));
+    }
+
+    #[test]
+    fn to_markdown_anchored_block_before_a_heading_body_keeps_the_heading() {
+        // A note whose body opens with a heading must not be swallowed into a paragraph by its
+        // anchor: the anchor is a block on its own line, so `## Section` stays a heading.
+        let cat = Category::new("c");
+        let mut a = note("a", "## Section\n\nbody");
+        a.prior = Some(PriorEdge::starts_category("c"));
+        let items = render(vec![a], vec![cat]);
+        let md = to_markdown_anchored(&items);
+        // The heading marker begins its own line (not glued onto an inline span).
+        assert!(md.contains("</div>\n\n## Section"), "got: {md}");
     }
 
     #[test]
@@ -424,7 +465,9 @@ mod tests {
         let b_id = b.id.clone();
         let items = render(vec![a, b], vec![cat]);
         let md = to_markdown_anchored(&items);
-        assert!(md.contains(&format!("<span id=\"{}\"></span>Hello", a_id.as_str())));
+        // The paragraph-starting note gets a block anchor; the same-paragraph continuation gets an
+        // inline span so it can sit mid-paragraph without breaking it.
+        assert!(md.contains(&format!("<div id=\"{}\"></div>", a_id.as_str())));
         assert!(md.contains(&format!("<span id=\"{}\"></span>world.", b_id.as_str())));
     }
 }

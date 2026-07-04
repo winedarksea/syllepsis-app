@@ -289,6 +289,10 @@ pre{overflow-x:auto;padding:.8rem 1rem;background:rgba(0,0,0,.04);border-radius:
 .page-nav a{text-decoration:none}\
 .page-nav a:hover{text-decoration:underline}\
 .nav-index{margin:0 auto}\
+.toc-list{list-style:none;padding:0}\
+.toc-list li{margin:0 0 1rem}\
+.toc-blurb{margin:.2rem 0 0;font-size:.92rem;color:#555}\
+@media(prefers-color-scheme:dark){.toc-blurb{color:#a8a5a0}}\
 @media print{.site-header,.page-nav{display:none}}";
 
 /// Replace (or insert) the managed private-exclusion block in an existing `.gitignore`, listing

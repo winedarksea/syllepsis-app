@@ -671,8 +671,11 @@ fn render_per_note(
     // Index/TOC page: grouped by chapter heading, loose notes last.
     let mut toc = String::from("<nav class=\"toc\">\n");
     for chapter in &split.chapters {
+        // The `cat-<slug>` id is what the feed/sitemap chapter entries point at
+        // (`index.html#cat-<slug>`), so it must exist on the per_note index page too.
         toc.push_str(&format!(
-            "<h2>{}</h2>\n<ul class=\"toc-list\">\n",
+            "<h2 id=\"{}\">{}</h2>\n<ul class=\"toc-list\">\n",
+            chapter_anchor(&chapter.category),
             publish::escape_html(&chapter.heading_text)
         ));
         for item in &chapter.items {
@@ -1069,6 +1072,51 @@ mod tests {
         // The dropped link's target leaks nowhere; its inner text survives as plain content.
         assert!(!html.contains(&secret_id));
         assert!(html.contains("secret"));
+    }
+
+    #[test]
+    fn note_body_opening_with_a_block_still_renders_as_that_block() {
+        let (dir, book) = book_with_mode(PageMode::Single);
+        book.store
+            .write_category(&Category::new("kitchen"))
+            .unwrap();
+        // Body opens with a sub-heading and a list — block constructs that a leading inline anchor
+        // span would have swallowed into a plain paragraph.
+        let body = "## Ingredients\n\n- flour\n- water";
+        sorted_note(&book, "Bread", body, &["kitchen"]);
+
+        let out = dir.path().join("site");
+        publish_site(&book, &out, &|_, _| None).unwrap();
+        let html = std::fs::read_to_string(out.join("index.html")).unwrap();
+        assert!(
+            html.contains("Ingredients</h2>"),
+            "sub-heading must render as a heading: {html}"
+        );
+        assert!(
+            html.contains("<li>flour</li>"),
+            "list must render as a list: {html}"
+        );
+    }
+
+    #[test]
+    fn per_note_index_has_chapter_anchors_for_feed_links() {
+        let (dir, mut book) = book_with_mode(PageMode::PerNote);
+        book.config.publish.base_url = Some("https://example.com".to_string());
+        book.store
+            .write_category(&Category::new("kitchen"))
+            .unwrap();
+        sorted_note(&book, "Stove", "the stove", &["kitchen"]);
+
+        let out = dir.path().join("site");
+        publish_site(&book, &out, &|_, _| None).unwrap();
+        // The feed points at `index.html#cat-kitchen`; that anchor must exist on the index page.
+        let index = std::fs::read_to_string(out.join("index.html")).unwrap();
+        assert!(
+            index.contains("id=\"cat-kitchen\""),
+            "index must carry the chapter anchor the feed links to: {index}"
+        );
+        let feed = std::fs::read_to_string(out.join("feed.xml")).unwrap();
+        assert!(feed.contains("index.html#cat-kitchen"));
     }
 
     #[test]
