@@ -67,6 +67,13 @@ function config(): BookConfig {
       external_edit_skew_secs: 2,
       author: '',
     },
+    publish: {
+      site_title: null,
+      author: null,
+      description: null,
+      base_url: null,
+      page_mode: 'per_chapter',
+    },
   };
 }
 

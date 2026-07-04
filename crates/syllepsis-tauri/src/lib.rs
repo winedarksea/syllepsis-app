@@ -100,6 +100,7 @@ pub fn run() {
             update_cleanup_config,
             update_llm_config,
             update_embedding_config,
+            update_publish_config,
             get_local_ai_device_policy,
             update_local_ai_device_policy,
             // notes

@@ -19,6 +19,7 @@ pub struct Config {
     pub search: SearchConfig,
     pub llm: LlmConfig,
     pub sync: SyncConfig,
+    pub publish: PublishConfig,
 }
 
 impl Config {
@@ -288,6 +289,84 @@ impl Default for SyncConfig {
             external_edit_skew_secs: 2,
             author: String::new(),
         }
+    }
+}
+
+/// Which page layout a static-site publish produces (platform-infra.md "Publishing").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PageMode {
+    /// Everything on one `index.html`, as today.
+    Single,
+    /// One page per top-level chapter (category), plus an index/TOC page.
+    #[default]
+    PerChapter,
+    /// One page per note, plus an index/TOC page.
+    PerNote,
+}
+
+/// Static-site publish settings (platform-infra.md "Import / Export / Serving"). Controls page
+/// layout and the SEO metadata emitted per page; `base_url` gates the artifacts (sitemap, feed,
+/// canonical/og:url) that only make sense once the site has a real published address.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PublishConfig {
+    /// Site title shown in the header and `<title>`; falls back to [`crate::storage::BookMetadata::name`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_title: Option<String>,
+    /// Author name, surfaced in the feed and page metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// Meta description for the index page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Published site's base URL (no trailing slash). When set, canonical/og:url links,
+    /// `sitemap.xml`, and `feed.xml` are emitted; when unset those are skipped since a relative
+    /// static export has no fixed address to point them at.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    pub page_mode: PageMode,
+}
+
+impl PublishConfig {
+    /// Strip any trailing slashes from `base_url` (an empty result is treated as unset). Called
+    /// when the config is saved so every reader downstream can assume the invariant.
+    pub fn normalize(&mut self) {
+        if let Some(url) = &mut self.base_url {
+            while url.ends_with('/') {
+                url.pop();
+            }
+            if url.is_empty() {
+                self.base_url = None;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod publish_config_tests {
+    use super::*;
+
+    #[test]
+    fn normalize_strips_trailing_slashes_and_clears_empty() {
+        let mut cfg = PublishConfig {
+            base_url: Some("https://example.com/book///".to_string()),
+            ..Default::default()
+        };
+        cfg.normalize();
+        assert_eq!(cfg.base_url.as_deref(), Some("https://example.com/book"));
+
+        let mut cfg = PublishConfig {
+            base_url: Some("///".to_string()),
+            ..Default::default()
+        };
+        cfg.normalize();
+        assert_eq!(cfg.base_url, None);
+    }
+
+    #[test]
+    fn default_page_mode_is_per_chapter() {
+        assert_eq!(PublishConfig::default().page_mode, PageMode::PerChapter);
     }
 }
 

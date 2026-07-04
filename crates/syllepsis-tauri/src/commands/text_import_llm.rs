@@ -177,10 +177,7 @@ fn run_import_llm_job_inner(
 }
 
 /// Wrap the chunk text in a note that exists only for prompt construction.
-fn transient_chunk_note(
-    state: &AppState,
-    request: &ImportLlmChunkRequest,
-) -> Result<Note, String> {
+fn transient_chunk_note(state: &AppState, request: &ImportLlmChunkRequest) -> Result<Note, String> {
     let guard = state.book.lock().unwrap();
     let book = guard
         .as_ref()

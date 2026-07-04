@@ -301,9 +301,7 @@ impl SearchEngine {
         let normalized: Vec<Option<Embedding>> = self
             .vectors
             .iter()
-            .map(|v| {
-                (v.centroid.magnitude() > f32::EPSILON).then(|| v.centroid.normalized())
-            })
+            .map(|v| (v.centroid.magnitude() > f32::EPSILON).then(|| v.centroid.normalized()))
             .collect();
 
         let mut duplicates = Vec::new();

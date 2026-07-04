@@ -193,13 +193,12 @@ pub fn parse_import_split_response(text: &str) -> Result<Vec<ProposedImportNote>
         (Some(start), Some(end)) if start < end => &stripped[start..=end],
         _ => stripped,
     };
-    let parsed: Vec<ProposedImportNote> = serde_json::from_str(candidate)
-        .or_else(|array_err| {
-            // Some models reply with a single object instead of a one-element array.
-            serde_json::from_str::<ProposedImportNote>(stripped)
-                .map(|note| vec![note])
-                .map_err(|_| format!("could not parse import-split JSON: {array_err}"))
-        })?;
+    let parsed: Vec<ProposedImportNote> = serde_json::from_str(candidate).or_else(|array_err| {
+        // Some models reply with a single object instead of a one-element array.
+        serde_json::from_str::<ProposedImportNote>(stripped)
+            .map(|note| vec![note])
+            .map_err(|_| format!("could not parse import-split JSON: {array_err}"))
+    })?;
     let notes: Vec<ProposedImportNote> = parsed
         .into_iter()
         .map(|note| ProposedImportNote {
@@ -392,7 +391,8 @@ mod tests {
 
     #[test]
     fn import_split_parser_handles_clean_json_array() {
-        let raw = r#"[{"title": "Hot tub", "body": "Simple concrete wall.", "categories": ["garden"]}]"#;
+        let raw =
+            r#"[{"title": "Hot tub", "body": "Simple concrete wall.", "categories": ["garden"]}]"#;
         let notes = parse_import_split_response(raw).unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].title, "Hot tub");
@@ -401,7 +401,8 @@ mod tests {
 
     #[test]
     fn import_split_parser_strips_fences_and_prose() {
-        let raw = "Here are the notes:\n```json\n[{\"title\": \"A\", \"body\": \"a body\"}]\n```\nDone!";
+        let raw =
+            "Here are the notes:\n```json\n[{\"title\": \"A\", \"body\": \"a body\"}]\n```\nDone!";
         let notes = parse_import_split_response(raw).unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].body, "a body");

@@ -84,8 +84,7 @@ pub fn chunk_items_for_llm(
             continue;
         }
 
-        let same_section =
-            current_indices.is_empty() || current_heading == item.category_context;
+        let same_section = current_indices.is_empty() || current_heading == item.category_context;
         let fits = current_text.chars().count() + piece_len + 2 <= max_chars;
         if !same_section || !fits {
             flush(
@@ -203,7 +202,10 @@ mod tests {
             .map(|i| format!("line {i} {}", "x".repeat(30)))
             .collect::<Vec<_>>()
             .join("\n");
-        let items = vec![item(0, Some("garden"), "small"), item(1, Some("garden"), &long_body)];
+        let items = vec![
+            item(0, Some("garden"), "small"),
+            item(1, Some("garden"), &long_body),
+        ];
         let chunks = chunk_items_for_llm(&items, 120);
         assert_eq!(chunks[0].item_indices, vec![0]);
         let oversized: Vec<_> = chunks

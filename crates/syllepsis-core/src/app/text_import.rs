@@ -1030,7 +1030,8 @@ mod tests {
     fn outline_commit_starts_a_chain_per_section() {
         let dir = tempdir().unwrap();
         let book = Book::create(dir.path().join("book"), "Book").unwrap();
-        let input = "Section one\n\tfirst note\n\tsecond note\nSection two\n\tthird note\n\tfourth note\n";
+        let input =
+            "Section one\n\tfirst note\n\tsecond note\nSection two\n\tthird note\n\tfourth note\n";
         let preview = preview_text_import(input, &defaults(TextImportSplitMode::Outline));
         assert_eq!(preview.items.len(), 4);
         let report = commit_text_import(
@@ -1071,7 +1072,8 @@ mod tests {
     fn commit_merges_extra_item_categories() {
         let dir = tempdir().unwrap();
         let book = Book::create(dir.path().join("book"), "Book").unwrap();
-        let preview = preview_text_import("One note body.", &defaults(TextImportSplitMode::OneNote));
+        let preview =
+            preview_text_import("One note body.", &defaults(TextImportSplitMode::OneNote));
         let mut items = preview.items;
         items[0].categories = vec!["concrete".to_string(), "insulation".to_string()];
         let report = commit_text_import(

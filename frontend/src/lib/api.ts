@@ -10,7 +10,7 @@ import type {
   LlmStatus, LlmRouteStatus, LlmTask, ModelRef, Proposal, QueuedLlmJobRequest, QueuedLlmJobResult, CloudLlmPrompt, CloudLlmCompletion,
   CloudLlmConnectionTestResult, CloudLlmModel, CloudLlmProviderDescriptor, CloudLlmProviderSettings,
   ModelManifest, ModelCacheStatus, ModelDownloadReport,
-  BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig,
+  BuildInfo, BookConfig, PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, PublishConfig,
   EmbeddingConfig, LocalAiDevicePolicy, LocalAiStatus,
   GitStatusDto, GitCommandReport, SyncActivityEvent, OperationalActivitySummary, NoteSyncActivity,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, CloudSyncConnectStart, CloudBookSummary,
@@ -45,6 +45,8 @@ export const api = {
   updateLlmConfig: (llm: LlmConfig) => invoke<BookConfig>('update_llm_config', { llm }),
   updateEmbeddingConfig: (embedding: EmbeddingConfig) =>
     invoke<BookConfig>('update_embedding_config', { embedding }),
+  updatePublishConfig: (publish: PublishConfig) =>
+    invoke<BookConfig>('update_publish_config', { publish }),
   getLocalAiDevicePolicy: () =>
     invoke<LocalAiDevicePolicy>('get_local_ai_device_policy'),
   updateLocalAiDevicePolicy: (policy: LocalAiDevicePolicy) =>

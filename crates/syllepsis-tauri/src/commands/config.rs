@@ -10,7 +10,8 @@
 use tauri::State;
 
 use syllepsis_core::config::{
-    CleanupConfig, Config, EmbeddingConfig, LlmConfig, PrivacyConfig, SearchConfig, SyncConfig,
+    CleanupConfig, Config, EmbeddingConfig, LlmConfig, PrivacyConfig, PublishConfig, SearchConfig,
+    SyncConfig,
 };
 use syllepsis_core::onnx::{self, ModelKind};
 
@@ -33,6 +34,15 @@ pub fn update_privacy_config(
 #[tauri::command]
 pub fn update_sync_config(state: State<AppState>, sync: SyncConfig) -> Result<Config, String> {
     update_book_config(&state, |config| config.sync = sync, false)
+}
+
+#[tauri::command]
+pub fn update_publish_config(
+    state: State<AppState>,
+    mut publish: PublishConfig,
+) -> Result<Config, String> {
+    publish.normalize();
+    update_book_config(&state, |config| config.publish = publish, false)
 }
 
 #[tauri::command]

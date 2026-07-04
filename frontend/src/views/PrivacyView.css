@@ -151,3 +151,28 @@
 }
 .pv-cap:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
 .pv-cap:disabled { opacity: 0.5; cursor: default; }
+
+/* Publishing config form */
+.pv-form { display: flex; flex-direction: column; gap: var(--sp-3); padding-bottom: var(--sp-4); }
+
+.pv-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.pv-input {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-3);
+}
+.pv-input:focus { outline: none; border-color: var(--color-accent); }
+
+.pv-savebar { display: flex; justify-content: flex-end; }
+
+.pv-row--withheld { align-items: flex-start; flex-direction: column; }

@@ -301,8 +301,18 @@ mod tests {
     fn coverage_only_path_matches_engine_coverage() {
         let (_d, book) = book();
         add(&book, "Embedded", "compost soil garden", &["garden"]);
-        add(&book, "Also embedded", "garden compost watering", &["garden"]);
-        add(&book, "Missing vector", "electrical breaker panel", &["electrical"]);
+        add(
+            &book,
+            "Also embedded",
+            "garden compost watering",
+            &["garden"],
+        );
+        add(
+            &book,
+            "Missing vector",
+            "electrical breaker panel",
+            &["electrical"],
+        );
         // Only write sidecars for the first two notes, leaving the third "missing".
         let notes = book.store.read_all_notes().unwrap();
         let embedded: Vec<_> = notes

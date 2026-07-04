@@ -25,24 +25,197 @@ pub const DEFAULT_MAX_SUGGESTIONS: usize = 12;
 /// note documents ("should", "would", "make", "good"...). Deliberately separate from the slug
 /// stopwords in `id.rs`, which serve a different purpose (short readable ids).
 const STOPWORDS: &[&str] = &[
-    "the", "and", "for", "are", "but", "not", "you", "all", "any", "can", "had", "her", "was",
-    "one", "our", "out", "day", "get", "has", "him", "his", "how", "man", "new", "now", "old",
-    "see", "two", "way", "who", "boy", "did", "its", "let", "put", "say", "she", "too", "use",
-    "that", "with", "have", "this", "will", "your", "from", "they", "know", "want", "been",
-    "much", "some", "time", "very", "when", "come", "here", "just", "like", "long", "many",
-    "more", "most", "over", "such", "take", "than", "them", "well", "were", "what", "which",
-    "while", "would", "should", "could", "might", "must", "shall", "make", "makes", "making",
-    "made", "good", "best", "better", "great", "really", "thing", "things", "something",
-    "anything", "everything", "nothing", "also", "only", "then", "there", "these", "those",
-    "into", "onto", "about", "after", "before", "between", "under", "above", "below", "each",
-    "other", "another", "same", "still", "even", "ever", "never", "always", "often", "maybe",
-    "probably", "perhaps", "around", "through", "where", "why", "because", "since", "until",
-    "unless", "though", "although", "however", "either", "neither", "both", "few", "less",
-    "least", "own", "off", "once", "again", "further", "doing", "does", "done", "being", "having",
-    "need", "needs", "needed", "used", "using", "uses", "lots", "lot", "bit", "kind", "sort",
-    "type", "part", "side", "back", "front", "near", "next", "first", "last", "small", "large",
-    "big", "little", "high", "low", "top", "bottom", "right", "left", "don", "won", "isn",
-    "aren", "wasn", "doesn", "didn", "haven", "hasn", "wouldn", "shouldn", "couldn",
+    "the",
+    "and",
+    "for",
+    "are",
+    "but",
+    "not",
+    "you",
+    "all",
+    "any",
+    "can",
+    "had",
+    "her",
+    "was",
+    "one",
+    "our",
+    "out",
+    "day",
+    "get",
+    "has",
+    "him",
+    "his",
+    "how",
+    "man",
+    "new",
+    "now",
+    "old",
+    "see",
+    "two",
+    "way",
+    "who",
+    "boy",
+    "did",
+    "its",
+    "let",
+    "put",
+    "say",
+    "she",
+    "too",
+    "use",
+    "that",
+    "with",
+    "have",
+    "this",
+    "will",
+    "your",
+    "from",
+    "they",
+    "know",
+    "want",
+    "been",
+    "much",
+    "some",
+    "time",
+    "very",
+    "when",
+    "come",
+    "here",
+    "just",
+    "like",
+    "long",
+    "many",
+    "more",
+    "most",
+    "over",
+    "such",
+    "take",
+    "than",
+    "them",
+    "well",
+    "were",
+    "what",
+    "which",
+    "while",
+    "would",
+    "should",
+    "could",
+    "might",
+    "must",
+    "shall",
+    "make",
+    "makes",
+    "making",
+    "made",
+    "good",
+    "best",
+    "better",
+    "great",
+    "really",
+    "thing",
+    "things",
+    "something",
+    "anything",
+    "everything",
+    "nothing",
+    "also",
+    "only",
+    "then",
+    "there",
+    "these",
+    "those",
+    "into",
+    "onto",
+    "about",
+    "after",
+    "before",
+    "between",
+    "under",
+    "above",
+    "below",
+    "each",
+    "other",
+    "another",
+    "same",
+    "still",
+    "even",
+    "ever",
+    "never",
+    "always",
+    "often",
+    "maybe",
+    "probably",
+    "perhaps",
+    "around",
+    "through",
+    "where",
+    "why",
+    "because",
+    "since",
+    "until",
+    "unless",
+    "though",
+    "although",
+    "however",
+    "either",
+    "neither",
+    "both",
+    "few",
+    "less",
+    "least",
+    "own",
+    "off",
+    "once",
+    "again",
+    "further",
+    "doing",
+    "does",
+    "done",
+    "being",
+    "having",
+    "need",
+    "needs",
+    "needed",
+    "used",
+    "using",
+    "uses",
+    "lots",
+    "lot",
+    "bit",
+    "kind",
+    "sort",
+    "type",
+    "part",
+    "side",
+    "back",
+    "front",
+    "near",
+    "next",
+    "first",
+    "last",
+    "small",
+    "large",
+    "big",
+    "little",
+    "high",
+    "low",
+    "top",
+    "bottom",
+    "right",
+    "left",
+    "don",
+    "won",
+    "isn",
+    "aren",
+    "wasn",
+    "doesn",
+    "didn",
+    "haven",
+    "hasn",
+    "wouldn",
+    "shouldn",
+    "couldn",
 ];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,7 +276,11 @@ pub fn suggest_categories(
     scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     scored
         .into_iter()
-        .take(if max == 0 { DEFAULT_MAX_SUGGESTIONS } else { max })
+        .take(if max == 0 {
+            DEFAULT_MAX_SUGGESTIONS
+        } else {
+            max
+        })
         .map(|(key, term, score)| TextImportCategorySuggestion {
             name: slug_for_term(&key),
             label: term.label,
@@ -174,11 +351,7 @@ fn add_term(
 fn tokenize(text: &str) -> Vec<String> {
     let text = text.replace(SPLIT_NOTE_MARKER, " ");
     text.split(|c: char| !c.is_alphanumeric() && c != '\'')
-        .map(|raw| {
-            raw.trim_matches('\'')
-                .to_lowercase()
-                .replace('\'', "")
-        })
+        .map(|raw| raw.trim_matches('\'').to_lowercase().replace('\'', ""))
         .filter(|word| {
             word.chars().count() >= 3
                 && !word.chars().all(|c| c.is_ascii_digit())
@@ -226,13 +399,7 @@ mod tests {
         // The outline parser's own "(split into its own note)" marker bullet is app-generated,
         // not source text, and must not surface as a keyword suggestion (e.g. "split-note").
         let items: Vec<_> = (0..5)
-            .map(|i| {
-                item(
-                    i,
-                    "",
-                    &format!("- some outline heading{SPLIT_NOTE_MARKER}"),
-                )
-            })
+            .map(|i| item(i, "", &format!("- some outline heading{SPLIT_NOTE_MARKER}")))
             .collect();
         let suggestions = suggest_categories(&items, 12);
         assert!(
@@ -249,13 +416,7 @@ mod tests {
         let items: Vec<_> = neighbors
             .iter()
             .enumerate()
-            .map(|(i, (a, b))| {
-                item(
-                    i,
-                    "concrete",
-                    &format!("insulation {a} insulation {b}"),
-                )
-            })
+            .map(|(i, (a, b))| item(i, "concrete", &format!("insulation {a} insulation {b}")))
             .collect();
         let suggestions = suggest_categories(&items, 12);
         let concrete = suggestions

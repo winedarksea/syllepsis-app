@@ -58,7 +58,9 @@ impl SyncProvider for LocalFolderSync {
         collect(&self.root, &self.root, &mut entries, &mut cache)?;
         entries.sort_by(|a, b| a.path.cmp(&b.path));
         let live_paths: HashSet<&str> = entries.iter().map(|e| e.path.as_str()).collect();
-        cache.entries.retain(|path, _| live_paths.contains(path.as_str()));
+        cache
+            .entries
+            .retain(|path, _| live_paths.contains(path.as_str()));
         // Best-effort: a failure to persist the cache just means the next pass rehashes, same as
         // a first run — it must never turn into a `list()` failure.
         let _ = cache.save(&self.root);
@@ -147,7 +149,12 @@ fn mtime_key(metadata: &fs::Metadata) -> Option<(u64, u32)> {
 
 /// Recursively gather files under `dir` as book-relative POSIX entries, reusing `cache` for any
 /// file whose `(mtime, size)` haven't changed since it was last hashed.
-fn collect(dir: &Path, root: &Path, out: &mut Vec<RemoteEntry>, cache: &mut RevisionCache) -> CoreResult<()> {
+fn collect(
+    dir: &Path,
+    root: &Path,
+    out: &mut Vec<RemoteEntry>,
+    cache: &mut RevisionCache,
+) -> CoreResult<()> {
     if !dir.exists() {
         return Ok(());
     }

@@ -787,6 +787,16 @@ export interface SyncConfig {
   author: string;
 }
 
+export type PageMode = 'single' | 'per_chapter' | 'per_note';
+
+export interface PublishConfig {
+  site_title: string | null;
+  author: string | null;
+  description: string | null;
+  base_url: string | null;
+  page_mode: PageMode;
+}
+
 export interface GitChangedFile {
   path: string;
   status: string;
@@ -946,6 +956,7 @@ export interface BookConfig {
   search: SearchConfig;
   llm: LlmConfig;
   sync: SyncConfig;
+  publish: PublishConfig;
 }
 
 export interface Proposal {
@@ -1342,6 +1353,9 @@ export interface PublishReport {
   index_path: string;
   published_notes: number;
   excluded_private: number;
+  pages_written: string[];
+  withheld_notes: NoteRef[];
+  stale_removed: string[];
 }
 
 export interface GitignoreReport {

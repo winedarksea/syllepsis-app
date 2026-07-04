@@ -386,10 +386,7 @@ impl<'a> Emitter<'a> {
                 && !node.children.is_empty()
                 && self.exceeds_promotion_thresholds(node);
             if should_promote {
-                body_lines.push(format!(
-                    "{indent}- {}{SPLIT_NOTE_MARKER}",
-                    node.text
-                ));
+                body_lines.push(format!("{indent}- {}{SPLIT_NOTE_MARKER}", node.text));
                 promoted.push(node);
             } else {
                 body_lines.push(format!("{indent}- {}", node.text));
@@ -541,7 +538,12 @@ Wind turbine on top
             TextImportPriorPreviewTarget::Category
         );
         assert_eq!(
-            first.intended_prior.as_ref().unwrap().target_label.as_deref(),
+            first
+                .intended_prior
+                .as_ref()
+                .unwrap()
+                .target_label
+                .as_deref(),
             Some("sunken-garden")
         );
     }

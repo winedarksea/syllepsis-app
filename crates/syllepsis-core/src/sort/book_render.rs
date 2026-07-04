@@ -66,6 +66,59 @@ pub fn flatten(tree: &SortTree) -> Vec<RenderItem> {
     items
 }
 
+/// One chapter of a split publish: a root category (its heading text as the chapter title) with
+/// every item that belongs to it — including nested subcategory headings/notes flattened inline,
+/// since a subsection is part of its parent chapter's page, not a page of its own.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChapterRender {
+    /// The root category's hashtag name (used to derive the chapter's filename/id).
+    pub category: String,
+    /// The root category's display heading text.
+    pub heading_text: String,
+    pub items: Vec<RenderItem>,
+}
+
+/// The book split into publishable chapters plus loose ("branch") notes, for multi-page publish
+/// modes. `loose` mirrors what [`flatten`] appends after chapters with no heading of its own.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SplitRender {
+    pub chapters: Vec<ChapterRender>,
+    pub loose: Vec<RenderItem>,
+}
+
+/// Build the tree and split it into one [`ChapterRender`] per root category (subcategories flatten
+/// into their parent chapter's item list, keeping their own heading levels) plus loose branch
+/// notes. A root category with no notes anywhere in its subtree is skipped entirely — no empty
+/// chapter page. Byte-for-byte, `flatten(&tree)` == concatenating every chapter's items with
+/// `loose`, so [`render`]'s output does not change.
+pub fn render_split(notes: Vec<Note>, categories: Vec<Category>) -> SplitRender {
+    let tree = tree::build(notes, categories);
+    let chapters = tree
+        .roots
+        .iter()
+        .filter(|root| category_has_notes(root))
+        .map(|root| {
+            let mut items = Vec::new();
+            flatten_category(root, &mut items);
+            ChapterRender {
+                category: root.category.name.clone(),
+                heading_text: root.category.heading_text().to_string(),
+                items,
+            }
+        })
+        .collect();
+
+    let mut loose = Vec::new();
+    flatten_notes(&tree.branches, 0, &mut loose);
+
+    SplitRender { chapters, loose }
+}
+
+/// True if a category subtree (itself or any descendant) has at least one note to publish.
+fn category_has_notes(node: &CategoryNode) -> bool {
+    !node.notes.is_empty() || node.children.iter().any(category_has_notes)
+}
+
 fn flatten_category(node: &CategoryNode, items: &mut Vec<RenderItem>) {
     let level = node.category.heading_level.clamp(1, MAX_HEADING_LEVEL);
     items.push(RenderItem::Heading {
@@ -103,6 +156,17 @@ fn flatten_notes(nodes: &[NoteNode], parent_list_depth: u8, items: &mut Vec<Rend
 
 /// Best-effort linear markdown for manuscript export.
 pub fn to_markdown(items: &[RenderItem]) -> String {
+    to_markdown_impl(items, false)
+}
+
+/// Identical to [`to_markdown`], but prepends `<span id="{note_id}"></span>` before each note's
+/// content so a publish can deep-link to it (`#<note-id>`). Inline HTML passes through
+/// pulldown-cmark untouched, including inside `same_paragraph` joins, so it survives rendering.
+pub fn to_markdown_anchored(items: &[RenderItem]) -> String {
+    to_markdown_impl(items, true)
+}
+
+fn to_markdown_impl(items: &[RenderItem], anchored: bool) -> String {
     let mut out = String::new();
     let mut paragraph = String::new();
 
@@ -117,7 +181,11 @@ pub fn to_markdown(items: &[RenderItem]) -> String {
                 out.push_str("\n\n");
             }
             RenderItem::Note(note) => {
-                let content = note_content(note);
+                let content = if anchored {
+                    format!("{}{}", note_anchor(note), note_content(note))
+                } else {
+                    note_content(note)
+                };
                 if note.list_depth > 0 {
                     flush_paragraph(&mut out, &mut paragraph);
                     let indent = "  ".repeat((note.list_depth - 1) as usize);
@@ -135,6 +203,11 @@ pub fn to_markdown(items: &[RenderItem]) -> String {
     }
     flush_paragraph(&mut out, &mut paragraph);
     out.trim_end().to_string()
+}
+
+/// Zero-width anchor marking a note's start position for deep-linking.
+fn note_anchor(note: &RenderedNote) -> String {
+    format!("<span id=\"{}\"></span>", note.id.as_str())
 }
 
 /// Prefer the full body; fall back to the summary when the body is empty.
@@ -242,5 +315,116 @@ mod tests {
         assert!(md.contains("- first"));
         assert!(md.contains("  - nested"));
         assert!(md.contains("- second"));
+    }
+
+    #[test]
+    fn render_split_matches_render_when_concatenated() {
+        let intro = Category::new("intro");
+        let mut a = note("a", "First sentence.");
+        a.prior = Some(PriorEdge::starts_category("intro"));
+        let recipes = Category::new("recipes");
+        let mut b = note("b", "Second sentence.");
+        b.prior = Some(PriorEdge::starts_category("recipes"));
+        // A branch: prior points at a note that doesn't exist, so it lands in `loose`.
+        let mut c = note("c", "Loose sentence.");
+        c.prior = Some(PriorEdge::follows(
+            NoteId::generate("note", "ghost"),
+            PriorKind::NewParagraph,
+        ));
+
+        let flat = render(
+            vec![a.clone(), b.clone(), c.clone()],
+            vec![intro.clone(), recipes.clone()],
+        );
+        let split = render_split(vec![a, b, c], vec![intro, recipes]);
+
+        assert_eq!(split.chapters.len(), 2);
+        let mut reconstructed: Vec<RenderItem> = split
+            .chapters
+            .iter()
+            .flat_map(|c| c.items.clone())
+            .collect();
+        reconstructed.extend(split.loose.clone());
+        assert_eq!(flat, reconstructed);
+    }
+
+    #[test]
+    fn render_split_skips_categories_with_no_publishable_notes() {
+        let empty = Category::new("empty");
+        let has_notes = Category::new("has-notes");
+        let mut a = note("a", "content");
+        a.prior = Some(PriorEdge::starts_category("has-notes"));
+
+        let split = render_split(vec![a], vec![empty, has_notes]);
+        assert_eq!(split.chapters.len(), 1);
+        assert_eq!(split.chapters[0].category, "has-notes");
+    }
+
+    #[test]
+    fn render_split_keeps_nested_subcategory_in_parent_chapter() {
+        let mut parent = Category::new("parent");
+        parent.heading_level = 1;
+        let mut child = Category::new("child");
+        child.parent = Some("parent".to_string());
+        child.heading_level = 2;
+        let mut a = note("a", "parent content");
+        a.prior = Some(PriorEdge::starts_category("parent"));
+        let mut b = note("b", "child content");
+        b.prior = Some(PriorEdge::starts_category("child"));
+
+        let split = render_split(vec![a, b], vec![parent, child]);
+        assert_eq!(split.chapters.len(), 1);
+        let items = &split.chapters[0].items;
+        // Parent heading, parent note, child heading, child note — all in one chapter.
+        assert!(items
+            .iter()
+            .any(|i| matches!(i, RenderItem::Heading { category, .. } if category == "child")));
+        assert!(items
+            .iter()
+            .any(|i| matches!(i, RenderItem::Note(n) if n.body == "child content")));
+    }
+
+    #[test]
+    fn render_split_with_no_categories_puts_sorted_notes_in_loose() {
+        // No categories exist, so a note whose prior targets one becomes a branch (loose).
+        let mut branch = note("solo", "text");
+        branch.prior = Some(PriorEdge::starts_category("nonexistent"));
+        let split = render_split(vec![branch], vec![]);
+        assert!(split.chapters.is_empty());
+        assert_eq!(split.loose.len(), 1);
+
+        // A genuinely unsorted note (no prior) never enters the book view at all.
+        let lonely = note("solo2", "text");
+        let split = render_split(vec![lonely], vec![]);
+        assert!(split.chapters.is_empty());
+        assert!(split.loose.is_empty());
+    }
+
+    #[test]
+    fn to_markdown_anchored_prepends_note_id_spans() {
+        let cat = Category::new("intro");
+        let mut a = note("a", "Hello");
+        a.prior = Some(PriorEdge::starts_category("intro"));
+        let id = a.id.clone();
+        let items = render(vec![a], vec![cat]);
+        let md = to_markdown_anchored(&items);
+        assert!(md.contains(&format!("<span id=\"{}\"></span>Hello", id.as_str())));
+        // Plain to_markdown has no anchors.
+        assert!(!to_markdown(&items).contains("<span id="));
+    }
+
+    #[test]
+    fn to_markdown_anchored_survives_same_paragraph_join() {
+        let cat = Category::new("c");
+        let mut a = note("a", "Hello");
+        a.prior = Some(PriorEdge::starts_category("c"));
+        let mut b = note("b", "world.");
+        b.prior = Some(PriorEdge::follows(a.id.clone(), PriorKind::SameParagraph));
+        let a_id = a.id.clone();
+        let b_id = b.id.clone();
+        let items = render(vec![a, b], vec![cat]);
+        let md = to_markdown_anchored(&items);
+        assert!(md.contains(&format!("<span id=\"{}\"></span>Hello", a_id.as_str())));
+        assert!(md.contains(&format!("<span id=\"{}\"></span>world.", b_id.as_str())));
     }
 }

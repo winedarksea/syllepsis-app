@@ -9,8 +9,92 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { PageHeader } from '../components/PageHeader';
-import type { NoteRef, PolicyOverview } from '../types';
+import type { NoteRef, PageMode, PolicyOverview, PublishConfig, PublishReport } from '../types';
 import './PrivacyView.css';
+
+/** Publish-config form: site title/author/description/base URL + page-mode select, saved as one section. */
+function PublishConfigSection({
+  value, onSaved, onError,
+}: { value: PublishConfig; onSaved: (v: PublishConfig) => void; onError: (m: string) => void }) {
+  const [draft, setDraft] = useState<PublishConfig>(value);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setDraft(value); }, [value]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(value);
+
+  const set = (patch: Partial<PublishConfig>) => setDraft({ ...draft, ...patch });
+  const save = async () => {
+    setSaving(true);
+    try {
+      const updated = await api.updatePublishConfig(draft);
+      onSaved(updated.publish);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="pv-section">
+      <h3 className="pv-section-title">Publishing</h3>
+      <p className="pv-hint">Site metadata and page layout for the static-site publish below.</p>
+      <div className="pv-form">
+        <label className="pv-form-row">
+          <span>Site title</span>
+          <input
+            className="pv-input"
+            value={draft.site_title ?? ''}
+            placeholder="(book name)"
+            onChange={(e) => set({ site_title: e.target.value || null })}
+          />
+        </label>
+        <label className="pv-form-row">
+          <span>Author</span>
+          <input
+            className="pv-input"
+            value={draft.author ?? ''}
+            onChange={(e) => set({ author: e.target.value || null })}
+          />
+        </label>
+        <label className="pv-form-row">
+          <span>Description</span>
+          <input
+            className="pv-input"
+            value={draft.description ?? ''}
+            placeholder="Meta description for the index page"
+            onChange={(e) => set({ description: e.target.value || null })}
+          />
+        </label>
+        <label className="pv-form-row">
+          <span>Base URL</span>
+          <input
+            className="pv-input"
+            value={draft.base_url ?? ''}
+            placeholder="https://example.com/book"
+            onChange={(e) => set({ base_url: e.target.value || null })}
+          />
+        </label>
+        <label className="pv-form-row">
+          <span>Page layout</span>
+          <select
+            className="pv-input"
+            value={draft.page_mode}
+            onChange={(e) => set({ page_mode: e.target.value as PageMode })}
+          >
+            <option value="single">Single page</option>
+            <option value="per_chapter">Per chapter</option>
+            <option value="per_note">Per note</option>
+          </select>
+        </label>
+        <div className="pv-savebar">
+          <button className="pv-btn" disabled={saving || !dirty} onClick={save}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 /** A removable capability chip: click to clear that restriction. */
 function CapChip({
@@ -47,6 +131,8 @@ function daysUntil(iso: string): string {
 export function PrivacyView() {
   const { openEditor } = useStore();
   const [policy, setPolicy] = useState<PolicyOverview | null>(null);
+  const [publishConfig, setPublishConfig] = useState<PublishConfig | null>(null);
+  const [publishReport, setPublishReport] = useState<PublishReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -54,6 +140,7 @@ export function PrivacyView() {
 
   const load = useCallback(() => {
     api.policyOverview().then(setPolicy).catch((e) => setError(String(e)));
+    api.getBookConfig().then((c) => setPublishConfig(c.publish)).catch((e) => setError(String(e)));
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -78,6 +165,7 @@ export function PrivacyView() {
     if (!dir || typeof dir !== 'string') return;
     await act(async () => {
       const report = await api.publishSite(dir);
+      setPublishReport(report);
       setNotice(`Published ${report.published_notes} note${report.published_notes !== 1 ? 's' : ''} (${report.excluded_private} withheld) → ${report.index_path}`);
     });
   }, [act]);
@@ -123,6 +211,41 @@ export function PrivacyView() {
 
       {notice && <div className="pv-notice" onClick={() => setNotice(null)}>{notice}</div>}
       {error && <div className="pv-state pv-error">{error}</div>}
+
+      {publishReport && (
+        <section className="pv-section">
+          <div className="pv-section-head">
+            <h3 className="pv-section-title">Last publish report</h3>
+            <button className="pv-link-btn" onClick={() => setPublishReport(null)}>Dismiss</button>
+          </div>
+          <p className="pv-hint">
+            {publishReport.pages_written.length} page{publishReport.pages_written.length !== 1 ? 's' : ''} written to {publishReport.index_path}.
+          </p>
+          {publishReport.withheld_notes.length > 0 && (
+            <div className="pv-row pv-row--withheld">
+              <span className="pv-name-static">Withheld ({publishReport.withheld_notes.length}):</span>
+              <span className="pv-caps">
+                {publishReport.withheld_notes.map((n) => (
+                  <button key={n.id} className="pv-name" onClick={() => openEditor(n.id)}>{n.title || '(untitled)'}</button>
+                ))}
+              </span>
+            </div>
+          )}
+          {publishReport.stale_removed.length > 0 && (
+            <p className="pv-hint">
+              Removed {publishReport.stale_removed.length} stale file{publishReport.stale_removed.length !== 1 ? 's' : ''} from a prior publish: {publishReport.stale_removed.join(', ')}
+            </p>
+          )}
+        </section>
+      )}
+
+      {publishConfig && (
+        <PublishConfigSection
+          value={publishConfig}
+          onSaved={(v) => { setPublishConfig(v); setNotice('Publish settings saved.'); }}
+          onError={setError}
+        />
+      )}
 
       {nothing && <div className="pv-state">Nothing is restricted. Notes are public, unlocked, and active.</div>}
 
