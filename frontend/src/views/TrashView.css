@@ -1,0 +1,93 @@
+.tv-root {
+  height: 100%;
+  overflow-y: auto;
+  padding-bottom: var(--sp-8);
+}
+
+.tv-btn {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+}
+.tv-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
+.tv-btn:disabled { opacity: 0.5; cursor: default; }
+.tv-btn--danger { color: var(--color-danger, #c0392b); }
+.tv-btn--danger:hover:not(:disabled) { border-color: var(--color-danger, #c0392b); color: var(--color-danger, #c0392b); }
+
+.tv-confirm-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.tv-state {
+  padding: var(--sp-8);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.tv-error { color: var(--color-error); }
+.tv-empty { color: var(--color-text-tertiary); }
+
+.tv-notice {
+  margin: var(--sp-4) var(--sp-6) 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+  background: var(--color-tag-bg);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.tv-list { padding: var(--sp-5) var(--sp-6) 0; }
+
+.tv-hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--sp-3);
+}
+
+.tv-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  margin-bottom: var(--sp-2);
+}
+
+.tv-name {
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.tv-name:hover { text-decoration: underline; }
+
+.tv-meta {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin-left: auto;
+}
+
+.tv-undo {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-accent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--sp-2);
+  cursor: pointer;
+}
+.tv-undo:hover:not(:disabled) { border-color: var(--color-accent); }
+.tv-undo:disabled { opacity: 0.5; cursor: default; }

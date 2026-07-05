@@ -81,9 +81,12 @@ export function UnsortedQueue() {
   const [error, setError] = useState<string | null>(null);
   const [filterMode, setFilterMode] = useState<FilterMode>('unsorted');
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [includePrivate, setIncludePrivate] = useState(false);
   const [sortField, setSortField] = useState<TimelineDateField>('updated');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [classificationFilter, setClassificationFilter] = useState<ClassificationKind | 'all'>('all');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement | null>(null);
 
   // Windowing: the full note list can be large, so only the first `visibleCount` cards render,
   // growing by WINDOW_SIZE as the sentinel scrolls into view (same pattern as SearchView).
@@ -95,16 +98,35 @@ export function UnsortedQueue() {
     setLoading(true);
     setError(null);
     const archivedNotesPromise = includeArchived ? api.listNotes('archived') : Promise.resolve([]);
-    Promise.all([api.listNotes('active'), archivedNotesPromise, api.unsortedNotes()])
-      .then(([activeNotes, archivedNotes, activeUnsortedNotes]) => {
-        setNotes(mergeNotesById(activeNotes, archivedNotes));
+    const privateNotesPromise = includePrivate ? api.listNotes('hidden') : Promise.resolve([]);
+    Promise.all([api.listNotes('active'), archivedNotesPromise, privateNotesPromise, api.unsortedNotes()])
+      .then(([activeNotes, archivedNotes, privateNotes, activeUnsortedNotes]) => {
+        setNotes(mergeNotesById(mergeNotesById(activeNotes, archivedNotes), privateNotes));
         setUnsortedCount(activeUnsortedNotes.length);
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [includeArchived, setUnsortedCount]);
+  }, [includeArchived, includePrivate, setUnsortedCount]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Close the filter popover on click-outside or Escape (pattern like the Sidebar "New" menu).
+  useEffect(() => {
+    if (!filterOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setFilterOpen(false); };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [filterOpen]);
+
+  const activeFilterCount =
+    (classificationFilter !== 'all' ? 1 : 0) + (includeArchived ? 1 : 0) + (includePrivate ? 1 : 0);
 
   const sortedNotes = useMemo(() => {
     const direction = sortDir === 'asc' ? 1 : -1;
@@ -175,24 +197,51 @@ export function UnsortedQueue() {
             </button>
           </div>
           <div className="uq-toolbar-utility">
-            <select
-              className="uq-sort-select uq-classification-select"
-              value={classificationFilter}
-              aria-label="Classification"
-              onChange={(e) => setClassificationFilter(e.target.value as ClassificationKind | 'all')}
-            >
-              {ALL_CLASSIFICATIONS.map((t) => (
-                <option key={t} value={t}>{CLASSIFICATION_LABELS[t]}</option>
-              ))}
-            </select>
-            <label className={`uq-archive-toggle ${includeArchived ? 'active' : ''}`}>
-              <input
-                type="checkbox"
-                checked={includeArchived}
-                onChange={(e) => setIncludeArchived(e.target.checked)}
-              />
-              Include archived
-            </label>
+            <div className="uq-filter" ref={filterRef}>
+              <button
+                type="button"
+                className={`uq-filter-toggle-btn ${activeFilterCount > 0 ? 'active' : ''}`}
+                aria-expanded={filterOpen}
+                aria-haspopup="true"
+                onClick={() => setFilterOpen((v) => !v)}
+              >
+                <Icon name="filter_list" size={16} />
+                <span>Filter{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}</span>
+              </button>
+              {filterOpen && (
+                <div className="uq-filter-popover" role="menu">
+                  <label className="uq-filter-field">
+                    <span className="uq-filter-label">Classification</span>
+                    <select
+                      className="uq-sort-select uq-classification-select"
+                      value={classificationFilter}
+                      aria-label="Classification"
+                      onChange={(e) => setClassificationFilter(e.target.value as ClassificationKind | 'all')}
+                    >
+                      {ALL_CLASSIFICATIONS.map((t) => (
+                        <option key={t} value={t}>{CLASSIFICATION_LABELS[t]}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="uq-filter-check">
+                    <input
+                      type="checkbox"
+                      checked={includeArchived}
+                      onChange={(e) => setIncludeArchived(e.target.checked)}
+                    />
+                    Include archived
+                  </label>
+                  <label className="uq-filter-check">
+                    <input
+                      type="checkbox"
+                      checked={includePrivate}
+                      onChange={(e) => setIncludePrivate(e.target.checked)}
+                    />
+                    Include private
+                  </label>
+                </div>
+              )}
+            </div>
             <label className="uq-sort">
               <span className="uq-sort-label">Sort</span>
               <select
@@ -240,6 +289,9 @@ export function UnsortedQueue() {
                 )}
                 {includeArchived && note.metadata.lifecycle?.archived && (
                   <span className="uq-card-type uq-card-type--archived">Archived</span>
+                )}
+                {includePrivate && note.metadata.lifecycle?.hidden && (
+                  <span className="uq-card-type uq-card-type--private">Private</span>
                 )}
                 <span className="uq-card-type">{CLASSIFICATION_LABELS[note.metadata.classification.kind]}</span>
                 {note.type !== 'note' && <span className="uq-card-type">{note.type}</span>}

@@ -2,13 +2,13 @@
 // Export buttons let users save the book as Markdown or HTML.
 
 import { useCallback, useEffect, useState } from 'react';
-import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { save as saveDialog, open as openDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { PageHeader } from '../components/PageHeader';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import { detectAccidentalWholeNoteCodeFence } from '../lib/wholeNoteFence';
-import type { RenderItem } from '../types';
+import type { PublishReport, RenderItem } from '../types';
 import './BookView.css';
 
 // ── HeadingTag ───────────────────────────────────────────────────────────────
@@ -69,6 +69,8 @@ export function BookView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [publishReport, setPublishReport] = useState<PublishReport | null>(null);
+  const [publishNotice, setPublishNotice] = useState<string | null>(null);
 
   useEffect(() => {
     api.bookView()
@@ -105,8 +107,24 @@ export function BookView() {
     finally { setExporting(false); }
   }, [book]);
 
+  const publish = useCallback(async () => {
+    const dir = await openDialog({ directory: true, multiple: false, title: 'Choose output folder for the published site' });
+    if (!dir || typeof dir !== 'string') return;
+    setExporting(true);
+    setError(null);
+    try {
+      const report = await api.publishSite(dir);
+      setPublishReport(report);
+      setPublishNotice(
+        `Published ${report.published_notes} note${report.published_notes !== 1 ? 's' : ''}` +
+        `${report.excluded_private > 0 ? ` · ${report.excluded_private} withheld` : ''} → ${report.index_path}`,
+      );
+    } catch (e) { setError(String(e)); }
+    finally { setExporting(false); }
+  }, []);
+
   if (loading) return <div className="bv-state">Loading book…</div>;
-  if (error) return <div className="bv-state bv-error">{error}</div>;
+  if (error && items.length === 0) return <div className="bv-state bv-error">{error}</div>;
   if (items.length === 0) {
     return (
       <div className="bv-state bv-empty">
@@ -129,7 +147,48 @@ export function BookView() {
         <button className="bv-export-btn" onClick={exportHtml} disabled={exporting}>
           Export HTML
         </button>
+        <button className="bv-export-btn" onClick={publish} disabled={exporting}>
+          Publish…
+        </button>
       </PageHeader>
+
+      {error && <div className="bv-publish-error" onClick={() => setError(null)}>{error}</div>}
+
+      {publishNotice && (
+        <div className="bv-publish-notice">
+          <span>{publishNotice}</span>
+          {publishReport && publishReport.excluded_private > 0 && (
+            <button className="bv-publish-link" onClick={() => setView('privacy')}>
+              Why were notes withheld?
+            </button>
+          )}
+          <button className="bv-publish-link" onClick={() => { setPublishNotice(null); setPublishReport(null); }}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {publishReport && (
+        <section className="bv-publish-report">
+          <p className="bv-publish-report-line">
+            {publishReport.pages_written.length} page{publishReport.pages_written.length !== 1 ? 's' : ''} written to {publishReport.index_path}.
+          </p>
+          {publishReport.withheld_notes.length > 0 && (
+            <div className="bv-publish-withheld">
+              <span className="bv-publish-withheld-label">Withheld ({publishReport.withheld_notes.length}):</span>
+              {publishReport.withheld_notes.map((n) => (
+                <button key={n.id} className="bv-publish-note" onClick={() => openEditor(n.id)}>{n.title || '(untitled)'}</button>
+              ))}
+            </div>
+          )}
+          {publishReport.stale_removed.length > 0 && (
+            <p className="bv-publish-report-line">
+              Removed {publishReport.stale_removed.length} stale file{publishReport.stale_removed.length !== 1 ? 's' : ''}: {publishReport.stale_removed.join(', ')}
+            </p>
+          )}
+        </section>
+      )}
+
       <div className="bv-body">
         <div className="bv-document">
           {items.map((item, i) => {

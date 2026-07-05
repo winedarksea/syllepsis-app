@@ -1,100 +1,16 @@
-// Centralized privacy & lifecycle policy panel (Phase 6, privacy-security.md). One place to see
-// and reverse every restriction in the book. Privacy is three independent capabilities — hidden,
+// Centralized privacy & lifecycle dashboard (Phase 6, privacy-security.md). One place to see and
+// reverse every restriction in the book. Privacy is three independent capabilities — hidden,
 // excluded-from-search, and excluded-from-publish — each listed and reversible on its own (the
-// "Private" preset just sets all three). Plus archived/locked notes, restricted categories, and the
-// deletion-delay trash, alongside the publish actions that exclude release-blocked content.
+// "Private" preset just sets all three). Plus archived and locked notes, and restricted categories.
+// Publish configuration lives in Settings → Publishing; the publish action and Trash have their own
+// homes (Book View header and the Trash view).
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { PageHeader } from '../components/PageHeader';
-import type { NoteRef, PageMode, PolicyOverview, PublishConfig, PublishReport } from '../types';
+import type { NoteRef, PolicyOverview } from '../types';
 import './PrivacyView.css';
-
-/** Publish-config form: site title/author/description/base URL + page-mode select, saved as one section. */
-function PublishConfigSection({
-  value, onSaved, onError,
-}: { value: PublishConfig; onSaved: (v: PublishConfig) => void; onError: (m: string) => void }) {
-  const [draft, setDraft] = useState<PublishConfig>(value);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { setDraft(value); }, [value]);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(value);
-
-  const set = (patch: Partial<PublishConfig>) => setDraft({ ...draft, ...patch });
-  const save = async () => {
-    setSaving(true);
-    try {
-      const updated = await api.updatePublishConfig(draft);
-      onSaved(updated.publish);
-    } catch (e) {
-      onError(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <section className="pv-section">
-      <h3 className="pv-section-title">Publishing</h3>
-      <p className="pv-hint">Site metadata and page layout for the static-site publish below.</p>
-      <div className="pv-form">
-        <label className="pv-form-row">
-          <span>Site title</span>
-          <input
-            className="pv-input"
-            value={draft.site_title ?? ''}
-            placeholder="(book name)"
-            onChange={(e) => set({ site_title: e.target.value || null })}
-          />
-        </label>
-        <label className="pv-form-row">
-          <span>Author</span>
-          <input
-            className="pv-input"
-            value={draft.author ?? ''}
-            onChange={(e) => set({ author: e.target.value || null })}
-          />
-        </label>
-        <label className="pv-form-row">
-          <span>Description</span>
-          <input
-            className="pv-input"
-            value={draft.description ?? ''}
-            placeholder="Meta description for the index page"
-            onChange={(e) => set({ description: e.target.value || null })}
-          />
-        </label>
-        <label className="pv-form-row">
-          <span>Base URL</span>
-          <input
-            className="pv-input"
-            value={draft.base_url ?? ''}
-            placeholder="https://example.com/book"
-            onChange={(e) => set({ base_url: e.target.value || null })}
-          />
-        </label>
-        <label className="pv-form-row">
-          <span>Page layout</span>
-          <select
-            className="pv-input"
-            value={draft.page_mode}
-            onChange={(e) => set({ page_mode: e.target.value as PageMode })}
-          >
-            <option value="single">Single page</option>
-            <option value="per_chapter">Per chapter</option>
-            <option value="per_note">Per note</option>
-          </select>
-        </label>
-        <div className="pv-savebar">
-          <button className="pv-btn" disabled={saving || !dirty} onClick={save}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </div>
-    </section>
-  );
-}
 
 /** A removable capability chip: click to clear that restriction. */
 function CapChip({
@@ -121,26 +37,15 @@ function mergeRestricted(
   return [...map.values()].sort((a, b) => a.title.localeCompare(b.title));
 }
 
-function daysUntil(iso: string): string {
-  const ms = new Date(iso).getTime() - Date.now();
-  const days = Math.ceil(ms / 86_400_000);
-  if (days <= 0) return 'due now';
-  return days === 1 ? 'in 1 day' : `in ${days} days`;
-}
-
 export function PrivacyView() {
   const { openEditor } = useStore();
   const [policy, setPolicy] = useState<PolicyOverview | null>(null);
-  const [publishConfig, setPublishConfig] = useState<PublishConfig | null>(null);
-  const [publishReport, setPublishReport] = useState<PublishReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
 
   const load = useCallback(() => {
     api.policyOverview().then(setPolicy).catch((e) => setError(String(e)));
-    api.getBookConfig().then((c) => setPublishConfig(c.publish)).catch((e) => setError(String(e)));
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -159,21 +64,6 @@ export function PrivacyView() {
       setBusy(false);
     }
   }, [load]);
-
-  const publish = useCallback(async () => {
-    const dir = await openDialog({ directory: true, multiple: false, title: 'Choose output folder for the published site' });
-    if (!dir || typeof dir !== 'string') return;
-    await act(async () => {
-      const report = await api.publishSite(dir);
-      setPublishReport(report);
-      setNotice(`Published ${report.published_notes} note${report.published_notes !== 1 ? 's' : ''} (${report.excluded_private} withheld) → ${report.index_path}`);
-    });
-  }, [act]);
-
-  const refreshGitignore = useCallback(() => act(async () => {
-    const report = await api.refreshPrivateGitignore();
-    setNotice(`${report.excluded_paths.length} path${report.excluded_paths.length !== 1 ? 's' : ''} excluded from git publish.`);
-  }), [act]);
 
   // Merge per-capability lists — must be before the early returns (rules of hooks).
   const restrictedNotes = useMemo(() => mergeRestricted([
@@ -199,92 +89,22 @@ export function PrivacyView() {
 
   const nothing =
     restrictedNotes.length === 0 && policy.archived_notes.length === 0 &&
-    policy.locked_notes.length === 0 && policy.pending_deletion.length === 0 &&
-    restrictedCategories.length === 0;
+    policy.locked_notes.length === 0 && restrictedCategories.length === 0;
 
   return (
     <div className="pv-root">
-      <PageHeader title="Privacy & Policy">
-        <button className="pv-btn" disabled={busy} onClick={publish}>Publish read-only site…</button>
-        <button className="pv-btn" disabled={busy} onClick={refreshGitignore}>Refresh git exclusions</button>
-      </PageHeader>
+      <PageHeader title="Privacy & Policy" />
+
+      <p className="pv-intro">
+        Each note's three privacy capabilities — hidden, excluded from search, and excluded from
+        publish — are set in the editor. Unlock and confirmation delays are configured in
+        Settings → Privacy &amp; Security.
+      </p>
 
       {notice && <div className="pv-notice" onClick={() => setNotice(null)}>{notice}</div>}
       {error && <div className="pv-state pv-error">{error}</div>}
 
-      {publishReport && (
-        <section className="pv-section">
-          <div className="pv-section-head">
-            <h3 className="pv-section-title">Last publish report</h3>
-            <button className="pv-link-btn" onClick={() => setPublishReport(null)}>Dismiss</button>
-          </div>
-          <p className="pv-hint">
-            {publishReport.pages_written.length} page{publishReport.pages_written.length !== 1 ? 's' : ''} written to {publishReport.index_path}.
-          </p>
-          {publishReport.withheld_notes.length > 0 && (
-            <div className="pv-row pv-row--withheld">
-              <span className="pv-name-static">Withheld ({publishReport.withheld_notes.length}):</span>
-              <span className="pv-caps">
-                {publishReport.withheld_notes.map((n) => (
-                  <button key={n.id} className="pv-name" onClick={() => openEditor(n.id)}>{n.title || '(untitled)'}</button>
-                ))}
-              </span>
-            </div>
-          )}
-          {publishReport.stale_removed.length > 0 && (
-            <p className="pv-hint">
-              Removed {publishReport.stale_removed.length} stale file{publishReport.stale_removed.length !== 1 ? 's' : ''} from a prior publish: {publishReport.stale_removed.join(', ')}
-            </p>
-          )}
-        </section>
-      )}
-
-      {publishConfig && (
-        <PublishConfigSection
-          value={publishConfig}
-          onSaved={(v) => { setPublishConfig(v); setNotice('Publish settings saved.'); }}
-          onError={setError}
-        />
-      )}
-
       {nothing && <div className="pv-state">Nothing is restricted. Notes are public, unlocked, and active.</div>}
-
-      {policy.pending_deletion.length > 0 && (
-        <section className="pv-section">
-          <div className="pv-section-head">
-            <h3 className="pv-section-title">Trash · pending deletion ({policy.pending_deletion.length})</h3>
-            <div className="pv-section-actions">
-              <button className="pv-link-btn" disabled={busy}
-                onClick={() => act(async () => { const ids = await api.purgeExpired(); setNotice(`Swept ${ids.length} expired note${ids.length !== 1 ? 's' : ''}.`); })}>
-                Sweep now
-              </button>
-              {confirmDeleteAll ? (
-                <span className="pv-confirm-inline">
-                  Delete all {policy.pending_deletion.length} now?{' '}
-                  <button className="pv-link-btn pv-link-btn--danger" disabled={busy}
-                    onClick={() => act(async () => { const ids = await api.purgeAllTrash(); setConfirmDeleteAll(false); setNotice(`Permanently deleted ${ids.length} note${ids.length !== 1 ? 's' : ''}.`); })}>
-                    Confirm
-                  </button>
-                  {' '}
-                  <button className="pv-link-btn" disabled={busy} onClick={() => setConfirmDeleteAll(false)}>Cancel</button>
-                </span>
-              ) : (
-                <button className="pv-link-btn pv-link-btn--danger" disabled={busy} onClick={() => setConfirmDeleteAll(true)}>
-                  Delete immediately
-                </button>
-              )}
-            </div>
-          </div>
-          <p className="pv-hint">Marked for deletion; permanently removed after the delay. Restore to cancel.</p>
-          {policy.pending_deletion.map((p) => (
-            <div key={p.id} className="pv-row">
-              <button className="pv-name" onClick={() => openEditor(p.id)}>{p.title || '(untitled)'}</button>
-              <span className="pv-meta">purges {daysUntil(p.purge_at)}</span>
-              <button className="pv-undo" disabled={busy} onClick={() => act(() => api.restoreNote(p.id), 'Restored.')}>Restore</button>
-            </div>
-          ))}
-        </section>
-      )}
 
       {restrictedNotes.length > 0 && (
         <section className="pv-section">

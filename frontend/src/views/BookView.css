@@ -105,6 +105,67 @@
 .bv-error { color: var(--color-error); }
 .bv-empty { color: var(--color-text-tertiary); }
 
+/* Publish notice + report, shown below the header after a publish. */
+.bv-publish-notice,
+.bv-publish-error,
+.bv-publish-report {
+  max-width: 1060px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--sp-3) var(--sp-6);
+}
+.bv-publish-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+.bv-publish-error {
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.bv-publish-link {
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  text-decoration: underline;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.bv-publish-report {
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.bv-publish-report-line {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+.bv-publish-withheld {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  font-size: var(--font-size-sm);
+}
+.bv-publish-withheld-label { color: var(--color-text-tertiary); }
+.bv-publish-note {
+  color: var(--color-accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 var(--sp-1);
+  font-size: var(--font-size-sm);
+  text-decoration: underline;
+}
+
 /* Saga serif headings as chapter markers: strong space before, modest after. */
 .bv-heading {
   font-family: var(--font-serif);

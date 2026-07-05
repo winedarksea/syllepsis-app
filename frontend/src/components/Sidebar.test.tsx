@@ -54,6 +54,23 @@ describe('Sidebar desktop collapse controls', () => {
     expect(onDesktopCollapse).toHaveBeenCalledTimes(1);
   });
 
+  it('groups utility views under a Tools header, including a Trash item that routes to the trash view', () => {
+    const setView = vi.fn();
+    useStore.setState({ setView });
+
+    render(
+      <Sidebar onNewNote={vi.fn()} onImportImage={vi.fn()} onNewDrawing={vi.fn()} />,
+    );
+
+    // Core surface and a Tools-group utility both render.
+    expect(screen.getByRole('button', { name: /Book View/ })).toBeTruthy();
+    expect(screen.getByText('Tools')).toBeTruthy();
+
+    const trash = screen.getByRole('button', { name: /Trash/ });
+    fireEvent.click(trash);
+    expect(setView).toHaveBeenCalledWith('trash');
+  });
+
   it('hides sidebar controls from assistive and pointer interaction when desktop-collapsed', () => {
     const { container } = render(
       <Sidebar

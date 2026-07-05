@@ -40,7 +40,9 @@ describe('UnsortedQueue', () => {
     expect(screen.queryByRole('button', { name: /^Active$/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Archived$/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Trash$/i })).toBeNull();
-    expect(screen.queryByText(/^Classification$/i)).toBeNull();
+    // Classification select lives inside the Filter popover, hidden until opened.
+    expect(screen.queryByLabelText('Classification')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Filter/ }));
     expect(screen.getByLabelText('Classification')).toBeTruthy();
     expect(api.listNotes).not.toHaveBeenCalledWith('trash');
   });
@@ -59,6 +61,7 @@ describe('UnsortedQueue', () => {
     expect(await screen.findByText('Plain Note')).toBeTruthy();
     expect(await screen.findByText('Quote Note')).toBeTruthy();
 
+    fireEvent.click(screen.getByRole('button', { name: /^Filter/ }));
     fireEvent.change(screen.getByLabelText('Classification'), { target: { value: 'quote' } });
 
     expect(screen.queryByText('Plain Note')).toBeNull();
@@ -90,6 +93,7 @@ describe('UnsortedQueue', () => {
     expect(await screen.findByText('All caught up! Every note has been organised.')).toBeTruthy();
     expect(api.listNotes).not.toHaveBeenCalledWith('archived');
 
+    fireEvent.click(screen.getByRole('button', { name: /^Filter/ }));
     fireEvent.click(screen.getByLabelText('Include archived'));
 
     await waitFor(() => expect(api.listNotes).toHaveBeenCalledWith('archived'));
@@ -105,19 +109,42 @@ describe('UnsortedQueue', () => {
     expect(screen.getByText('Archived Unsorted Note')).toBeTruthy();
     expect(api.listNotes).not.toHaveBeenCalledWith('trash');
   });
+
+  it('includes hidden notes when Include private is toggled in the Filter popover', async () => {
+    const privateNote = noteDto({ id: 'private-note', title: 'Private Note', sorted: false, hidden: true });
+    mockNotes({ activeNotes: [], privateNotes: [privateNote], activeUnsortedNotes: [] });
+
+    render(<UnsortedQueue />);
+
+    await waitFor(() => expect(api.listNotes).toHaveBeenCalledWith('active'));
+    expect(api.listNotes).not.toHaveBeenCalledWith('hidden');
+    expect(screen.queryByText('Private Note')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Filter/ }));
+    fireEvent.click(screen.getByLabelText('Include private'));
+
+    await waitFor(() => expect(api.listNotes).toHaveBeenCalledWith('hidden'));
+    expect(await screen.findByText('Private Note')).toBeTruthy();
+    expect(within(screen.getByText('Private Note').closest('.uq-card')!).getByText('Private')).toBeTruthy();
+
+    // Active-filter count chip reflects the single active filter.
+    expect(screen.getByRole('button', { name: /^Filter · 1/ })).toBeTruthy();
+  });
 });
 
 function mockNotes({
   activeNotes,
   archivedNotes = [],
+  privateNotes = [],
   activeUnsortedNotes,
 }: {
   activeNotes: NoteDto[];
   archivedNotes?: NoteDto[];
+  privateNotes?: NoteDto[];
   activeUnsortedNotes: NoteDto[];
 }) {
   vi.mocked(api.listNotes).mockImplementation(async (visibility) => (
-    visibility === 'archived' ? archivedNotes : activeNotes
+    visibility === 'archived' ? archivedNotes : visibility === 'hidden' ? privateNotes : activeNotes
   ));
   vi.mocked(api.unsortedNotes).mockResolvedValue(activeUnsortedNotes);
 }
@@ -128,6 +155,7 @@ function noteDto({
   classification = 'note',
   sorted = false,
   archived = false,
+  hidden = false,
   categories = [],
 }: {
   id: string;
@@ -135,6 +163,7 @@ function noteDto({
   classification?: ClassificationKind;
   sorted?: boolean;
   archived?: boolean;
+  hidden?: boolean;
   categories?: string[];
 }): NoteDto {
   return {
@@ -160,7 +189,7 @@ function noteDto({
         updated: '2024-01-02T00:00:00Z',
       },
       authorship: {},
-      lifecycle: archived ? { archived: true } : {},
+      lifecycle: { ...(archived ? { archived: true } : {}), ...(hidden ? { hidden: true } : {}) },
       packs: {},
       kanban: {},
     },

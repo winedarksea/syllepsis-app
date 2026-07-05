@@ -124,6 +124,10 @@ pub fn note_matches_visibility(note: &Note, visibility: NoteVisibility) -> bool 
             !note.metadata.lifecycle.hidden
                 && note.metadata.lifecycle.marked_for_deletion_at.is_some()
         }
+        NoteVisibility::Hidden => {
+            note.metadata.lifecycle.hidden
+                && note.metadata.lifecycle.marked_for_deletion_at.is_none()
+        }
     }
 }
 
@@ -1371,6 +1375,29 @@ mod tests {
         assert_eq!(stats.created_this_week, 3);
         assert_eq!(stats.updated_this_week, 3);
         assert!(stats.avg_word_count > 0);
+    }
+
+    #[test]
+    fn list_notes_with_hidden_visibility_returns_only_hidden_notes() {
+        let (_dir, book) = book();
+
+        // Plain visible note.
+        create_note(&book, ObjectType::Note, "visible", None).unwrap();
+
+        // Hidden (private) note, still active (not pending deletion).
+        let mut hidden = create_note(&book, ObjectType::Note, "hidden", None).unwrap();
+        hidden.metadata.lifecycle.hidden = true;
+        let hidden = update_note(&book, hidden).unwrap();
+
+        // Hidden note that is also pending deletion: excluded from the Hidden view.
+        let mut hidden_trashed = create_note(&book, ObjectType::Note, "hidden_trashed", None).unwrap();
+        hidden_trashed.metadata.lifecycle.hidden = true;
+        let hidden_trashed = update_note(&book, hidden_trashed).unwrap();
+        crate::app::lifecycle::request_deletion(&book, &hidden_trashed.id).unwrap();
+
+        let listed = list_notes_with_visibility(&book, NoteVisibility::Hidden).unwrap();
+        let ids: Vec<&str> = listed.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, vec![hidden.id.as_str()]);
     }
 
     #[test]

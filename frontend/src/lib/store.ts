@@ -13,7 +13,7 @@ import { DEFAULT_THEME_ID, themeById } from '../theme/themes';
 export type View =
   | 'book' | 'unsorted' | 'category' | 'editor' | 'search' | 'graph'
   | 'diagnostics' | 'worlds' | 'privacy' | 'packs' | 'text_import' | 'stats' | 'style_cards'
-  | 'settings';
+  | 'trash' | 'settings';
 
 export type ThemePref = 'light' | 'dark' | 'system';
 

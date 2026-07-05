@@ -28,17 +28,25 @@ const NEW_TYPES: { type: ObjectType; classification?: ClassificationKind; label:
   { type: 'note', classification: 'code', label: 'Code' },
 ];
 
-const NAV: { view: string; icon: string; label: string; slot?: SignatureSlot }[] = [
+type NavItem = { view: string; icon: string; label: string; slot?: SignatureSlot };
+
+// Core surfaces for reading and organizing the book.
+const CORE_NAV: NavItem[] = [
   { view: 'book', icon: 'menu_book', label: 'Book View', slot: 'book' },
   { view: 'unsorted', icon: 'inbox', label: 'Notebox', slot: 'unsorted' },
   { view: 'search', icon: 'search', label: 'Search', slot: 'search' },
   { view: 'graph', icon: 'hub', label: 'Graph', slot: 'graph' },
   { view: 'worlds', icon: 'map', label: 'Worlds', slot: 'worlds' },
+];
+
+// Utility views, grouped under a "Tools" header.
+const TOOLS_NAV: NavItem[] = [
   { view: 'packs', icon: 'inventory_2', label: 'Packs', slot: 'packs' },
   { view: 'text_import', icon: 'upload_file', label: 'Note Import' },
   { view: 'privacy', icon: 'lock', label: 'Privacy' },
-  { view: 'stats', icon: 'bar_chart', label: 'Statistics' },
+  { view: 'trash', icon: 'delete', label: 'Trash' },
   { view: 'style_cards', icon: 'style', label: 'Style Cards' },
+  { view: 'stats', icon: 'bar_chart', label: 'Statistics' },
   { view: 'diagnostics', icon: 'monitor_heart', label: 'Diagnostics' },
 ];
 
@@ -181,6 +189,23 @@ export function Sidebar({
     closeMobileDrawer();
   }, [closeBook, closeMobileDrawer]);
 
+  const renderNavItem = (item: NavItem) => (
+    <button
+      key={item.view}
+      className={`sidebar-item ${view === item.view ? 'active' : ''}`}
+      onClick={() => handleView(item.view as Parameters<typeof setView>[0])}
+    >
+      <Icon name={item.icon} slot={item.slot} className="sidebar-item-icon" size={19} />
+      <span>{item.label}</span>
+      {item.view === 'unsorted' && unsortedCount > 0 && !hideUnsortedBadge && (
+        <span className="sidebar-badge">{unsortedCount}</span>
+      )}
+      {item.view === 'diagnostics' && diagnosticsIssueCount > 0 && !hideUnsortedBadge && (
+        <span className="sidebar-badge sidebar-badge--diag">{diagnosticsIssueCount}</span>
+      )}
+    </button>
+  );
+
   const syncButtonLabel = syncMsg ?? (syncing
     ? 'Syncing...'
     : syncMode === 'cloud'
@@ -233,22 +258,12 @@ export function Sidebar({
       </div>
 
       <nav className="sidebar-nav">
-        {NAV.map((item) => (
-          <button
-            key={item.view}
-            className={`sidebar-item ${view === item.view ? 'active' : ''}`}
-            onClick={() => handleView(item.view as Parameters<typeof setView>[0])}
-          >
-            <Icon name={item.icon} slot={item.slot} className="sidebar-item-icon" size={19} />
-            <span>{item.label}</span>
-            {item.view === 'unsorted' && unsortedCount > 0 && !hideUnsortedBadge && (
-              <span className="sidebar-badge">{unsortedCount}</span>
-            )}
-            {item.view === 'diagnostics' && diagnosticsIssueCount > 0 && !hideUnsortedBadge && (
-              <span className="sidebar-badge sidebar-badge--diag">{diagnosticsIssueCount}</span>
-            )}
-          </button>
-        ))}
+        {CORE_NAV.map(renderNavItem)}
+      </nav>
+
+      <div className="sidebar-section-header">Tools</div>
+      <nav className="sidebar-nav">
+        {TOOLS_NAV.map(renderNavItem)}
       </nav>
 
       <div className="sidebar-section-header">Categories</div>

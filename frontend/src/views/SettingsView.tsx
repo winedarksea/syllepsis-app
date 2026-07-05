@@ -15,7 +15,7 @@ import { useStore } from '../lib/store';
 import type { ThemePref } from '../lib/store';
 import type {
   BuildInfo, BookConfig, CloudLlmProviderDescriptor,
-  PrivacyConfig, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, ModelRef,
+  PrivacyConfig, PublishConfig, PageMode, SyncConfig, SearchConfig, CleanupConfig, LlmConfig, ModelRef,
   EmbeddingConfig, LocalAiDevicePolicy, ModelManifest,
   CloudSyncProviderDescriptor, CloudSyncProviderStatus, PluginDescriptor,
   SyncReport, CloudSyncFinished, DeleteCurrentBookReport,
@@ -38,6 +38,7 @@ const SUBTITLES = {
   appearance: { icelandic: 'Útlit',           latin: 'Aspectus' },
   ai:         { icelandic: 'Vélmenni',        latin: 'Machina' },
   privacy:    { icelandic: 'Vernd',           latin: 'Seclusio' },
+  publishing: { icelandic: 'Útgáfa',          latin: 'Editio' },
   sync:       { icelandic: 'Samstilling',     latin: 'Concordia' },
   advanced:   { icelandic: 'Djúpstillingar',  latin: 'Profunda' },
   book:       { icelandic: 'Bókarstillingar', latin: 'Codex' },
@@ -181,6 +182,15 @@ export function SettingsView({ launchMode = false }: Props) {
                 <PrivacyPanel
                   value={config.privacy}
                   onSaved={(privacy) => { setConfig((p) => p && { ...p, privacy }); flash('Privacy saved.'); }}
+                  onError={reportError}
+                />
+              </Section>
+
+              <Section title="Publishing" subtitle={SUBTITLES.publishing[flavorLang]}>
+                <PublishPanel
+                  value={config.publish}
+                  onSaved={(publish) => { setConfig((p) => p && { ...p, publish }); flash('Publishing settings saved.'); }}
+                  onNotice={flash}
                   onError={reportError}
                 />
               </Section>
@@ -875,6 +885,89 @@ function PrivacyPanel({ value, onSaved, onError }: {
         <NumberInput value={draft.confirmation_delay_hours} onChange={(n) => setDraft({ ...draft, confirmation_delay_hours: n })} />
       </Field>
       <SaveBar saving={saving} dirty={dirty} onSave={commit} />
+    </div>
+  );
+}
+
+// ── Publishing ────────────────────────────────────────────────────────────────
+
+function PublishPanel({ value, onSaved, onNotice, onError }: {
+  value: PublishConfig;
+  onSaved: (v: PublishConfig) => void;
+  onNotice: (m: string) => void;
+  onError: (m: string) => void;
+}) {
+  const { draft, setDraft, dirty, saving, commit } = useSectionDraft(
+    value,
+    async (d) => { const updated = await api.updatePublishConfig(d); onSaved(updated.publish); },
+    onError,
+  );
+  const set = (patch: Partial<PublishConfig>) => setDraft({ ...draft, ...patch });
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshGitignore = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const report = await api.refreshPrivateGitignore();
+      const n = report.excluded_paths.length;
+      onNotice(`${n} path${n !== 1 ? 's' : ''} excluded from git publish.`);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [onNotice, onError]);
+
+  return (
+    <div className="sv-subpanel">
+      <p className="sv-hint">Site metadata and page layout for the read-only static site. Publish it from the Book View header.</p>
+      <Field label="Site title" hint="Defaults to the book name when left blank.">
+        <input
+          className="sv-input"
+          value={draft.site_title ?? ''}
+          placeholder="(book name)"
+          onChange={(e) => set({ site_title: e.target.value || null })}
+        />
+      </Field>
+      <Field label="Author">
+        <input
+          className="sv-input"
+          value={draft.author ?? ''}
+          onChange={(e) => set({ author: e.target.value || null })}
+        />
+      </Field>
+      <Field label="Description" hint="Meta description for the index page.">
+        <input
+          className="sv-input"
+          value={draft.description ?? ''}
+          onChange={(e) => set({ description: e.target.value || null })}
+        />
+      </Field>
+      <Field label="Base URL" hint="Absolute URL where the site will be hosted.">
+        <input
+          className="sv-input"
+          value={draft.base_url ?? ''}
+          placeholder="https://example.com/book"
+          onChange={(e) => set({ base_url: e.target.value || null })}
+        />
+      </Field>
+      <Field label="Page layout">
+        <select
+          className="sv-input"
+          value={draft.page_mode}
+          onChange={(e) => set({ page_mode: e.target.value as PageMode })}
+        >
+          <option value="single">Single page</option>
+          <option value="per_chapter">Per chapter</option>
+          <option value="per_note">Per note</option>
+        </select>
+      </Field>
+      <SaveBar saving={saving} dirty={dirty} onSave={commit} />
+      <div className="sv-subhead">Git exclusions</div>
+      <Field label="Refresh git exclusions" hint="Rewrites .gitignore so publish-excluded and private notes stay out of a git-published repository.">
+        <button className="sv-btn" disabled={refreshing} onClick={refreshGitignore}>
+          {refreshing ? 'Refreshing…' : 'Refresh git exclusions'}
+        </button>
+      </Field>
     </div>
   );
 }

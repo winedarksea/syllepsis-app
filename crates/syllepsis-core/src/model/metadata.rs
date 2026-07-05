@@ -215,6 +215,7 @@ pub enum NoteVisibility {
     Active,
     Archived,
     Trash,
+    Hidden,
 }
 
 impl NoteStatus {

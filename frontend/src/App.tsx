@@ -14,6 +14,7 @@ import { SearchView } from './views/SearchView';
 import { GraphView } from './views/GraphView';
 import { WorldView } from './views/WorldView';
 import { PrivacyView } from './views/PrivacyView';
+import { TrashView } from './views/TrashView';
 import { PacksView } from './views/PacksView';
 import { TextImportView } from './views/text-import/TextImportView';
 import { Diagnostics } from './views/Diagnostics';
@@ -776,6 +777,8 @@ function Workspace() {
           <WorldView />
         ) : view === 'privacy' ? (
           <PrivacyView />
+        ) : view === 'trash' ? (
+          <TrashView />
         ) : view === 'packs' ? (
           <PacksView />
         ) : view === 'text_import' ? (
