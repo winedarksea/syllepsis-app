@@ -1,0 +1,50 @@
+name: Website
+
+# Deploy the syllepsis.org landing page to Cloudflare Pages.
+#
+# Triggers:
+#   * release: published        -> refresh downloads.json from the newly published release.
+#   * push to main under website/** -> deploy content edits.
+#   * workflow_dispatch         -> manual deploy.
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "scripts/website-downloads.mjs"
+      - ".github/workflows/website.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: website
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Regenerate downloads.json from the latest published release. Falls back to the
+      # committed file when no release exists yet, so the deploy never fails on a fresh repo.
+      - name: Generate downloads.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/website-downloads.mjs > website/downloads.json.new && mv website/downloads.json.new website/downloads.json
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy website --project-name=syllepsis --branch=main

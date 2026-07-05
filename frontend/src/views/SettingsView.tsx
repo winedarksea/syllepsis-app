@@ -10,6 +10,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import { api } from '../lib/api';
+import { checkForUpdate, installUpdate } from '../lib/updater';
 import { useStore } from '../lib/store';
 import type { ThemePref } from '../lib/store';
 import type {
@@ -275,6 +276,7 @@ export function SettingsView({ launchMode = false }: Props) {
               <p className="sv-about-flavor">A local-first knowledge book</p>
             </div>
           </div>
+          <UpdateChecker />
         </Section>
 
         {book && (
@@ -327,6 +329,70 @@ function SettingsError({ message, onDismiss }: { message: string; onDismiss: () 
         </div>
       </div>
       <pre className="sv-error-panel-message">{message}</pre>
+    </div>
+  );
+}
+
+// "Check for updates" control in the About section. Desktop-only under the hood: on mobile or
+// in the dev browser the updater plugin is absent and the check resolves to "up to date".
+function UpdateChecker() {
+  const [state, setState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'checking' }
+    | { kind: 'up-to-date' }
+    | { kind: 'available'; version: string; notes?: string }
+    | { kind: 'installing' }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
+  // Hold the pending Update object between "check" and "install" without re-rendering on it.
+  const [pending, setPending] = useState<Awaited<ReturnType<typeof checkForUpdate>>>(null);
+
+  const onCheck = useCallback(async () => {
+    setState({ kind: 'checking' });
+    const update = await checkForUpdate();
+    if (update && update.available) {
+      setPending(update);
+      setState({ kind: 'available', version: update.version, notes: update.body });
+    } else {
+      setPending(null);
+      setState({ kind: 'up-to-date' });
+    }
+  }, []);
+
+  const onInstall = useCallback(async () => {
+    if (!pending) return;
+    setState({ kind: 'installing' });
+    try {
+      await installUpdate(pending);
+    } catch (err) {
+      setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+    }
+  }, [pending]);
+
+  return (
+    <div className="sv-update">
+      {state.kind === 'available' ? (
+        <div className="sv-update-row">
+          <span>Version {state.version} is available.</span>
+          <button className="sv-btn" onClick={onInstall}>Download &amp; restart</button>
+        </div>
+      ) : (
+        <div className="sv-update-row">
+          <button
+            className="sv-btn"
+            onClick={onCheck}
+            disabled={state.kind === 'checking' || state.kind === 'installing'}
+          >
+            {state.kind === 'checking'
+              ? 'Checking…'
+              : state.kind === 'installing'
+                ? 'Installing…'
+                : 'Check for updates'}
+          </button>
+          {state.kind === 'up-to-date' && <span className="sv-update-note">You're up to date.</span>}
+          {state.kind === 'error' && <span className="sv-update-error">{state.message}</span>}
+        </div>
+      )}
     </div>
   );
 }

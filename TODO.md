@@ -57,3 +57,33 @@ Categories and commentary don't get Loro management
 Test knowledge pack import/export, and import of a new version of an existing knowledge pack
 
 Consider aligning the types with ts-rs or tauri-specta. tauri-specta requires annotating all ~149 commands and only helps the Tauri boundary (your REST/MCP servers in rest.rs and mcp.rs wouldn't benefit). ts-rs is a smaller change and helps all three boundaries, but leaves the command-wrapper layer hand-typed.
+
+
+# GITHUB ACTIONS
+These are the plan's explicit manual/secret steps:
+
+cargo tauri signer generate → replace the REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY placeholder in tauri.conf.json and set TAURI_SIGNING_PRIVATE_KEY(_PASSWORD). ⚠️ createUpdaterArtifacts fails the build until this secret exists — that's the intended PR-2 gate, so don't tag until it's set. I deliberately did not generate your production release key.
+Secrets (GDRIVE_CLIENT_SECRET, CLOUDFLARE_*, ANDROID_*) and the Cloudflare Pages project — external setup.
+Android: the source-level cfg(target_os="android") gating of secrets.rs/onnx/extism paths and cargo tauri android init need the NDK and iterative compilation — captured step-by-step in docs/android.md.
+PR 1 (Desktop CI + Website) — Required before first release tag:
+
+GDRIVE_CLIENT_SECRET — Google Drive OAuth client secret (baked into binaries)
+CLOUDFLARE_API_TOKEN — Cloudflare Pages API token (scoped: Cloudflare Pages: Edit)
+CLOUDFLARE_ACCOUNT_ID — Your Cloudflare account ID
+PR 2 (Auto-updater) — Required before this PR merges (else createUpdaterArtifacts fails the build):
+4. TAURI_SIGNING_PRIVATE_KEY — from cargo tauri signer generate
+5. TAURI_SIGNING_PRIVATE_KEY_PASSWORD — password for the key above
+
+PR 3 (Android) — Required for Android builds:
+6. ANDROID_KEYSTORE_BASE64 — base64-encoded .jks upload keystore
+7. ANDROID_KEYSTORE_PASSWORD — keystore password
+8. ANDROID_KEY_ALIAS — key alias (e.g., "upload")
+9. ANDROID_KEY_PASSWORD — key password
+
+Optional (Add when code-signing certs are ready):
+10. APPLE_CERTIFICATE — macOS signing certificate (base64)
+11. APPLE_CERTIFICATE_PASSWORD — certificate password
+12. APPLE_SIGNING_IDENTITY — identity string
+13. APPLE_ID — Apple ID email
+14. APPLE_PASSWORD — Apple ID app-specific password
+15. APPLE_TEAM_ID — Apple Team ID

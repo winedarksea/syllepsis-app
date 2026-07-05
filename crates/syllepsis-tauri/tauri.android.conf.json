@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "mkdir -p bundled-models && npm --prefix ../frontend run build"
+  }
+}

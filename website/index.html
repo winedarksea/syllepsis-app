@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Syllepsis — Your notes. Your files. Your cloud.</title>
+  <meta name="description" content="Syllepsis is a free, open-source, local-first notes app. Plain Markdown on your disk, synced through your own Google Drive — no vendor account, no subscription, no proprietary add-ons. On-device AI search, WASM plugins, and static-site publishing." />
+  <link rel="canonical" href="https://syllepsis.org/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Syllepsis" />
+  <meta property="og:title" content="Syllepsis — Your notes. Your files. Your cloud." />
+  <meta property="og:description" content="Free, open-source, local-first notes. Plain Markdown on disk, synced through your own cloud. On-device AI, no subscription, no lock-in." />
+  <meta property="og:url" content="https://syllepsis.org/" />
+  <meta property="og:image" content="https://syllepsis.org/assets/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Syllepsis — Your notes. Your files. Your cloud." />
+  <meta name="twitter:description" content="Free, open-source, local-first notes. Plain Markdown on disk, synced through your own cloud. On-device AI, no subscription, no lock-in." />
+  <meta name="twitter:image" content="https://syllepsis.org/assets/og-image.png" />
+
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/assets/icon-512.png" />
+  <link rel="stylesheet" href="/styles.css" />
+
+  <!-- JSON-LD: SoftwareApplication -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Syllepsis",
+    "applicationCategory": "ProductivityApplication",
+    "operatingSystem": "macOS, Windows, Linux, Android",
+    "description": "Free, open-source, local-first notes app. Plain Markdown on disk, synced through your own cloud account, with on-device AI search.",
+    "url": "https://syllepsis.org/",
+    "downloadUrl": "https://github.com/winedarksea/syllepsis-app/releases",
+    "softwareVersion": "",
+    "license": "https://opensource.org/licenses/MIT",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "sameAs": ["https://github.com/winedarksea/syllepsis-app"]
+  }
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">
+      <img src="/assets/favicon.svg" alt="" width="28" height="28" />
+      <span>Syllepsis</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#downloads">Download</a>
+      <a href="#open-source">Open source</a>
+      <a href="https://github.com/winedarksea/syllepsis-app" rel="noopener">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- 1. Hero -->
+    <section class="hero">
+      <div class="hero-copy">
+        <h1>Your notes. Your files. Your cloud.</h1>
+        <p class="lede">
+          Syllepsis is a free, open-source, local-first notes app. Your notes live as
+          plain Markdown on your disk and sync through <em>your own</em> Google Drive —
+          no vendor account, no subscription, no proprietary add-ons.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" id="download-cta" href="#downloads">Download for your OS</a>
+          <a class="btn btn-secondary" href="https://github.com/winedarksea/syllepsis-app" rel="noopener">View on GitHub</a>
+        </div>
+        <p class="cta-sub" id="download-cta-sub">Free &amp; open source (MIT) · macOS · Windows · Linux · Android</p>
+      </div>
+      <div class="hero-shot">
+        <img src="/assets/screenshots/app.png" alt="Syllepsis editing a Markdown note next to a spatial world view"
+             width="1280" height="800" loading="eager" decoding="async" />
+      </div>
+    </section>
+
+    <section id="features" class="features">
+      <!-- 2. Why local-first -->
+      <article class="feature">
+        <h2>Local-first, by design</h2>
+        <p>
+          Every note is plain Markdown in a folder you control. Open them in any editor,
+          back them up any way you like, keep them forever. Cloud sync runs through
+          <strong>your own accounts</strong> with CRDT conflict handling, so edits from
+          multiple devices merge cleanly. Private by default — nothing is uploaded unless
+          you connect a provider.
+        </p>
+      </article>
+
+      <!-- 3. On-device AI -->
+      <article class="feature">
+        <h2>AI that never leaves your machine</h2>
+        <p>
+          Semantic search and an optional local language model run entirely on-device.
+          Ask questions of your notes and find things by meaning, not just keywords —
+          with no data sent to any server, ever.
+        </p>
+      </article>
+
+      <!-- 4. Power features -->
+      <article class="feature">
+        <h2>Power features, no lock-in</h2>
+        <ul class="feature-list">
+          <li><strong>WASM plugins</strong> — extend the app with sandboxed WebAssembly modules.</li>
+          <li><strong>Publish as a static site</strong> — turn a set of notes into a shareable website.</li>
+          <li><strong>PDF import</strong> — bring documents in as editable notes.</li>
+          <li><strong>Syntax highlighting</strong> — code blocks rendered by a plugin, not a service.</li>
+        </ul>
+      </article>
+    </section>
+
+    <!-- 5. Downloads -->
+    <section id="downloads" class="downloads">
+      <h2>Download Syllepsis</h2>
+      <p class="downloads-meta" id="downloads-meta">Latest release · free &amp; open source</p>
+      <div class="download-grid" id="download-grid">
+        <!-- Populated/enhanced by download.js; these anchors are the no-JS fallback. -->
+        <div class="download-card">
+          <h3>macOS</h3>
+          <ul>
+            <li><a data-asset="macos_arm64" href="https://github.com/winedarksea/syllepsis-app/releases">Apple Silicon (.dmg)</a></li>
+            <li><a data-asset="macos_x64" href="https://github.com/winedarksea/syllepsis-app/releases">Intel (.dmg)</a></li>
+          </ul>
+        </div>
+        <div class="download-card">
+          <h3>Windows</h3>
+          <ul>
+            <li><a data-asset="windows_exe" href="https://github.com/winedarksea/syllepsis-app/releases">Installer (.exe)</a></li>
+            <li><a data-asset="windows_msi" href="https://github.com/winedarksea/syllepsis-app/releases">Package (.msi)</a></li>
+          </ul>
+        </div>
+        <div class="download-card">
+          <h3>Linux</h3>
+          <ul>
+            <li><a data-asset="linux_appimage" href="https://github.com/winedarksea/syllepsis-app/releases">AppImage</a></li>
+            <li><a data-asset="linux_deb" href="https://github.com/winedarksea/syllepsis-app/releases">Debian (.deb)</a></li>
+            <li><a data-asset="linux_rpm" href="https://github.com/winedarksea/syllepsis-app/releases">Fedora (.rpm)</a></li>
+          </ul>
+        </div>
+        <div class="download-card">
+          <h3>Android</h3>
+          <ul>
+            <li><a data-asset="android_apk" href="https://github.com/winedarksea/syllepsis-app/releases">APK</a></li>
+            <li><span class="muted">Play Store — coming soon</span></li>
+          </ul>
+        </div>
+      </div>
+      <p class="all-releases">
+        <a id="all-releases-link" href="https://github.com/winedarksea/syllepsis-app/releases" rel="noopener">All releases &amp; checksums →</a>
+      </p>
+    </section>
+
+    <!-- 6. Open source -->
+    <section id="open-source" class="open-source">
+      <h2>Open source, no telemetry</h2>
+      <p>
+        Syllepsis is released under the <strong>MIT license</strong>. There are no trackers,
+        no analytics, and no phone-home. Read the code, file an issue, or send a patch on
+        <a href="https://github.com/winedarksea/syllepsis-app" rel="noopener">GitHub</a>.
+      </p>
+    </section>
+
+    <!-- 7. FAQ -->
+    <section id="faq" class="faq">
+      <h2>FAQ</h2>
+
+      <details>
+        <summary>Is it really free?</summary>
+        <p>Yes — free and open source under the MIT license, with no paid tiers or add-ons.</p>
+      </details>
+
+      <details>
+        <summary>Where are my notes stored?</summary>
+        <p>As plain Markdown files in a folder on your device. Optional sync copies them to
+          your own cloud account (e.g. Google Drive); Syllepsis never stores your notes on
+          our servers because we don't run any.</p>
+      </details>
+
+      <details>
+        <summary>macOS says the app is from an “unidentified developer.”</summary>
+        <p>Early releases are not yet code-signed. Right-click (or Control-click) the app and
+          choose <strong>Open</strong>, then confirm — macOS will remember your choice.
+          Signed builds are on the roadmap.</p>
+      </details>
+
+      <details>
+        <summary>Does the AI send my notes anywhere?</summary>
+        <p>No. Semantic search and the optional local model run entirely on your device.</p>
+      </details>
+
+      <details>
+        <summary>Can I sync between devices?</summary>
+        <p>Yes. Connect the same cloud account on each device; edits merge automatically via
+          CRDTs, even offline.</p>
+      </details>
+    </section>
+  </main>
+
+  <!-- 8. Footer -->
+  <footer class="site-footer">
+    <p>
+      <strong>Syllepsis</strong> — local-first notes.
+      <a href="https://github.com/winedarksea/syllepsis-app" rel="noopener">GitHub</a> ·
+      MIT licensed
+    </p>
+  </footer>
+
+  <script src="/download.js" defer></script>
+</body>
+</html>

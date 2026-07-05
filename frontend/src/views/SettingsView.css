@@ -523,6 +523,12 @@ select.sv-input { min-width: 180px; cursor: pointer; }
   margin-top: var(--sp-2);
 }
 
+/* ── Update checker ─────────────────────────────────────────────────────────── */
+.sv-update { margin-top: var(--sp-4); }
+.sv-update-row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.sv-update-note { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.sv-update-error { font-size: var(--font-size-sm); color: var(--color-danger, #d9534f); }
+
 /* ── Plugins list ───────────────────────────────────────────────────────────── */
 .sv-plugin-list { display: flex; flex-direction: column; gap: var(--sp-2); }
 .sv-plugin-item {

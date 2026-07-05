@@ -1,0 +1,187 @@
+name: Release
+
+# Desktop (Windows / Linux / macOS) build + publish pipeline.
+#
+# Trigger model:
+#   * Push a tag `vX.Y.Z`   -> create a DRAFT GitHub Release, build every platform,
+#                              upload installers + `latest.json` to that draft. A human
+#                              then QAs and publishes it (which fires website.yml).
+#   * workflow_dispatch     -> build every platform and upload the bundles as workflow
+#                              artifacts only (no release touched). Dry-run / QA path.
+#
+# Building into a draft (never directly on `release: published`) keeps releases atomic:
+# tauri-action uploads assets and `latest.json` incrementally, and a half-uploaded
+# published release would break the updater endpoint for every installed app.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Avoid two runs racing on the same tag's draft release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    # Only tag pushes get a release; dispatch runs build to artifacts instead.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Create the draft release ourselves (rather than letting tauri-action do it) so the
+      # matrix builds all upload into one pre-existing release instead of racing to create it.
+      - name: Create draft release
+        id: create
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const { data: release } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: tag,
+              draft: true,
+              prerelease: tag.includes('-'),
+              generate_release_notes: true,
+            });
+            core.setOutput('release_id', release.id);
+
+  build:
+    needs: create-release
+    # `always()` so dispatch runs (which skip create-release) still execute.
+    if: always() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-15
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-15
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ""
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            libssl-dev \
+            libfuse2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }},wasm32-wasip1
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          # The root workspace plus both out-of-workspace plugin crates.
+          workspaces: |
+            .
+            plugins/pdf-import
+            plugins/syntax-highlight
+          key: ${{ matrix.target }}
+
+      # The ~207 MB HuggingFace download for the bundled model is deterministic; cache it so
+      # only the first run pays the cost. Key on the prep script + the model manifest source.
+      - name: Cache bundled models
+        uses: actions/cache@v4
+        with:
+          path: crates/syllepsis-tauri/bundled-models
+          key: bundled-models-${{ hashFiles('scripts/prepare-bundled-models.sh', 'crates/syllepsis-core/src/onnx/manifest.rs') }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # WASM plugins are not built by beforeBuildCommand; tauri.conf bundles plugins/dist.
+      # bash shell so this works on the Windows runner via Git Bash.
+      - name: Build WASM plugins
+        shell: bash
+        run: ./plugins/build.sh
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Install Tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli
+
+      # Framework-now-certs-later: export Apple signing vars to the environment ONLY when the
+      # secret is non-empty. Tauri misbehaves when these are set-but-empty, so the guard keeps
+      # first releases unsigned with zero workflow changes once certs are added as secrets.
+      - name: Configure signing environment
+        shell: bash
+        run: |
+          set_if_present() {
+            local name="$1" value="$2"
+            if [ -n "$value" ]; then
+              echo "$name=$value" >> "$GITHUB_ENV"
+            fi
+          }
+          set_if_present APPLE_CERTIFICATE "${{ secrets.APPLE_CERTIFICATE }}"
+          set_if_present APPLE_CERTIFICATE_PASSWORD "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+          set_if_present APPLE_SIGNING_IDENTITY "${{ secrets.APPLE_SIGNING_IDENTITY }}"
+          set_if_present APPLE_ID "${{ secrets.APPLE_ID }}"
+          set_if_present APPLE_PASSWORD "${{ secrets.APPLE_PASSWORD }}"
+          set_if_present APPLE_TEAM_ID "${{ secrets.APPLE_TEAM_ID }}"
+
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Baked into the binary via option_env! so shipped installers can complete the
+          # Google Drive OAuth token exchange with no runtime configuration.
+          SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          # Updater artifact signing (populated once the secret exists; PR 2 wires the plugin).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: crates/syllepsis-tauri
+          tauriScript: cargo tauri
+          # Empty on workflow_dispatch -> tauri-action builds only and we upload artifacts.
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: ${{ matrix.args }}
+          includeUpdaterJson: true
+
+      # On dispatch (no release) surface the bundles as downloadable workflow artifacts.
+      - name: Upload bundles as artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.target }}
+          if-no-files-found: warn
+          path: |
+            target/${{ matrix.target }}/release/bundle/**
+            target/release/bundle/**

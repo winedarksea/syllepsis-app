@@ -16,7 +16,6 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-syllepsis-core = { path = "../syllepsis-core", features = ["onnx", "loro", "extism"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-deep-link = "2"
@@ -26,7 +25,6 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 chrono = { workspace = true }
 ulid = { workspace = true }
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
 notify = "8"
 opendal = { version = "0.57", features = ["blocking", "services-gdrive", "services-dropbox", "services-onedrive"] }
@@ -38,6 +36,23 @@ axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
 tokio = { version = "1", features = ["net"] }
+
+# syllepsis-core features split by target. Desktop gets the full stack; Android drops
+# `extism` (wasmtime — no Android backend) and `onnx` (ort linking is the open Android
+# question). Semantic search / WASM plugins are desktop-only on Android initially; the
+# corresponding syllepsis-tauri source must be cfg-gated for `target_os = "android"`.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+syllepsis-core = { path = "../syllepsis-core", features = ["onnx", "loro", "extism"] }
+# keyring v3 has no Android backend; OS-keychain credential storage is desktop-only.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+syllepsis-core = { path = "../syllepsis-core", features = ["loro"] }
+
+# Desktop-only: the auto-updater and process (relaunch) plugins have no mobile backend.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [dev-dependencies]
 tempfile = "3"

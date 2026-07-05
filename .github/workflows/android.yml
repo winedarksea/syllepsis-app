@@ -1,0 +1,145 @@
+name: Android
+
+# Android build (APK + AAB). tauri-action's Android support is weak, so we drive the raw CLI.
+#
+# Trigger model mirrors release.yml:
+#   * tag `vX.Y.Z`      -> build signed APK + AAB, upload to that tag's DRAFT release.
+#   * workflow_dispatch -> build and upload as workflow artifacts only.
+#
+# Prerequisite: `cargo tauri android init` must have been run locally and `gen/android`
+# committed, with a `signingConfigs` block reading a gitignored `keystore.properties`.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,wasm32-wasip1
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            plugins/pdf-import
+            plugins/syntax-highlight
+          key: android
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build WASM plugins
+        run: ./plugins/build.sh
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Install Tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli
+
+      # Decode the upload keystore and write keystore.properties for gen/android to read.
+      - name: Configure signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/upload.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          props="crates/syllepsis-tauri/gen/android/keystore.properties"
+          {
+            echo "storeFile=$keystore"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > "$props"
+
+      - name: Build Android APK + AAB
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
+          SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+        working-directory: crates/syllepsis-tauri
+        # The android overlay config drops model prep + the bundled-models resource so the
+        # APK stays small (runtime HF download fallback covers it).
+        run: cargo tauri android build --apk --aab --target aarch64 --config tauri.android.conf.json
+
+      - name: Collect artifacts
+        id: collect
+        run: |
+          set -euo pipefail
+          out="crates/syllepsis-tauri/gen/android/app/build/outputs"
+          mkdir -p dist-android
+          find "$out" -name "*.apk" -exec cp {} dist-android/ \;
+          find "$out" -name "*.aab" -exec cp {} dist-android/ \;
+          ls -la dist-android
+
+      - name: Upload to draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release upload "$tag" dist-android/* --clobber
+
+      - name: Upload as workflow artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-bundles
+          path: dist-android/**
+          if-no-files-found: warn
+
+  # ── iOS (deferred — no Apple developer account yet). Extension point:
+  # ios:
+  #   runs-on: macos-15
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         targets: aarch64-apple-ios,wasm32-wasip1
+  #     - name: Import signing certificate
+  #       env:
+  #         APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+  #         APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+  #       run: # decode cert into a temporary keychain
+  #     - run: ./plugins/build.sh && npm --prefix frontend ci
+  #     - working-directory: crates/syllepsis-tauri
+  #       run: cargo tauri ios init && cargo tauri ios build --config tauri.ios.conf.json

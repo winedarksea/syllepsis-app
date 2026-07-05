@@ -1956,6 +1956,7 @@ fn oauth_client_config(provider: &str) -> Result<CloudSyncOAuthClientConfig, Str
         "onedrive" => configured_client_ids.onedrive,
         other => return Err(format!("unknown cloud sync provider: {other}")),
     };
+    apply_oauth_client_secret_baked(provider, &mut config);
     apply_oauth_client_config_override(provider, &mut config)?;
     apply_oauth_client_secret_env(provider, &mut config);
     if config.client_id.trim().is_empty() {
@@ -2012,6 +2013,28 @@ fn apply_oauth_client_config_fields(
     }
     if let Some(client_secret) = config_override.client_secret {
         config.client_secret = Some(client_secret);
+    }
+}
+
+/// Compile-time fallback for the OAuth client secret baked into release builds.
+///
+/// Shipped binaries have no runtime env var or local override file, so without this the
+/// managed cloud sync (e.g. Google Drive) token exchange fails on end-user machines. The
+/// secret is provided at build time via `SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET`. This is the
+/// lowest-precedence source: a runtime env var or local override file still wins.
+///
+/// Embedding a desktop OAuth client secret is expected for Google's installed-app flow —
+/// combined with PKCE the secret is not treated as confidential.
+fn apply_oauth_client_secret_baked(provider: &str, config: &mut CloudSyncOAuthClientConfig) {
+    let baked = match provider {
+        "google_drive" => option_env!("SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET"),
+        _ => None,
+    };
+    if let Some(secret) = baked
+        .map(str::trim)
+        .filter(|secret| !secret.is_empty())
+    {
+        config.client_secret = Some(secret.to_string());
     }
 }
 

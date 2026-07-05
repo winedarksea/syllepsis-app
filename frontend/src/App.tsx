@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties, FormEvent, ReactNode } from 'react';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { open as openDialog, ask } from '@tauri-apps/plugin-dialog';
+import { checkForUpdateOnStartup, installUpdate } from './lib/updater';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import { useStore } from './lib/store';
@@ -801,6 +802,24 @@ function Workspace() {
 // ──────────────────────────────────────────────
 export default function App() {
   const { book, theme, themePref, syncSystemTheme, themeId, customThemes } = useStore();
+
+  // One-shot startup update check (desktop only; silently no-ops elsewhere). If an update is
+  // available, offer it non-blockingly; installing downloads then relaunches into the new build.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const update = await checkForUpdateOnStartup();
+      if (cancelled || !update) return;
+      const accepted = await ask(
+        `Syllepsis ${update.version} is available. Update now?`,
+        { title: 'Update available', kind: 'info' },
+      );
+      if (accepted) await installUpdate(update);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // When following the system theme, re-resolve live as the OS color scheme changes.
   useEffect(() => {
