@@ -43,10 +43,10 @@ const CORE_NAV: NavItem[] = [
 const TOOLS_NAV: NavItem[] = [
   { view: 'packs', icon: 'inventory_2', label: 'Packs', slot: 'packs' },
   { view: 'text_import', icon: 'upload_file', label: 'Note Import' },
-  { view: 'trash', icon: 'delete', label: 'Trash' },
   { view: 'style_cards', icon: 'style', label: 'Style Cards' },
   { view: 'stats', icon: 'bar_chart', label: 'Statistics' },
   { view: 'diagnostics', icon: 'monitor_heart', label: 'Diagnostics' },
+  { view: 'trash', icon: 'delete', label: 'Trash' },
 ];
 
 export function Sidebar({
