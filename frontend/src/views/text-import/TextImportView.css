@@ -21,6 +21,11 @@
   font-size: var(--font-size-sm);
 }
 
+.ti-frontmatter-summary {
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+  font-style: italic;
+}
+
 /* ── Two-pane body: fixed controls left, scrolling preview right ── */
 .ti-body {
   flex: 1;

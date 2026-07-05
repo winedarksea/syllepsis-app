@@ -11,6 +11,7 @@ import type {
   PluginDescriptor,
   TextImportLlmChunk,
   TextImportOptions,
+  TextImportFrontmatter,
   TextImportPlacement,
   TextImportPreview,
   TextImportPreviewItem,
@@ -20,6 +21,19 @@ import { PreviewItemCard, type EditableImportItem } from './PreviewItemCard';
 import { CategorySuggestPanel } from './CategorySuggestPanel';
 import { LlmImportPanel, type ChunkSide } from './LlmImportPanel';
 import './TextImportView.css';
+
+/// One-line summary of the file-level frontmatter applied to every imported note, e.g.
+/// "created 2024-01-02 · 3 tags · status done · 2 aliases". Empty string when nothing applies.
+function frontmatterSummary(fm: TextImportFrontmatter | null | undefined): string {
+  if (!fm) return '';
+  const parts: string[] = [];
+  if (fm.created) parts.push(`created ${fm.created.slice(0, 10)}`);
+  if (fm.updated) parts.push(`updated ${fm.updated.slice(0, 10)}`);
+  if (fm.tags.length) parts.push(`${fm.tags.length} tag${fm.tags.length === 1 ? '' : 's'}`);
+  if (fm.status) parts.push(`status ${fm.status.replace(/_/g, ' ')}`);
+  if (fm.aliases.length) parts.push(`${fm.aliases.length} alias${fm.aliases.length === 1 ? '' : 'es'}`);
+  return parts.join(' · ');
+}
 
 const TEXT_FILTER = [
   { name: 'Text or Markdown', extensions: ['txt', 'md', 'markdown'] },
@@ -363,6 +377,7 @@ export function TextImportView() {
         items: commitItems,
         categories: preview.categories,
         placement,
+        frontmatter: preview.frontmatter ?? null,
       });
       const [freshCategories, freshUnsorted] = await Promise.all([
         api.allCategories(),
@@ -447,6 +462,11 @@ export function TextImportView() {
                     {commitItems.length} note{commitItems.length === 1 ? '' : 's'} ready.{' '}
                     {preview.categories.length} detected section{preview.categories.length === 1 ? '' : 's'}.
                   </p>
+                  {frontmatterSummary(preview.frontmatter) && (
+                    <p className="ti-frontmatter-summary">
+                      Frontmatter: {frontmatterSummary(preview.frontmatter)}
+                    </p>
+                  )}
                 </div>
               </div>
 

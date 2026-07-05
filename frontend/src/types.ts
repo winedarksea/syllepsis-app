@@ -1189,10 +1189,19 @@ export interface TextImportCategoryPreview {
   heading_level: number;
 }
 
+export interface TextImportFrontmatter {
+  created?: string | null;
+  updated?: string | null;
+  tags: string[];
+  aliases: string[];
+  status?: NoteStatus | null;
+}
+
 export interface TextImportPreview {
   items: TextImportPreviewItem[];
   categories: TextImportCategoryPreview[];
   warnings: string[];
+  frontmatter?: TextImportFrontmatter | null;
 }
 
 export type TextImportPlacement =
@@ -1204,6 +1213,7 @@ export interface TextImportCommitRequest {
   items: TextImportPreviewItem[];
   categories: TextImportCategoryPreview[];
   placement: TextImportPlacement;
+  frontmatter?: TextImportFrontmatter | null;
 }
 
 export interface TextImportReport {

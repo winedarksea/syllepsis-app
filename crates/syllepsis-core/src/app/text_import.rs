@@ -14,8 +14,11 @@ use crate::model::{Category, Note, ObjectType, PriorEdge, PriorKind};
 use crate::storage::{Book, NoteStore};
 
 pub mod chunks;
+pub mod frontmatter;
 pub mod keywords;
 pub mod outline;
+
+pub use frontmatter::TextImportFrontmatter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -150,6 +153,9 @@ pub struct TextImportPreview {
     pub items: Vec<TextImportPreviewItem>,
     pub categories: Vec<TextImportCategoryPreview>,
     pub warnings: Vec<String>,
+    /// Frontmatter detected at the top of the source, applied to every note on commit.
+    #[serde(default)]
+    pub frontmatter: Option<TextImportFrontmatter>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +171,9 @@ pub struct TextImportCommitRequest {
     pub items: Vec<TextImportPreviewItem>,
     pub categories: Vec<TextImportCategoryPreview>,
     pub placement: TextImportPlacement,
+    /// Frontmatter to apply to every committed note (dates, status, tags, aliases).
+    #[serde(default)]
+    pub frontmatter: Option<TextImportFrontmatter>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,6 +200,9 @@ struct HeadingContext {
 
 pub fn preview_text_import(source_text: &str, options: &TextImportOptions) -> TextImportPreview {
     let normalized = source_text.replace("\r\n", "\n").replace('\r', "\n");
+    // Strip any leading Obsidian frontmatter before splitting so it never becomes a note; its
+    // mapped fields are attached to the preview and applied to every note on commit.
+    let (frontmatter, normalized, mut fm_warnings) = frontmatter::extract_frontmatter(&normalized);
     let (blocks, categories, warnings) = match options.split_mode {
         TextImportSplitMode::OneNote => parse_one_note(&normalized, options),
         TextImportSplitMode::NonEmptyLine => parse_non_empty_lines(&normalized, options),
@@ -199,11 +211,13 @@ pub fn preview_text_import(source_text: &str, options: &TextImportOptions) -> Te
         // The outline parser assigns priors itself (each section starts its own chain), so it
         // returns finished preview items instead of blocks for the mapping loop below.
         TextImportSplitMode::Outline => {
-            let (items, categories, warnings) = outline::parse_outline(&normalized, options);
+            let (items, categories, mut warnings) = outline::parse_outline(&normalized, options);
+            fm_warnings.append(&mut warnings);
             return TextImportPreview {
                 items,
                 categories,
-                warnings,
+                warnings: fm_warnings,
+                frontmatter,
             };
         }
     };
@@ -243,10 +257,12 @@ pub fn preview_text_import(source_text: &str, options: &TextImportOptions) -> Te
         })
         .collect();
 
+    fm_warnings.extend(warnings);
     TextImportPreview {
         items,
         categories,
-        warnings,
+        warnings: fm_warnings,
+        frontmatter,
     }
 }
 
@@ -290,11 +306,10 @@ pub fn commit_text_import(
         );
         note.body = item.body.clone();
         note.categories = categories_for_item(item);
+        apply_frontmatter(&mut note, request.frontmatter.as_ref());
         for category in &note.categories {
             ensure_category_exists(book, category, category, 2, &mut created_categories)?;
         }
-        note.metadata.dates.updated = Utc::now();
-        note.metadata.dates.created = note.metadata.dates.updated;
 
         note.prior = if let Some(previous) = previous_note_id.clone() {
             // An item explicitly marked as a category start (outline sections) begins its own
@@ -918,6 +933,30 @@ fn intended_category_start(item: &TextImportPreviewItem) -> Option<String> {
         .or_else(|| item.category_context.clone())
 }
 
+/// Apply mapped Obsidian frontmatter to a note being committed. Falls back to `now` for missing
+/// dates so `created`/`updated` stay populated exactly as before when no frontmatter is present.
+fn apply_frontmatter(note: &mut Note, frontmatter: Option<&TextImportFrontmatter>) {
+    let now = Utc::now();
+    let Some(fm) = frontmatter else {
+        note.metadata.dates.created = now;
+        note.metadata.dates.updated = now;
+        return;
+    };
+    note.metadata.dates.created = fm.created.unwrap_or(now);
+    note.metadata.dates.updated = fm.updated.or(fm.created).unwrap_or(now);
+    if fm.status.is_some() {
+        note.metadata.status = fm.status;
+    }
+    for tag in &fm.tags {
+        if !tag.trim().is_empty() && !note.categories.contains(tag) {
+            note.categories.push(tag.clone());
+        }
+    }
+    if !fm.aliases.is_empty() && note.summary.trim().is_empty() {
+        note.summary = format!("Also known as: {}", fm.aliases.join(", "));
+    }
+}
+
 fn categories_for_item(item: &TextImportPreviewItem) -> Vec<String> {
     let mut categories = Vec::new();
     if let Some(category) = &item.category_context {
@@ -940,6 +979,7 @@ fn categories_for_item(item: &TextImportPreviewItem) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::model::PriorRef;
+    use chrono::TimeZone;
     use tempfile::tempdir;
 
     fn defaults(mode: TextImportSplitMode) -> TextImportOptions {
@@ -1040,6 +1080,7 @@ mod tests {
                 items: preview.items,
                 categories: preview.categories,
                 placement: TextImportPlacement::Unsorted,
+                frontmatter: None,
             },
         )
         .unwrap();
@@ -1082,6 +1123,7 @@ mod tests {
                 items,
                 categories: preview.categories,
                 placement: TextImportPlacement::Unsorted,
+                frontmatter: None,
             },
         )
         .unwrap();
@@ -1098,6 +1140,58 @@ mod tests {
     }
 
     #[test]
+    fn commit_applies_frontmatter_to_every_note() {
+        use crate::model::NoteStatus;
+        let dir = tempdir().unwrap();
+        let book = Book::create(dir.path().join("book"), "Book").unwrap();
+        let input = "---\ncreated: 2023-05-01T10:00:00Z\nupdated: 2023-06-02\ntags:\n  - project/alpha\n  - idea\naliases:\n  - Alt Name\nstatus: in-progress\n---\nFirst note.\n\nSecond note.";
+        let preview = preview_text_import(input, &defaults(TextImportSplitMode::Paragraph));
+        // The fence never becomes a note, and the preview carries the mapped frontmatter.
+        assert!(preview.items.iter().all(|item| !item.body.contains("---")));
+        let fm = preview.frontmatter.clone().unwrap();
+        assert_eq!(fm.status, Some(NoteStatus::Active));
+        let report = commit_text_import(
+            &book,
+            TextImportCommitRequest {
+                items: preview.items,
+                categories: preview.categories,
+                placement: TextImportPlacement::Unsorted,
+                frontmatter: preview.frontmatter,
+            },
+        )
+        .unwrap();
+        assert_eq!(report.imported.len(), 2);
+        for id in &report.imported {
+            let note = book.store.read_note(&NoteId::parse(id).unwrap()).unwrap();
+            assert_eq!(
+                note.metadata.dates.created,
+                Utc.with_ymd_and_hms(2023, 5, 1, 10, 0, 0).unwrap()
+            );
+            assert_eq!(
+                note.metadata.dates.updated,
+                Utc.with_ymd_and_hms(2023, 6, 2, 0, 0, 0).unwrap()
+            );
+            assert_eq!(note.metadata.status, Some(NoteStatus::Active));
+            assert!(note.categories.contains(&"project-alpha".to_string()));
+            assert!(note.categories.contains(&"idea".to_string()));
+            assert_eq!(note.summary, "Also known as: Alt Name");
+        }
+        assert!(report.created_categories.contains(&"project-alpha".to_string()));
+        assert!(report.created_categories.contains(&"idea".to_string()));
+    }
+
+    #[test]
+    fn commit_request_without_frontmatter_field_deserializes() {
+        let json = serde_json::json!({
+            "items": [],
+            "categories": [],
+            "placement": { "kind": "unsorted" }
+        });
+        let request: TextImportCommitRequest = serde_json::from_value(json).unwrap();
+        assert!(request.frontmatter.is_none());
+    }
+
+    #[test]
     fn commit_chains_imported_notes_in_order() {
         let dir = tempdir().unwrap();
         let book = Book::create(dir.path().join("book"), "Book").unwrap();
@@ -1111,6 +1205,7 @@ mod tests {
                 items: preview.items,
                 categories: preview.categories,
                 placement: TextImportPlacement::Unsorted,
+                frontmatter: None,
             },
         )
         .unwrap();
