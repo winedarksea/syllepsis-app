@@ -96,6 +96,10 @@ pub struct PrivacyConfig {
     pub unlock_delay_hours: u32,
     /// Hours before a delete/unlock confirmation takes effect.
     pub confirmation_delay_hours: u32,
+    /// Minutes of inactivity before an unlocked PIN-lock session (privacy-security.md
+    /// "PIN-Locked Notes") auto-relocks. The session itself lives in the tauri shell
+    /// (`PinSession`, process memory only); this is just the configured timeout.
+    pub pin_idle_relock_minutes: u32,
 }
 
 impl Default for PrivacyConfig {
@@ -103,6 +107,7 @@ impl Default for PrivacyConfig {
         PrivacyConfig {
             unlock_delay_hours: 24,
             confirmation_delay_hours: 24,
+            pin_idle_relock_minutes: 15,
         }
     }
 }

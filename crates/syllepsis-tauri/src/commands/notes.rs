@@ -34,7 +34,12 @@ pub fn book_view(state: State<AppState>) -> Result<Vec<RenderItem>, String> {
 #[tauri::command]
 pub fn unsorted_notes(state: State<AppState>) -> Result<Vec<NoteDto>, String> {
     with_book!(state, book, {
-        app::unsorted_notes(book).map_err(|e| e.to_string())
+        let dtos = app::unsorted_notes(book).map_err(|e| e.to_string())?;
+        let mut session = state.pin_session.lock().unwrap();
+        Ok(dtos
+            .into_iter()
+            .map(|dto| crate::commands::pinlock::present(book, dto, &mut session))
+            .collect())
     })
 }
 
@@ -42,7 +47,9 @@ pub fn unsorted_notes(state: State<AppState>) -> Result<Vec<NoteDto>, String> {
 #[tauri::command]
 pub fn get_note(state: State<AppState>, id: String) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        app::get_note(book, &id).map_err(|e| e.to_string())
+        let dto = app::get_note(book, &id).map_err(|e| e.to_string())?;
+        let mut session = state.pin_session.lock().unwrap();
+        Ok(crate::commands::pinlock::present(book, dto, &mut session))
     })
 }
 
@@ -98,8 +105,13 @@ pub fn list_notes(
     visibility: Option<NoteVisibility>,
 ) -> Result<Vec<NoteDto>, String> {
     with_book!(state, book, {
-        app::list_notes_with_visibility(book, visibility.unwrap_or_default())
-            .map_err(|e| e.to_string())
+        let dtos = app::list_notes_with_visibility(book, visibility.unwrap_or_default())
+            .map_err(|e| e.to_string())?;
+        let mut session = state.pin_session.lock().unwrap();
+        Ok(dtos
+            .into_iter()
+            .map(|dto| crate::commands::pinlock::present(book, dto, &mut session))
+            .collect())
     })
 }
 
@@ -137,16 +149,64 @@ pub fn create_note(
 }
 
 /// Persist edits to a note (bumps updated timestamp, folds inline #tags).
+///
+/// A locked note's `summary`/`body` can only change when the incoming DTO carries real plaintext
+/// (`unlocked: true`, from `present()` on the read side) *and* the session currently holds a key —
+/// otherwise a locked note's ciphertext is preserved untouched and only its other fields (title,
+/// categories, …) move, so a locked note can still be retitled without unlocking. Trying to save
+/// actual content changes to a locked note while the session is locked is the one case that
+/// surfaces a typed error the frontend turns into the unlock modal (privacy-security.md
+/// "PIN-Locked Notes").
 #[tauri::command]
 pub fn update_note(state: State<AppState>, note: NoteDto) -> Result<NoteDto, String> {
     with_book!(state, book, {
+        let note_id =
+            syllepsis_core::id::NoteId::parse(&note.id).map_err(|e| e.to_string())?;
+        let stored = book.store.read_note(&note_id).ok();
+        let mut note = note;
+        if let Some(stored) = &stored {
+            if stored.is_pin_locked() {
+                if note.unlocked {
+                    let key = {
+                        let mut session = state.pin_session.lock().unwrap();
+                        let key = session
+                            .key()
+                            .cloned()
+                            .ok_or_else(|| "book is locked".to_string())?;
+                        session.touch(std::time::SystemTime::now());
+                        key
+                    };
+                    let mut ciphertext_note = stored.clone();
+                    syllepsis_core::pinlock::encrypt_for_save(
+                        &mut ciphertext_note,
+                        &note.summary,
+                        &note.body,
+                        &key,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    note.summary = ciphertext_note.summary;
+                    note.body = ciphertext_note.body;
+                    note.encryption = ciphertext_note.encryption;
+                } else {
+                    // Not unlocked (or a stale/placeholder DTO): never let this touch ciphertext —
+                    // only non-content fields (title, categories, …) can move.
+                    note.summary = stored.summary.clone();
+                    note.body = stored.body.clone();
+                    note.encryption = stored.encryption.clone();
+                }
+            }
+        }
+        let was_pin_locked = stored.as_ref().is_some_and(|n| n.is_pin_locked());
         let updated = app::update_note(book, note).map_err(|e| e.to_string())?;
         let stored = book
             .store
             .read_note(&syllepsis_core::id::NoteId::parse(&updated.id).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
-        if syllepsis_core::embeddings::note_embedding_is_stale(book, &stored)
-            .map_err(|e| e.to_string())?
+        // Locked notes never get automatic embedding jobs — no plaintext-derived artifact should
+        // be generated from content the session may not even be able to see.
+        if !was_pin_locked
+            && syllepsis_core::embeddings::note_embedding_is_stale(book, &stored)
+                .map_err(|e| e.to_string())?
         {
             state
                 .local_ai

@@ -183,6 +183,20 @@ impl LocalAiWorker {
     }
 
     pub fn enqueue_note(&self, book: &Book, note_id: String, expedite: bool) -> Result<(), String> {
+        // PIN-locked notes never get automatic embedding/summary jobs — this is a defense-in-depth
+        // guard here (not just at the `update_note` call site) so every current and future caller
+        // is covered: no plaintext-derived artifact should be generated from content the session
+        // may not even currently be able to see (privacy-security.md "PIN-Locked Notes").
+        if let Ok(id) = NoteId::parse(&note_id) {
+            if book
+                .store
+                .read_note(&id)
+                .map(|note| note.is_pin_locked())
+                .unwrap_or(false)
+            {
+                return Ok(());
+            }
+        }
         let models_root = book
             .models_root()
             .ok_or_else(|| "local model directory unavailable".to_string())?

@@ -354,6 +354,12 @@
   font-style: italic;
 }
 
+.bv-locked-body {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
 /* Code blocks in the book view — plain fallback */
 .bv-code-block {
   font-family: var(--font-mono);

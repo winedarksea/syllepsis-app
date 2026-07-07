@@ -9,6 +9,7 @@ import { api } from '../lib/api';
 import { humanize } from '../lib/utils';
 import { Icon } from '../components/Icon';
 import { WorldLocationHelper } from '../components/WorldLocationHelper';
+import { usePinLockStore } from '../lib/pinLock';
 import type {
   NoteDto, Category, LockMode, PriorKind, PriorRef, ClassificationKind, Priority, FlexDate, NoteStatus,
   NoteEmbeddingDetails,
@@ -191,6 +192,30 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
   const privacyCount = [lcHidden, lcNoSearch, lcNoPublish].filter(Boolean).length;
   const allPrivate = privacyCount === 3;
   const somePrivate = privacyCount > 0 && !allPrivate;
+
+  // PIN-locked notes (privacy-security.md "PIN-Locked Notes"): a separate toggle, not part of the
+  // "Private" preset above. Text notes only in phase 1; needs a book PIN configured first.
+  const pinLockStatus = usePinLockStore((s) => s.status);
+  const requestUnlock = usePinLockStore((s) => s.requestUnlock);
+  const supportsPinLock = !['picture', 'drawing', 'table'].includes(note.type);
+  const pinLockDisabledReason = !pinLockStatus?.configured
+    ? 'Set a PIN in Settings first'
+    : !supportsPinLock
+      ? `${humanize(note.type)} notes can't be PIN-locked yet`
+      : undefined;
+  const togglePinLock = async () => {
+    if (pinLockDisabledReason) return;
+    try {
+      if (!usePinLockStore.getState().status?.unlocked) {
+        const unlocked = await requestUnlock();
+        if (!unlocked) return;
+      }
+      const updated = await api.setNotePinLocked(note.id, !note.pin_locked);
+      onChange(updated);
+    } catch {
+      // Toggle simply stays as-is; the editor's normal error surfaces elsewhere if this matters.
+    }
+  };
 
   const addCategory = () => {
     const name = newCategory.trim().replace(/^#/, '');
@@ -562,6 +587,14 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
                     title="Withheld from the published site (gitignored)"
                   >
                     No publish
+                  </button>
+                  <button
+                    className={`dp-privacy-chip${note.pin_locked ? ' dp-privacy-chip--on' : ''}`}
+                    onClick={togglePinLock}
+                    disabled={!!pinLockDisabledReason}
+                    title={pinLockDisabledReason ?? 'Summary/body are encrypted until the book is unlocked with its PIN'}
+                  >
+                    Locked (PIN)
                   </button>
                 </div>
               </div>

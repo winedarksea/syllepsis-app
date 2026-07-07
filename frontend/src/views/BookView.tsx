@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { PageHeader } from '../components/PageHeader';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
+import { Icon } from '../components/Icon';
 import { detectAccidentalWholeNoteCodeFence } from '../lib/wholeNoteFence';
 import type { PublishReport, RenderItem } from '../types';
 import './BookView.css';
@@ -243,9 +244,15 @@ export function BookView() {
                       </button>
                     </div>
                   )}
-                  {content.trim()
-                    ? <MarkdownRenderer markdown={content} className="bv-rendered-note" />
-                    : <span className="bv-empty-body">(empty)</span>}
+                  {note.pin_locked ? (
+                    <span className="bv-empty-body bv-locked-body">
+                      <Icon name="lock" size={12} /> Locked — enter PIN to view
+                    </span>
+                  ) : content.trim() ? (
+                    <MarkdownRenderer markdown={content} className="bv-rendered-note" />
+                  ) : (
+                    <span className="bv-empty-body">(empty)</span>
+                  )}
                 </div>
               </div>
             );

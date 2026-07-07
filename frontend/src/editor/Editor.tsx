@@ -30,6 +30,7 @@ import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import { detectAccidentalWholeNoteCodeFence } from '../lib/wholeNoteFence';
+import { usePinLockStore } from '../lib/pinLock';
 import type { Category, LookupEntry, NoteDto, NoteEmbeddingDetails, NoteNeighbors, NoteScreenMode, NoteSyncActivity } from '../types';
 import { RelatedCarousel } from '../components/RelatedCarousel';
 import { MetaPanel } from './MetaPanel';
@@ -432,6 +433,21 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       })
       .catch((e) => setError(String(e)));
   }, [initialMode, noteId, noteReloadSignal]);
+
+  // PIN-locked notes (privacy-security.md "PIN-Locked Notes"): re-fetch once the session unlocks
+  // while this note's placeholder is showing, so the real content appears without a manual reload.
+  const pinLockUnlocked = usePinLockStore((s) => s.status?.unlocked ?? false);
+  useEffect(() => {
+    if (!note || !note.pin_locked || note.unlocked || !pinLockUnlocked) return;
+    api.getNote(noteId).then((n) => {
+      setNote(n);
+      setTitle(n.title);
+      setSummary(n.summary);
+      setBody(n.body);
+      getCurrentBody.current = () => n.body;
+      setEditModeSearchText(n.body);
+    }).catch(() => {});
+  }, [pinLockUnlocked, note, noteId]);
 
   useEffect(() => {
     api.listNotes().then(setAllNotes).catch(() => {});
@@ -977,6 +993,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const isTable = note.type === 'table';
   const isImageObject = note.type === 'picture' || note.type === 'drawing';
   const isLocked = !!(note.metadata.lifecycle?.lock && note.metadata.lifecycle.lock !== 'none');
+  const isPinLockedAndHidden = !!note.pin_locked && !note.unlocked;
   const colCount = rows[0]?.length ?? 0;
 
   const editorConfig: InitialConfigType = {
@@ -1112,7 +1129,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             </span>
           )}
         </div>
-        {(mode !== 'read' || summary) && (
+        {!isPinLockedAndHidden && (mode !== 'read' || summary) && (
           <textarea
             ref={summaryRef}
             rows={1}
@@ -1183,7 +1200,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         </div>
       )}
 
-      {isImageObject ? (
+      {isPinLockedAndHidden ? (
+        <PinLockedPlaceholder />
+      ) : isImageObject ? (
         note.type === 'drawing' ? (
           <DrawingEditor
             note={note}
@@ -1607,6 +1626,36 @@ function SplitDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// PIN-locked notes (privacy-security.md "PIN-Locked Notes"): shown instead of the summary/body
+// editors while the note is locked and the session hasn't decrypted it. Unlocking here is the
+// same shared modal used everywhere else (Editor's own load effect re-fetches the note once the
+// session flips to unlocked, so there's nothing else for this component to do after the click).
+function PinLockedPlaceholder() {
+  const hint = usePinLockStore((s) => s.status?.hint);
+  const requestUnlock = usePinLockStore((s) => s.requestUnlock);
+  const [busy, setBusy] = useState(false);
+
+  const unlock = async () => {
+    setBusy(true);
+    try {
+      await requestUnlock();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="editor-body-wrap editor-pinlock-placeholder">
+      <Icon name="lock" size={28} />
+      <p>This note's summary and body are PIN-locked.</p>
+      {hint && <p className="editor-pinlock-hint">Hint: {hint}</p>}
+      <button type="button" onClick={unlock} disabled={busy}>
+        {busy ? 'Unlocking…' : 'Unlock'}
+      </button>
     </div>
   );
 }

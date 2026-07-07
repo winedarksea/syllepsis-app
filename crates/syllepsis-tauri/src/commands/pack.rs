@@ -3,10 +3,11 @@
 
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use syllepsis_core::app::pack::{
-    self as app, ExportSpec, ImportOptions, ImportPreview, ImportReport,
+    self as app, ExportSpec, ImportOptions, ImportPreview, ImportReport, LockedNoteHandling,
 };
 use syllepsis_core::pack::PackManifest;
 
@@ -23,15 +24,39 @@ macro_rules! with_book {
     }};
 }
 
-/// Export the notes selected by `spec` to a `.synpack.json` file at `path`; returns the manifest.
+/// The export command's result: the manifest for the confirmation toast, plus how many PIN-locked
+/// notes were skipped from the selection (`spec.locked_note_handling == Skip`, the default).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPackResult {
+    pub manifest: PackManifest,
+    pub skipped_locked_notes: usize,
+}
+
+/// Export the notes selected by `spec` to a `.synpack.json` file at `path`.
+///
+/// `spec.locked_note_handling == Decrypt` requires an unlocked PIN-lock session; if the session is
+/// locked this returns the literal error string `"pin_required"`, which the frontend maps to the
+/// unlock modal rather than a generic error toast (privacy-security.md "PIN-Locked Notes": packs
+/// never contain ciphertext, so a locked note is either skipped or decrypted, never bundled as-is).
 #[tauri::command]
 pub fn export_pack(
     state: State<AppState>,
     spec: ExportSpec,
     path: String,
-) -> Result<PackManifest, String> {
+) -> Result<ExportPackResult, String> {
+    let key = state.pin_session.lock().unwrap().key().cloned();
+    if spec.locked_note_handling == LockedNoteHandling::Decrypt && key.is_none() {
+        return Err("pin_required".to_string());
+    }
     with_book!(state, book, {
-        app::export_pack(book, &spec, Path::new(&path)).map_err(|e| e.to_string())
+        let (manifest, skipped_locked_notes) =
+            app::export_pack_with_key(book, &spec, Path::new(&path), key.as_ref())
+                .map_err(|e| e.to_string())?;
+        Ok(ExportPackResult {
+            manifest,
+            skipped_locked_notes,
+        })
     })
 }
 
@@ -95,6 +120,7 @@ pub fn import_pack_as_book(
     };
     track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
+    state.pin_session.lock().unwrap().lock();
     state.invalidate_llm_service();
     if let Some(book) = state.book.lock().unwrap().as_ref() {
         let _ = state.local_ai.enqueue_all_stale(book, false);

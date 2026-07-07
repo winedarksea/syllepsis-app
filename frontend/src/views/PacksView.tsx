@@ -6,7 +6,8 @@ import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialo
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { PageHeader } from '../components/PageHeader';
-import type { ImportPreview, ImportReport, BookInfo, NoteResolution } from '../types';
+import { usePinLockStore, isPinRequiredError } from '../lib/pinLock';
+import type { ImportPreview, ImportReport, BookInfo, NoteResolution, LockedNoteHandling } from '../types';
 import './PacksView.css';
 
 const PACK_FILTER = [{ name: 'Syllepsis pack', extensions: ['synpack.json', 'json'] }];
@@ -59,6 +60,7 @@ interface PanelProps {
 
 function ExportPanel({ categories, onNotice, onError }: PanelProps & { categories: string[] }) {
   const { book } = useStore();
+  const requestUnlock = usePinLockStore((s) => s.requestUnlock);
   const [id, setId] = useState('');
   const [name, setName] = useState(() => book?.name ?? '');
   const [version, setVersion] = useState('1.0.0');
@@ -66,6 +68,7 @@ function ExportPanel({ categories, onNotice, onError }: PanelProps & { categorie
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exportAll, setExportAll] = useState(false);
   const [includeCommentary, setIncludeCommentary] = useState(false);
+  const [lockedHandling, setLockedHandling] = useState<LockedNoteHandling>('skip');
   const [busy, setBusy] = useState(false);
 
   const toggle = (cat: string) => setSelected((prev) => {
@@ -74,6 +77,35 @@ function ExportPanel({ categories, onNotice, onError }: PanelProps & { categorie
     return next;
   });
 
+  const runExport = useCallback(async (path: string): Promise<boolean> => {
+    const spec = {
+      id: id.trim(), name: name.trim(), version: version.trim() || '1.0.0', description,
+      categories: [...selected], note_ids: [], export_all: exportAll,
+      include_commentary: includeCommentary, locked_note_handling: lockedHandling,
+    };
+    // At most one retry: if the session needs unlocking, prompt once and try again with the same
+    // spec. No further retries — a second failure surfaces as a normal error.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const result = await api.exportPack(spec, path);
+        const skipped = result.skipped_locked_notes > 0
+          ? ` (skipped ${result.skipped_locked_notes} locked note${result.skipped_locked_notes !== 1 ? 's' : ''})`
+          : '';
+        onNotice(`Exported “${result.manifest.name}” v${result.manifest.version}.${skipped}`);
+        return true;
+      } catch (e) {
+        if (attempt === 0 && isPinRequiredError(e)) {
+          const unlocked = await requestUnlock();
+          if (!unlocked) return false;
+          continue;
+        }
+        onError(String(e));
+        return false;
+      }
+    }
+    return false;
+  }, [id, name, version, description, selected, exportAll, includeCommentary, lockedHandling, requestUnlock, onNotice, onError]);
+
   const exportPack = useCallback(async () => {
     if (!id.trim() || !name.trim()) { onError('Pack needs an id and a name.'); return; }
     if (!exportAll && selected.size === 0) { onError('Select at least one category to export.'); return; }
@@ -81,17 +113,11 @@ function ExportPanel({ categories, onNotice, onError }: PanelProps & { categorie
     if (!path) return;
     setBusy(true);
     try {
-      const manifest = await api.exportPack(
-        { id: id.trim(), name: name.trim(), version: version.trim() || '1.0.0', description, categories: [...selected], note_ids: [], export_all: exportAll, include_commentary: includeCommentary },
-        path,
-      );
-      onNotice(`Exported “${manifest.name}” v${manifest.version}.`);
-    } catch (e) {
-      onError(String(e));
+      await runExport(path);
     } finally {
       setBusy(false);
     }
-  }, [id, name, version, description, selected, exportAll, includeCommentary, onNotice, onError]);
+  }, [id, name, exportAll, selected, runExport, onError]);
 
   return (
     <section className="pk-panel">
@@ -113,6 +139,19 @@ function ExportPanel({ categories, onNotice, onError }: PanelProps & { categorie
         <input type="checkbox" checked={includeCommentary} onChange={(e) => setIncludeCommentary(e.target.checked)} />
         <span>Include commentary (proposals, notes, footnotes)</span>
       </label>
+
+      <div className="pk-subhead">PIN-locked notes in the selection</div>
+      <div className="pk-choice-row">
+        <label className={`pk-choice-option${lockedHandling === 'skip' ? ' active' : ''}`}>
+          <input type="radio" name="locked-note-handling" value="skip" checked={lockedHandling === 'skip'} onChange={() => setLockedHandling('skip')} />
+          Skip locked notes
+        </label>
+        <label className={`pk-choice-option${lockedHandling === 'decrypt' ? ' active' : ''}`}>
+          <input type="radio" name="locked-note-handling" value="decrypt" checked={lockedHandling === 'decrypt'} onChange={() => setLockedHandling('decrypt')} />
+          Unlock and include as plaintext
+        </label>
+      </div>
+      <p className="pk-hint">Packs never contain ciphertext: a locked note is either left out or decrypted into the pack copy (the original note is untouched either way).</p>
 
       <div className="pk-subhead">Categories to include</div>
       {categories.length === 0 && <div className="pk-state">No categories in this book yet.</div>}

@@ -3,6 +3,7 @@
 pub mod commands;
 pub mod local_ai;
 mod model_bootstrap;
+pub mod pin_session;
 pub mod search_api_config;
 pub mod secrets;
 pub mod server;
@@ -10,8 +11,8 @@ pub mod state;
 
 use commands::{
     book::*, categories::*, cloud_llm::*, commentary::*, config::*, lifecycle::*, llm::*,
-    local_ai::*, notes::*, pack::*, plugins::*, publish::*, search::*, serve::*, spatial::*,
-    style_cards::*, sync::*, text_import::*, text_import_llm::*,
+    local_ai::*, notes::*, pack::*, pinlock::*, plugins::*, publish::*, search::*, serve::*,
+    spatial::*, style_cards::*, sync::*, text_import::*, text_import_llm::*,
 };
 use state::AppState;
 use tauri::Manager;
@@ -51,6 +52,12 @@ pub fn run() {
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_process::init());
     }
+    // Biometric/device-credential gate for PIN-lock's "remember on this device" unlock: mobile
+    // only (no desktop backend — see the Cargo.toml comment on this dependency).
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_biometric::init());
+    }
     builder
         .manage(AppState::default())
         .setup(|app| {
@@ -69,6 +76,7 @@ pub fn run() {
                     .configure_preferences_path(app_data_dir.join("local-ai-device-policy.json"));
             }
             commands::sync::start_managed_cloud_auto_sync(app.handle().clone());
+            commands::pinlock::start_pin_session_relock_poll(app.handle().clone());
             model_bootstrap::provision_default_embedding_model(app.handle())?;
             // Start the search API server if it was enabled when the app was last quit.
             if let Ok(app_data_dir) = app.path().app_data_dir() {
@@ -235,6 +243,16 @@ pub fn run() {
             purge_expired,
             purge_all_trash,
             delete_image_object_now,
+            // PIN-locked notes
+            get_pin_lock_status,
+            set_book_pin,
+            unlock_book,
+            unlock_book_with_device_credential,
+            lock_book_now,
+            change_book_pin,
+            remove_book_pin,
+            set_pin_hint,
+            set_note_pin_locked,
             // knowledge packs (Phase 6)
             export_pack,
             read_pack_manifest,

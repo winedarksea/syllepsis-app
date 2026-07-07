@@ -42,6 +42,7 @@ function overview(pendingDeletion: PendingDeletion[]): PolicyOverview {
     publish_excluded_notes: [],
     archived_notes: [],
     locked_notes: [],
+    pin_locked_notes: [],
     pending_deletion: pendingDeletion,
     hidden_categories: [],
     search_excluded_categories: [],

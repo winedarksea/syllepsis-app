@@ -26,7 +26,7 @@ function config(): BookConfig {
     markdown: { dialect_version: '1' },
     summary: { max_chars: 400, max_fraction_of_body: 0.2 },
     cleanup: { default_vanish_days: 30, deletion_delay_days: 30, todo_archive_days: 30 },
-    privacy: { unlock_delay_hours: 24, confirmation_delay_hours: 24 },
+    privacy: { unlock_delay_hours: 24, confirmation_delay_hours: 24, pin_idle_relock_minutes: 15 },
     embedding: {
       chunk_token_limit: 512,
       chunk_overlap_tokens: 64,

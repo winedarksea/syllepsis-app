@@ -34,6 +34,7 @@ pub mod markdown;
 pub mod model;
 pub mod onnx;
 pub mod pack;
+pub mod pinlock;
 pub mod plugin;
 pub mod publish;
 pub mod search;
@@ -54,6 +55,7 @@ pub use model::{
 };
 pub use model::{SpatialRegion, World, WorldKind};
 pub use onnx::{ModelCache, ModelKind, ModelManifest, RuntimeDiagnostics};
+pub use pinlock::BookKey;
 pub use plugin::{InstalledPlugin, PluginKind, PluginManifest, PluginRegistry, PluginSource};
 pub use search::{SearchEngine, SearchHit, SearchResults};
 pub use sort::{render, to_markdown, RenderItem};

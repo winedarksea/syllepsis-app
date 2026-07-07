@@ -6,6 +6,7 @@
 pub mod category;
 pub mod classification;
 pub mod commentary;
+pub mod encryption;
 pub mod metadata;
 pub mod note;
 pub mod object_type;
@@ -21,6 +22,7 @@ pub use commentary::{
     CommentaryKind, CommentaryMetadata, CommentarySource, CommentaryStatus, CommentaryTargetField,
     FactCheckAssessment,
 };
+pub use encryption::{EncryptionMeta, ALGORITHM_XCHACHA20POLY1305, ENCRYPTION_META_VERSION};
 pub use metadata::{
     Authorship, DateMetadata, FlexDate, ForkInfo, Kanban, Lifecycle, LockMode, Metadata,
     NoteStatus, NoteVisibility, PackMembership,

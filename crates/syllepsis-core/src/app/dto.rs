@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
 use crate::id::NoteId;
-use crate::model::{AssetMetadata, CommentaryMetadata, Metadata, Note, ObjectType, PriorEdge};
+use crate::model::{
+    AssetMetadata, CommentaryMetadata, EncryptionMeta, Metadata, Note, ObjectType, PriorEdge,
+};
 
 /// A note as sent to / received from the UI. Unlike [`Note`], this includes the body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -39,17 +41,45 @@ pub struct NoteDto {
     /// overwrite behavior untouched.
     #[serde(default)]
     pub baseline_body: Option<String>,
+    /// True when the note is PIN-locked (`encryption.is_some()` on the stored [`Note`]).
+    #[serde(default)]
+    pub pin_locked: bool,
+    /// True when `summary`/`body` above are real plaintext rather than the locked placeholder.
+    /// Only ever set by [`NoteDto::from_decrypted`] — never by [`NoteDto::from_note`], which is
+    /// the fail-safe default every other core read path uses.
+    #[serde(default)]
+    pub unlocked: bool,
+    /// Internal-only channel between the tauri boundary and [`into_note`](Self::into_note):
+    /// when re-encrypting a locked note's edit via `pinlock::encrypt_for_save`, the resulting
+    /// [`EncryptionMeta`] is stashed here before calling this crate's `update_note`. Never
+    /// serialized in either direction — a DTO arriving from the wire can never carry (or forge)
+    /// encryption metadata this way.
+    #[serde(skip)]
+    pub encryption: Option<EncryptionMeta>,
 }
 
 impl NoteDto {
-    /// Project a stored note into its API shape.
+    /// Project a stored note into its API shape. **Fail-safe at the core**: whenever the note is
+    /// PIN-locked, `summary`/`body` are blanked here regardless of caller — core can never leak
+    /// locked content through any DTO path. The only way a DTO carries real plaintext for a locked
+    /// note is [`NoteDto::from_decrypted`], called explicitly at the tauri boundary once a session
+    /// key is available.
     pub fn from_note(note: &Note) -> NoteDto {
+        let pin_locked = note.is_pin_locked();
         NoteDto {
             id: note.id.to_string(),
             object_type: note.object_type,
             title: note.title.clone(),
-            summary: note.summary.clone(),
-            body: note.body.clone(),
+            summary: if pin_locked {
+                String::new()
+            } else {
+                note.summary.clone()
+            },
+            body: if pin_locked {
+                String::new()
+            } else {
+                note.body.clone()
+            },
             categories: note.categories.clone(),
             prior: note.prior.clone(),
             location: note.location.clone(),
@@ -58,7 +88,21 @@ impl NoteDto {
             sorted: note.is_sorted(),
             metadata: note.metadata.clone(),
             baseline_body: None,
+            pin_locked,
+            unlocked: false,
+            encryption: note.encryption.clone(),
         }
+    }
+
+    /// Like [`Self::from_note`] but with `summary`/`body` already decrypted by the caller (the
+    /// tauri boundary's `present()` helper, once a session key is available). Core itself never
+    /// calls this — it is the one sanctioned bypass of the blanking above.
+    pub fn from_decrypted(note: &Note, summary: String, body: String) -> NoteDto {
+        let mut dto = NoteDto::from_note(note);
+        dto.summary = summary;
+        dto.body = body;
+        dto.unlocked = true;
+        dto
     }
 
     /// Rebuild a stored note from an incoming DTO, stamping the book's dialect version.
@@ -75,6 +119,7 @@ impl NoteDto {
             location: self.location,
             asset: self.asset,
             commentary: self.commentary,
+            encryption: self.encryption,
             metadata: self.metadata,
         })
     }

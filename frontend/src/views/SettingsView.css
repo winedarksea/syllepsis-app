@@ -254,6 +254,27 @@ select.sv-input { min-width: 180px; cursor: pointer; }
 /* ── Buttons ── */
 .sv-savebar { display: flex; gap: var(--sp-2); justify-content: flex-end; }
 
+/* ── Choice rows (radio-style option groups, e.g. PIN-lock change/remove) ── */
+.sv-choice-row { display: flex; gap: var(--sp-2); margin: var(--sp-3) 0; }
+.sv-choice-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  cursor: pointer;
+  flex: 1;
+}
+.sv-choice-option.active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-tag-bg);
+}
+
 .sv-btn {
   font-size: var(--font-size-sm);
   font-weight: 500;

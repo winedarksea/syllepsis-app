@@ -68,6 +68,9 @@ pub struct PolicyOverview {
     pub publish_excluded_notes: Vec<NoteRef>,
     pub archived_notes: Vec<NoteRef>,
     pub locked_notes: Vec<LockedNote>,
+    /// Notes PIN-locked (`Note::is_pin_locked`) — distinct from `locked_notes` above, which is the
+    /// unrelated unlock-delay/fact-check-gate `LockMode` feature.
+    pub pin_locked_notes: Vec<NoteRef>,
     pub pending_deletion: Vec<PendingDeletion>,
     /// Categories whose notes are hidden from default views.
     pub hidden_categories: Vec<String>,
@@ -311,6 +314,7 @@ pub fn policy_overview(book: &Book) -> CoreResult<PolicyOverview> {
         publish_excluded_notes: Vec::new(),
         archived_notes: Vec::new(),
         locked_notes: Vec::new(),
+        pin_locked_notes: Vec::new(),
         pending_deletion: Vec::new(),
         hidden_categories: Vec::new(),
         search_excluded_categories: Vec::new(),
@@ -343,6 +347,9 @@ pub fn policy_overview(book: &Book) -> CoreResult<PolicyOverview> {
                 title: note.title.clone(),
                 mode: life.lock,
             });
+        }
+        if note.is_pin_locked() {
+            overview.pin_locked_notes.push(NoteRef::of(&note));
         }
         if let Some(marked_at) = life.marked_for_deletion_at {
             overview.pending_deletion.push(PendingDeletion {

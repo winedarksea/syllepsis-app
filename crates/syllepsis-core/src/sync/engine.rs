@@ -19,9 +19,10 @@ use serde::Serialize;
 use chrono::Utc;
 
 use crate::config::SyncConfig;
-use crate::crdt::{select_crdt_backend, ActorId, CrdtBackend, NoteCrdt};
+use crate::crdt::{select_crdt_backend, ActorId, CrdtBackend, LwwBackend, NoteCrdt};
 use crate::error::CoreResult;
 use crate::markdown::frontmatter;
+use crate::model::Note;
 use crate::storage::atomic::write_atomic;
 use crate::sync::cloud_index::{is_cloud_index_path, IndexEntry};
 use crate::sync::local_folder::content_revision;
@@ -277,6 +278,25 @@ impl SyncEngine {
         self.sync_embedding_sidecars || !is_embedding_sidecar(path)
     }
 
+    /// The always-available LWW backend, used in place of the book's configured backend for
+    /// PIN-locked notes (see [`Self::doc_backend_for`]). A `const` unit value so it can be handed
+    /// out as a `'static` reference without allocating.
+    const LOCKED_NOTE_BACKEND: LwwBackend = LwwBackend;
+
+    /// The CRDT backend to use for `note`'s sidecar. PIN-locked notes always use the whole-body LWW
+    /// register regardless of the book's configured backend: fine-grained merge (Loro) over
+    /// ciphertext is meaningless (any concurrent byte-level merge just produces undecryptable
+    /// garbage), and LWW is compiled into every build so a locked note's sidecar never depends on
+    /// an optional feature. Concurrent edits to the same locked note resolve whole-body LWW —
+    /// acceptable, same conflict semantics as any other LWW note.
+    fn doc_backend_for(&self, note: &Note) -> &dyn CrdtBackend {
+        if note.is_pin_locked() {
+            &Self::LOCKED_NOTE_BACKEND
+        } else {
+            self.backend.as_ref()
+        }
+    }
+
     /// Step 1: ensure every local note has a sidecar whose CRDT text equals its markdown body.
     /// A note that fails to parse (bad frontmatter) or a sidecar that fails to load (corrupt
     /// `.crdt` file) must never fail the whole sync pass — the file stays exactly as it is on
@@ -298,16 +318,18 @@ impl SyncEngine {
                 None => continue,
             };
             let sidecar_full = self.full(&sidecar_rel);
+            let backend = self.doc_backend_for(&note);
             if sidecar_full.exists() {
-                let (mut doc, corrupt) = match self
-                    .backend
+                let (mut doc, corrupt) = match backend
                     .load_document(&self.actor, &std::fs::read(&sidecar_full)?)
                 {
                     Ok(doc) => (doc, false),
                     Err(_) => {
-                        // Corrupt sidecar: markdown is the source of truth, rebuild from it.
+                        // Corrupt sidecar: markdown is the source of truth, rebuild from it. Also
+                        // the migration path for a pre-existing Loro sidecar on a note that has
+                        // since been locked: it fails to load under LWW and rebuilds here.
                         report.rebuilt_sidecars.push(rel.clone());
-                        (self.backend.new_document(&self.actor, &note.body), true)
+                        (backend.new_document(&self.actor, &note.body), true)
                     }
                 };
                 if corrupt || doc.text() != note.body {
@@ -315,7 +337,7 @@ impl SyncEngine {
                     self.write_sidecar(&sidecar_full, doc.as_ref())?;
                 }
             } else {
-                let doc = self.backend.new_document(&self.actor, &note.body);
+                let doc = backend.new_document(&self.actor, &note.body);
                 self.write_sidecar(&sidecar_full, doc.as_ref())?;
             }
         }
@@ -351,20 +373,20 @@ impl SyncEngine {
             }
         };
 
+        let backend = self.doc_backend_for(&note);
         let mut doc = if sidecar_full.exists() {
-            match self
-                .backend
-                .load_document(&self.actor, &std::fs::read(&sidecar_full)?)
-            {
+            match backend.load_document(&self.actor, &std::fs::read(&sidecar_full)?) {
                 Ok(doc) => doc,
                 Err(_) => {
-                    // Corrupt local sidecar: markdown is the source of truth, rebuild from it.
+                    // Corrupt local sidecar: markdown is the source of truth, rebuild from it. Also
+                    // the migration path for a pre-existing Loro sidecar on a note that has since
+                    // been locked: it fails to load under LWW and rebuilds here.
                     report.rebuilt_sidecars.push(path.to_string());
-                    self.backend.new_document(&self.actor, &note.body)
+                    backend.new_document(&self.actor, &note.body)
                 }
             }
         } else {
-            self.backend.new_document(&self.actor, &note.body)
+            backend.new_document(&self.actor, &note.body)
         };
 
         let merged = if remote_all.contains_key(&sidecar_rel) {
@@ -1252,5 +1274,194 @@ mod tests {
             "replicas must still converge"
         );
         assert!(!final_a.is_empty(), "no data was lost outright");
+    }
+
+    // --- PIN-lock sync safety (privacy-security.md "PIN-Locked Notes", plan milestone M3) ---
+
+    fn book_key() -> crate::pinlock::BookKey {
+        crate::pinlock::BookKey::new([42u8; 32], "test0001".to_string())
+    }
+
+    fn lock_note(device: &Device, note: &mut crate::model::Note) {
+        crate::pinlock::encrypt_note(note, &book_key()).unwrap();
+        device.book.save_note(note).unwrap();
+    }
+
+    /// Every regular file under `root`, recursed (there's no `walkdir` dev-dependency; the remote
+    /// test fixture is small enough that a hand-rolled walk is fine).
+    fn all_files(root: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return out;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                out.extend(all_files(&path));
+            } else {
+                out.push(path);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn locked_note_ciphertext_converges_across_devices() {
+        let (_tmp, a, b) = two_devices();
+        let mut note = a.book.new_note(ObjectType::Note, "diary").unwrap();
+        note.summary = "private summary".into();
+        note.body = "the secret plaintext".into();
+        lock_note(&a, &mut note);
+
+        a.sync();
+        b.sync();
+        b.book.store.refresh().unwrap();
+
+        let on_b = b.book.store.read_note(&note.id).unwrap();
+        assert!(on_b.is_pin_locked());
+        let decrypted = crate::pinlock::decrypt_note(&on_b, &book_key()).unwrap();
+        assert_eq!(decrypted.body, "the secret plaintext");
+        assert_eq!(decrypted.summary, "private summary");
+
+        // Edit on B the way the tauri boundary would: decrypt, edit, re-encrypt via
+        // `encrypt_for_save`, save — then propagate back to A.
+        let mut edited = on_b;
+        crate::pinlock::encrypt_for_save(&mut edited, "private summary", "edited on b", &book_key())
+            .unwrap();
+        b.book.save_note(&edited).unwrap();
+        b.sync();
+        a.sync();
+        a.book.store.refresh().unwrap();
+
+        let on_a = a.book.store.read_note(&note.id).unwrap();
+        let decrypted_a = crate::pinlock::decrypt_note(&on_a, &book_key()).unwrap();
+        assert_eq!(decrypted_a.body, "edited on b");
+    }
+
+    #[test]
+    fn remote_never_carries_a_plaintext_sentinel_for_a_locked_note() {
+        const SENTINEL: &[u8] = b"SENTINEL-PLAINTEXT-MUST-NOT-SYNC";
+        let (_tmp, a, _b) = two_devices();
+        let mut note = a.book.new_note(ObjectType::Note, "diary").unwrap();
+        note.summary = "s SENTINEL-PLAINTEXT-MUST-NOT-SYNC s".into();
+        note.body = "SENTINEL-PLAINTEXT-MUST-NOT-SYNC".into();
+        lock_note(&a, &mut note);
+
+        a.sync();
+
+        for path in all_files(&a.remote) {
+            let bytes = std::fs::read(&path).unwrap();
+            assert!(
+                !bytes
+                    .windows(SENTINEL.len())
+                    .any(|window| window == SENTINEL),
+                "plaintext sentinel leaked into remote file {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn resyncing_an_unchanged_locked_note_is_a_noop() {
+        let (_tmp, a, b) = two_devices();
+        let mut note = a.book.new_note(ObjectType::Note, "diary").unwrap();
+        note.body = "locked content".into();
+        lock_note(&a, &mut note);
+
+        a.sync();
+        b.sync();
+        assert!(a.sync().is_noop(), "device A re-sync should be a no-op");
+        assert!(b.sync().is_noop(), "device B re-sync should be a no-op");
+    }
+
+    #[test]
+    fn locked_note_and_plain_note_converge_together() {
+        // A mixed sync pass (one locked note, one plain note) must not disturb either.
+        let (_tmp, a, b) = two_devices();
+        let mut locked = a.book.new_note(ObjectType::Note, "locked").unwrap();
+        locked.body = "secret".into();
+        lock_note(&a, &mut locked);
+        let plain = add_note(&a, "plain", "not a secret");
+
+        a.sync();
+        b.sync();
+        b.book.store.refresh().unwrap();
+
+        assert_eq!(body_of(&b.book, &plain), "not a secret");
+        let on_b = b.book.store.read_note(&locked.id).unwrap();
+        assert!(on_b.is_pin_locked());
+        assert_eq!(
+            crate::pinlock::decrypt_note(&on_b, &book_key())
+                .unwrap()
+                .body,
+            "secret"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "loro")]
+    fn locked_note_sidecar_uses_lww_even_when_book_is_configured_for_loro() {
+        let (_tmp, a, b) = two_devices_with(SyncConfig {
+            crdt_backend: crate::crdt::LORO_BACKEND.to_string(),
+            ..SyncConfig::default()
+        });
+        let mut locked = a.book.new_note(ObjectType::Note, "locked").unwrap();
+        locked.body = "locked body".into();
+        lock_note(&a, &mut locked);
+        let mut plain = a.book.new_note(ObjectType::Note, "plain").unwrap();
+        plain.body = "plain body under loro".into();
+        a.book.save_note(&plain).unwrap();
+
+        a.sync();
+        b.sync();
+
+        let actor = actor_id_for(&a.book.root).unwrap();
+        let locked_sidecar_bytes =
+            std::fs::read(crate::storage::layout::crdt_sidecar_path(&a.book.root, &locked.id))
+                .unwrap();
+        assert!(
+            LwwBackend.load_document(&actor, &locked_sidecar_bytes).is_ok(),
+            "a locked note's sidecar must be an LWW document regardless of the book's configured backend"
+        );
+        let plain_sidecar_bytes =
+            std::fs::read(crate::storage::layout::crdt_sidecar_path(&a.book.root, &plain.id))
+                .unwrap();
+        assert!(
+            LwwBackend.load_document(&actor, &plain_sidecar_bytes).is_err(),
+            "an unlocked note under a Loro-configured book must actually use Loro, not LWW"
+        );
+
+        b.book.store.refresh().unwrap();
+        let on_b = b.book.store.read_note(&locked.id).unwrap();
+        assert_eq!(
+            crate::pinlock::decrypt_note(&on_b, &book_key())
+                .unwrap()
+                .body,
+            "locked body"
+        );
+    }
+
+    #[test]
+    fn pre_existing_loro_style_sidecar_is_rebuilt_from_ciphertext_body_once_locked() {
+        // Simulate a note that was synced under Loro before it was ever locked (a garbage/foreign
+        // sidecar from the LWW backend's point of view), then gets locked. The next reconcile pass
+        // must detect the load failure and rebuild the sidecar from the (now-ciphertext) markdown
+        // body — the same corrupt-sidecar migration path engine.rs already relies on.
+        let (_tmp, a, _b) = two_devices();
+        let mut note = a.book.new_note(ObjectType::Note, "migrating").unwrap();
+        note.body = "will be locked".into();
+        a.book.save_note(&note).unwrap();
+
+        let sidecar_path = crate::storage::layout::crdt_sidecar_path(&a.book.root, &note.id);
+        std::fs::write(&sidecar_path, b"not an lww snapshot, pretend loro binary").unwrap();
+
+        lock_note(&a, &mut note);
+        let report = a.sync();
+
+        assert!(report.rebuilt_sidecars.iter().any(|p| p.ends_with(".md")));
+        let actor = actor_id_for(&a.book.root).unwrap();
+        let rebuilt = LwwBackend
+            .load_document(&actor, &std::fs::read(&sidecar_path).unwrap())
+            .unwrap();
+        assert_eq!(rebuilt.text(), note.body, "rebuilt sidecar holds the ciphertext body");
     }
 }

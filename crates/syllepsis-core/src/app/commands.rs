@@ -538,6 +538,31 @@ pub fn update_note(book: &Book, dto: NoteDto) -> CoreResult<NoteDto> {
     note.id = note.id.with_regenerated_slug(&note.title);
     let stored = book.store.read_note(&note.id).ok();
     if let Some(stored) = &stored {
+        if stored.is_pin_locked() {
+            // A locked note's summary/body can only change via the pin-lock re-encrypt path
+            // (`pinlock::encrypt_for_save`), which stamps `dto.encryption` with a key_id matching
+            // the note's before calling into this function. Any other caller — a plain
+            // title/category edit while the session is locked, a stale/blanked DTO, a plugin write
+            // — gets the stored ciphertext preserved untouched rather than clobbered with a
+            // placeholder. This is the core-level safety net behind the tauri boundary's own
+            // "session locked" rejection (privacy-security.md "PIN-Locked Notes").
+            let key_matches = note.encryption.as_ref().is_some_and(|meta| {
+                stored
+                    .encryption
+                    .as_ref()
+                    .is_some_and(|stored_meta| stored_meta.key_id == meta.key_id)
+            });
+            if !key_matches {
+                note.summary = stored.summary.clone();
+                note.body = stored.body.clone();
+                note.encryption = stored.encryption.clone();
+            }
+        } else if note.encryption.is_some() {
+            return Err(CoreError::PinLock(
+                "cannot lock a note via update_note; use app::pinlock::set_note_pin_locked"
+                    .to_string(),
+            ));
+        }
         if stored.metadata.lifecycle.lock != LockMode::None && stored.body != note.body {
             crate::app::commentary::create_commentary(
                 book,

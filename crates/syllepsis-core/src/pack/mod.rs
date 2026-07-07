@@ -12,7 +12,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{Category, CommentaryMetadata, Note, ObjectType, PriorEdge};
+use crate::model::{Category, CommentaryMetadata, EncryptionMeta, Note, ObjectType, PriorEdge};
 
 /// Envelope format tag written into every pack file, so a reader can reject an incompatible
 /// future format instead of silently mis-parsing it.
@@ -61,6 +61,12 @@ pub struct PackNote {
     /// pack. `None` for unsorted or out-of-pack priors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prior: Option<PriorEdge>,
+    /// Never set by [`PackNote::from_note`] (packs are plaintext-only — see
+    /// `app::pack::build_pack`'s locked-note skip/decrypt handling) — this field exists purely so
+    /// the import side can detect and reject a pack that somehow carries ciphertext (an old buggy
+    /// exporter, a hand-edited file) instead of silently importing an undecryptable note.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption: Option<EncryptionMeta>,
 }
 
 /// A commentary note bundled in a pack (only included when `ExportSpec::include_commentary`).
@@ -87,6 +93,7 @@ impl PackNote {
             body: note.body.clone(),
             categories: note.categories.clone(),
             prior: None,
+            encryption: None,
         }
     }
 }
@@ -174,6 +181,7 @@ mod tests {
                 body: "Greens and browns.".into(),
                 categories: vec!["garden".into()],
                 prior: None,
+                encryption: None,
             }],
             vec![Category::new("garden")],
         )

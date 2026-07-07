@@ -1595,6 +1595,23 @@ pre.plugin-block {
   font: inherit;
 }
 
+/* ── PIN-locked note placeholder ───────────────────────────────────────────── */
+.editor-pinlock-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-8) var(--sp-4);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.editor-pinlock-hint {
+  font-style: italic;
+  font-size: var(--font-size-sm);
+}
+
 /* ── DrawingEditor (Excalidraw canvas) ─────────────────────────────────────── */
 .drawing-editor-wrap {
   flex: 1;

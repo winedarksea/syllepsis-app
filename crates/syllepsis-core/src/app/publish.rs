@@ -805,7 +805,8 @@ pub fn refresh_private_gitignore(book: &Book) -> CoreResult<GitignoreReport> {
     for note in book.store.read_all_notes()? {
         if note.object_type != ObjectType::Commentary
             && (note.metadata.lifecycle.exclude_from_publish
-                || in_publish_excluded_category(&note, &publish_excluded_categories))
+                || in_publish_excluded_category(&note, &publish_excluded_categories)
+                || note.is_pin_locked())
         {
             // Phase-1 flat layout: a note's file is `{id}.md` at the book root.
             excluded.push(layout::note_filename(&note.id));
@@ -817,6 +818,10 @@ pub fn refresh_private_gitignore(book: &Book) -> CoreResult<GitignoreReport> {
             layout::CATEGORIES_DIR,
             layout::category_filename(name)
         ));
+    }
+    // The PIN-lock keycheck (salt + hint) must never reach a public git publish, unconditionally.
+    if layout::pinlock_path(&book.root).is_file() {
+        excluded.push(layout::PINLOCK_FILE.to_string());
     }
     excluded.sort();
     excluded.dedup();
@@ -850,6 +855,9 @@ fn is_publishable(note: &Note, publish_excluded_categories: &BTreeSet<String>) -
         && note.metadata.lifecycle.marked_for_deletion_at.is_none()
         && !in_publish_excluded_category(note, publish_excluded_categories)
         && note.object_type != ObjectType::Commentary
+        // Packs never contain ciphertext; the static-site publish is the same rule (privacy-
+        // security.md "PIN-Locked Notes"): a PIN-locked note is excluded like `exclude_from_publish`.
+        && !note.is_pin_locked()
 }
 
 fn in_publish_excluded_category(

@@ -48,6 +48,12 @@ pub struct RenderedNote {
     pub indented: bool,
     /// True when the list item is numbered rather than bulleted.
     pub numbered: bool,
+    /// True when the note is PIN-locked (privacy-security.md "PIN-Locked Notes"); `summary`/`body`
+    /// above are blanked rather than ciphertext whenever this is true — the continuous book view
+    /// and markdown export have no session key to decrypt with, so (unlike the DTO read paths at
+    /// the tauri boundary) there is no `present()`-equivalent bypass here yet.
+    #[serde(default)]
+    pub pin_locked: bool,
 }
 
 /// Convenience: build the tree and flatten it in one call.
@@ -139,14 +145,16 @@ fn flatten_notes(nodes: &[NoteNode], parent_list_depth: u8, items: &mut Vec<Rend
     for node in nodes {
         let is_list = node.join.is_list_item();
         let list_depth = if is_list { parent_list_depth + 1 } else { 0 };
+        let pin_locked = node.note.is_pin_locked();
         items.push(RenderItem::Note(RenderedNote {
             id: node.note.id.clone(),
-            summary: node.note.summary.clone(),
-            body: node.note.body.clone(),
+            summary: if pin_locked { String::new() } else { node.note.summary.clone() },
+            body: if pin_locked { String::new() } else { node.note.body.clone() },
             join: node.join,
             list_depth,
             indented: node.join == PriorKind::IndentedNewParagraph,
             numbered: node.join == PriorKind::NumberedList,
+            pin_locked,
         }));
         // Children inherit this node's list depth only if this node is a list item.
         let child_parent_depth = if is_list { list_depth } else { 0 };
@@ -292,6 +300,30 @@ mod tests {
         let md = to_markdown(&items);
         assert!(md.starts_with("## intro"));
         assert!(md.contains("First sentence."));
+    }
+
+    #[test]
+    fn pin_locked_note_body_is_blanked_in_render_and_markdown() {
+        let cat = Category::new("diary");
+        let mut a = note("a", "SECRET-PLAINTEXT-SENTINEL");
+        a.summary = "secret summary".into();
+        a.prior = Some(PriorEdge::starts_category("diary"));
+        crate::pinlock::encrypt_note(
+            &mut a,
+            &crate::pinlock::BookKey::new([5u8; 32], "abcd1234".to_string()),
+        )
+        .unwrap();
+
+        let items = render(vec![a], vec![cat]);
+        let RenderItem::Note(rendered) = &items[1] else {
+            panic!("expected a note render item");
+        };
+        assert!(rendered.pin_locked);
+        assert!(rendered.summary.is_empty());
+        assert!(rendered.body.is_empty());
+
+        let md = to_markdown(&items);
+        assert!(!md.contains("SECRET-PLAINTEXT-SENTINEL"));
     }
 
     #[test]

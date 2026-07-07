@@ -57,9 +57,7 @@ fn searchable_notes(book: &Book, visibility: NoteVisibility) -> CoreResult<Vec<N
 /// are unaffected (a user searching those modes wants everything in them).
 fn note_matches_searchable(note: &Note, visibility: NoteVisibility) -> bool {
     match visibility {
-        NoteVisibility::Active => {
-            note_matches_visibility(note, visibility) && note.metadata.is_searchable()
-        }
+        NoteVisibility::Active => note_matches_visibility(note, visibility) && note.is_searchable(),
         other => note_matches_visibility(note, other),
     }
 }

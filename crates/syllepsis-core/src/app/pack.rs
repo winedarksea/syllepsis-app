@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::app::pack_manifest::{BookPackManifest, NoteBaseline};
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 use crate::model::metadata::Metadata;
 use crate::model::prior::PriorRef;
@@ -21,7 +21,21 @@ use crate::model::{
     Category, CommentaryKind, CommentaryMetadata, CommentarySource, Note, ObjectType,
 };
 use crate::pack::{ExportKind, Pack, PackCommentary, PackManifest, PackNote};
+use crate::pinlock::BookKey;
 use crate::storage::{layout, write_atomic, Book, NoteStore};
+
+/// How a PIN-locked note is handled when it falls within an export selection (privacy-security.md
+/// "PIN-Locked Notes": packs never contain ciphertext).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LockedNoteHandling {
+    /// Leave the note out of the pack entirely (default — no session key required).
+    #[default]
+    Skip,
+    /// Decrypt the note and bundle it as plaintext. Requires a verified session key; the
+    /// *original* note on disk is untouched, only the pack's copy is plaintext.
+    Decrypt,
+}
 
 /// What to put in an exported pack: the manifest fields plus the note selection. A note is
 /// included if it carries one of `categories` **or** is named directly in `note_ids` (so an author
@@ -44,13 +58,33 @@ pub struct ExportSpec {
     /// Default false — commentary is private and off by default.
     #[serde(default)]
     pub include_commentary: bool,
+    /// How to handle PIN-locked notes that fall within the selection.
+    #[serde(default)]
+    pub locked_note_handling: LockedNoteHandling,
 }
 
 /// Assemble (but do not write) a pack from the book per `spec`. Pending-deletion notes are never
 /// exported; the categories the selected notes use are bundled so the import side can recreate them.
 /// When `spec.export_all` is true all non-deleted notes are included and `export_kind` is set to
 /// `Book`; otherwise the category/id filter applies and `export_kind` is `Pack`.
+///
+/// PIN-locked notes never carry ciphertext into a pack. Use [`build_pack_with_key`] to control
+/// `spec.locked_note_handling` and learn how many locked notes were skipped; this convenience
+/// wrapper always skips them (no session key available).
 pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
+    Ok(build_pack_with_key(book, spec, None)?.0)
+}
+
+/// Like [`build_pack`], but returns the number of PIN-locked notes that were skipped (for the
+/// export UI's "skipped N locked notes" message) and accepts a session `key` so
+/// `spec.locked_note_handling == Decrypt` can actually decrypt them into the pack's plaintext
+/// copy. Errors if `Decrypt` is requested for a note but no key (or a key for the wrong book PIN)
+/// is supplied — the caller should have already prompted for an unlock.
+pub fn build_pack_with_key(
+    book: &Book,
+    spec: &ExportSpec,
+    key: Option<&BookKey>,
+) -> CoreResult<(Pack, usize)> {
     let all_notes: Vec<Note> = book
         .store
         .read_all_notes()?
@@ -58,7 +92,7 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
         .filter(|note| note.object_type != ObjectType::Commentary)
         .collect();
 
-    let selected: Vec<Note> = if spec.export_all {
+    let matched: Vec<Note> = if spec.export_all {
         all_notes
             .into_iter()
             .filter(|n| n.metadata.lifecycle.marked_for_deletion_at.is_none())
@@ -78,6 +112,29 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
             })
             .collect()
     };
+
+    // Packs never contain ciphertext: a locked note is either dropped or decrypted here, before
+    // anything downstream (category usage, priors, the pack notes themselves) sees it.
+    let mut skipped_locked = 0usize;
+    let mut selected: Vec<Note> = Vec::with_capacity(matched.len());
+    for note in matched {
+        if !note.is_pin_locked() {
+            selected.push(note);
+            continue;
+        }
+        match spec.locked_note_handling {
+            LockedNoteHandling::Skip => skipped_locked += 1,
+            LockedNoteHandling::Decrypt => {
+                let key = key.ok_or_else(|| {
+                    CoreError::PinLock(
+                        "a session key is required to decrypt locked notes for export"
+                            .to_string(),
+                    )
+                })?;
+                selected.push(crate::pinlock::decrypt_note(&note, key)?);
+            }
+        }
+    }
 
     let selected_ids: BTreeSet<String> = selected.iter().map(|n| n.id.to_string()).collect();
 
@@ -157,7 +214,7 @@ pub fn build_pack(book: &Book, spec: &ExportSpec) -> CoreResult<Pack> {
         }
     }
 
-    Ok(pack)
+    Ok((pack, skipped_locked))
 }
 
 /// Build a pack and write it to `path`, returning its manifest for a confirmation toast.
@@ -165,6 +222,19 @@ pub fn export_pack(book: &Book, spec: &ExportSpec, path: &Path) -> CoreResult<Pa
     let pack = build_pack(book, spec)?;
     pack.write_to(path)?;
     Ok(pack.manifest)
+}
+
+/// Like [`export_pack`] but threads a session key through to [`build_pack_with_key`] (needed when
+/// `spec.locked_note_handling == Decrypt`) and reports how many locked notes were skipped.
+pub fn export_pack_with_key(
+    book: &Book,
+    spec: &ExportSpec,
+    path: &Path,
+    key: Option<&BookKey>,
+) -> CoreResult<(PackManifest, usize)> {
+    let (pack, skipped_locked) = build_pack_with_key(book, spec, key)?;
+    pack.write_to(path)?;
+    Ok((pack.manifest, skipped_locked))
 }
 
 /// Read a pack file from disk (the import UI's first step).
@@ -208,9 +278,23 @@ pub struct ImportPreview {
     pub category_suggestions: Vec<CategoryMapping>,
 }
 
+/// Packs are plaintext-only (privacy-security.md "PIN-Locked Notes"): reject a pack that somehow
+/// carries a note stamped with encryption metadata rather than silently importing an
+/// undecryptable note. `PackNote::from_note` never sets this field, so its presence means the
+/// pack came from an old buggy exporter or was hand-edited.
+fn reject_ciphertext_looking_notes(pack: &Pack) -> CoreResult<()> {
+    if pack.notes.iter().any(|n| n.encryption.is_some()) {
+        return Err(CoreError::PinLock(
+            "pack contains a note with encryption metadata; packs must be plaintext".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Dry-run a pack against the current book: classify each note (new / update / locally-modified)
 /// and suggest a local category for each incoming category.
 pub fn preview_import(book: &Book, pack: &Pack) -> CoreResult<ImportPreview> {
+    reject_ciphertext_looking_notes(pack)?;
     let notes = pack
         .notes
         .iter()
@@ -294,6 +378,7 @@ pub struct ImportReport {
 /// Import the selected notes from `pack`, applying the category mapping and honoring the
 /// per-note resolution for locally-modified notes. Auto-overwrites unmodified notes.
 pub fn import_pack(book: &Book, pack: &Pack, options: &ImportOptions) -> CoreResult<ImportReport> {
+    reject_ciphertext_looking_notes(pack)?;
     let selected: BTreeSet<&str> = options
         .selected_note_ids
         .iter()
@@ -533,6 +618,7 @@ fn new_pack_note(book: &Book, id: NoteId, pack_note: &PackNote) -> Note {
         location: None,
         asset: None,
         commentary: None,
+        encryption: None,
         metadata: Metadata::now(),
     }
 }
@@ -735,6 +821,7 @@ mod tests {
             note_ids: vec![],
             export_all: false,
             include_commentary: false,
+            locked_note_handling: LockedNoteHandling::Skip,
         }
     }
 
@@ -1467,5 +1554,66 @@ mod tests {
 
         let imported = get_note(&target, &id).unwrap();
         assert_eq!(imported.categories, vec!["plants".to_string()]);
+    }
+
+    fn book_key() -> crate::pinlock::BookKey {
+        crate::pinlock::BookKey::new([11u8; 32], "test0001".to_string())
+    }
+
+    fn locked_note(book: &Book, title: &str, cat: &str, body: &str) {
+        let mut dto = create_note(book, ObjectType::Note, title, None).unwrap();
+        dto.categories = vec![cat.to_string()];
+        dto.body = body.to_string();
+        let saved = update_note(book, dto).unwrap();
+        let mut note = book.store.read_note(&NoteId::parse(&saved.id).unwrap()).unwrap();
+        crate::pinlock::encrypt_note(&mut note, &book_key()).unwrap();
+        book.save_note(&note).unwrap();
+    }
+
+    #[test]
+    fn locked_note_is_skipped_by_default() {
+        let (_d, book) = book();
+        add(&book, "Public", "not a secret", &["garden"]);
+        locked_note(&book, "Secret", "garden", "hush");
+
+        let (pack, skipped) = build_pack_with_key(&book, &spec(), None).unwrap();
+        assert_eq!(skipped, 1);
+        assert_eq!(pack.notes.len(), 1);
+        assert_eq!(pack.notes[0].title, "Public");
+        assert!(pack.notes.iter().all(|n| n.encryption.is_none()));
+    }
+
+    #[test]
+    fn locked_note_decrypt_requires_a_key() {
+        let (_d, book) = book();
+        locked_note(&book, "Secret", "garden", "hush");
+
+        let decrypt_spec = ExportSpec {
+            locked_note_handling: LockedNoteHandling::Decrypt,
+            ..spec()
+        };
+        assert!(build_pack_with_key(&book, &decrypt_spec, None).is_err());
+
+        let (pack, skipped) = build_pack_with_key(&book, &decrypt_spec, Some(&book_key())).unwrap();
+        assert_eq!(skipped, 0);
+        assert_eq!(pack.notes.len(), 1);
+        assert_eq!(pack.notes[0].body, "hush");
+        assert!(pack.notes[0].encryption.is_none());
+    }
+
+    #[test]
+    fn import_rejects_a_pack_carrying_ciphertext_metadata() {
+        let (_d, source) = book();
+        let id = add(&source, "Compost", "greens", &["garden"]);
+        let mut pack = build_pack(&source, &spec()).unwrap();
+        pack.notes[0].encryption = Some(crate::model::EncryptionMeta::new(
+            "deadbeef",
+            "nonce-summary",
+            "nonce-body",
+        ));
+
+        let (_td, target) = book();
+        assert!(preview_import(&target, &pack).is_err());
+        assert!(import_pack(&target, &pack, &selected_options(&id)).is_err());
     }
 }

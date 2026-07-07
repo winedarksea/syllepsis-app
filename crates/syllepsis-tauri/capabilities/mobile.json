@@ -1,0 +1,10 @@
+{
+  "identifier": "mobile",
+  "description": "Mobile-only capabilities: biometric/device-credential gate for PIN-lock's remember-on-this-device unlock.",
+  "platforms": ["android", "iOS"],
+  "windows": ["main"],
+  "permissions": [
+    "biometric:allow-authenticate",
+    "biometric:allow-status"
+  ]
+}

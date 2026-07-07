@@ -273,6 +273,10 @@
   margin-bottom: var(--sp-2);
 }
 
+.uq-card-summary--locked {
+  color: var(--color-text-tertiary);
+}
+
 .uq-card-body {
   font-size: var(--font-size-sm);
   color: var(--color-text);

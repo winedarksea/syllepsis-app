@@ -293,14 +293,25 @@ export function UnsortedQueue() {
                 {includePrivate && note.metadata.lifecycle?.hidden && (
                   <span className="uq-card-type uq-card-type--private">Private</span>
                 )}
+                {note.pin_locked && (
+                  <span className="uq-card-type uq-card-type--private" title="PIN-locked">
+                    <Icon name="lock" size={11} /> Locked
+                  </span>
+                )}
                 <span className="uq-card-type">{CLASSIFICATION_LABELS[note.metadata.classification.kind]}</span>
                 {note.type !== 'note' && <span className="uq-card-type">{note.type}</span>}
               </div>
-              {note.summary && (
-                <p className="uq-card-summary">{note.summary}</p>
-              )}
-              {note.body && (
-                <p className="uq-card-body">{note.body.slice(0, 200)}{note.body.length > 200 ? '…' : ''}</p>
+              {note.pin_locked ? (
+                <p className="uq-card-summary uq-card-summary--locked">Locked — enter PIN to view</p>
+              ) : (
+                <>
+                  {note.summary && (
+                    <p className="uq-card-summary">{note.summary}</p>
+                  )}
+                  {note.body && (
+                    <p className="uq-card-body">{note.body.slice(0, 200)}{note.body.length > 200 ? '…' : ''}</p>
+                  )}
+                </>
               )}
               {note.categories.length > 0 && (
                 <div className="uq-card-tags">

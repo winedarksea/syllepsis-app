@@ -103,11 +103,14 @@ describe('PacksView', () => {
     vi.clearAllMocks();
     apiMocks.importPack.mockResolvedValue(importReport());
     apiMocks.exportPack.mockResolvedValue({
-      id: 'garden-pack',
-      name: 'Garden Pack',
-      version: '1.0.0',
-      description: '',
-      export_kind: 'pack',
+      manifest: {
+        id: 'garden-pack',
+        name: 'Garden Pack',
+        version: '1.0.0',
+        description: '',
+        export_kind: 'pack',
+      },
+      skipped_locked_notes: 0,
     });
     apiMocks.previewPack.mockResolvedValue(
       preview([
@@ -216,6 +219,7 @@ describe('PacksView', () => {
         note_ids: [],
         export_all: false,
         include_commentary: true,
+        locked_note_handling: 'skip',
       },
       '/packs/export.synpack.json',
     );

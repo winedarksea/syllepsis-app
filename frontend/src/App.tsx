@@ -24,6 +24,8 @@ import { SettingsView } from './views/SettingsView';
 import { Editor } from './editor/Editor';
 import { Icon } from './components/Icon';
 import { LlmJobTray } from './components/LlmJobTray';
+import { UnlockPinModal } from './components/UnlockPinModal';
+import { usePinLockStore, startPinLockListener } from './lib/pinLock';
 import { resolveThemeVars, resolveThemeStyle } from './theme/themes';
 import type {
   BookInfo, TrackedBookInfo, ClassificationKind, ObjectType,
@@ -655,6 +657,14 @@ function Workspace() {
     desktopSidebarHidden ? 'desktop-sidebar-collapsed' : '',
   ].filter(Boolean).join(' ');
 
+  // PIN-lock session status: fetch once on open, then stay current via the shared listener
+  // (unlocks/locks/idle-relock from any command land here).
+  const refreshPinLock = usePinLockStore((s) => s.refresh);
+  useEffect(() => {
+    startPinLockListener();
+    refreshPinLock();
+  }, [refreshPinLock]);
+
   // Refresh sidebar data on view change (i.e. when returning from the editor). Entering the
   // editor itself can't have changed anything yet, so skip the redundant fetch on that
   // transition — it would otherwise refire on both the way in and the way out of every edit.
@@ -720,6 +730,7 @@ function Workspace() {
 
   return (
     <div className={workspaceClassName}>
+      <UnlockPinModal />
       <Sidebar
         onNewNote={handleNewNote}
         onImportImage={handleImportImage}

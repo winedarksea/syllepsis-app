@@ -144,11 +144,12 @@ impl Book {
         std::fs::write(
             root.join(".gitignore"),
             format!(
-                "{}/\n{}/\n{}/\n{}/\n.DS_Store\n",
+                "{}/\n{}/\n{}/\n{}/\n{}\n.DS_Store\n",
                 layout::DERIVED_DIR,
                 layout::EMBEDDINGS_DIR,
                 layout::SYNC_DIR,
-                layout::CRDT_DIR
+                layout::CRDT_DIR,
+                layout::PINLOCK_FILE
             ),
         )?;
 

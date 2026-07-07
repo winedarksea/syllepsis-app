@@ -3,17 +3,11 @@ Test the merge, split, and fork note tools
 
 Device storage vs app storage for the app (like Obsidian, able to choose with more permissions for the book)
 
-Need to make a GitHub Actions flow that publishes to syllepsis.org (our domain) a landing page as well as the built installer binaries available for download (likely all hosted on Cloudflare Pages). May also need to build the wasm bundles for the built in plugins.
-We intend long term to have build targets for desktop (Windows, Linux, and Mac), as well as Android (both apk and aab, one for uploading to Google Play, the other for users to do manual side loads if desired), and Apple iOS. We do not yet have an apple developer account setup for this, so iOS app does not need to be fully built yet.
-The action should run on release, and likely would find the action https://github.com/tauri-apps/tauri-action useful. We have one secret set right already, GDRIVE_CLIENT_SECRET which is the secret for the app id for google drive sync, and can add other secrets as needed
-
 When the user is going across the world map, it shows the coordinates (useful). What might be nice is when a user clicks (perhaps click, drops a temporary pin, then has a 'copy' button), it copies those coordinates (perhaps world / x /y) such that they can paste them exactly into a note's location metadata.
 
 The current "dots" for notes placed on worlds can be difficult to see when the world map/image is colorful.
 
 Add basic OTel logging / telemetry option
-
-Add Obsidian frontmatter metadata mapping in the text importer. Likely includes created/updated which are ISO 8601 strings, tags, possibly alias/status
 
 Consider adding "aliases" to the metadata for the notes.
 stylistic_elements are not used
@@ -58,6 +52,7 @@ Test knowledge pack import/export, and import of a new version of an existing kn
 
 Consider aligning the types with ts-rs or tauri-specta. tauri-specta requires annotating all ~149 commands and only helps the Tauri boundary (your REST/MCP servers in rest.rs and mcp.rs wouldn't benefit). ts-rs is a smaller change and helps all three boundaries, but leaves the command-wrapper layer hand-typed.
 
+Make the book "cover" (like the category icon) visible in settings. Can be either an emoji character or an SVG. Either way it becomes the favicon/icon of the published site, if published.
 
 # GITHUB ACTIONS
 These are the plan's explicit manual/secret steps:

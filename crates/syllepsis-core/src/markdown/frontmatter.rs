@@ -129,4 +129,23 @@ mod tests {
         let parsed = parse_note(&serialize_note(&note).unwrap()).unwrap();
         assert_eq!(parsed.asset, note.asset);
     }
+
+    #[test]
+    fn pin_lock_encryption_meta_round_trips_in_frontmatter() {
+        let mut note = Note::new(ObjectType::Note, "Diary", "syllepsis_001");
+        crate::pinlock::encrypt_note(
+            &mut note,
+            &crate::pinlock::BookKey::new([3u8; 32], "abcd1234".to_string()),
+        )
+        .unwrap();
+        let serialized = serialize_note(&note).unwrap();
+        assert!(serialized.contains("encryption:"));
+        assert!(serialized.contains("xchacha20poly1305"));
+
+        let parsed = parse_note(&serialized).unwrap();
+        assert_eq!(parsed.encryption, note.encryption);
+        assert_eq!(parsed.summary, note.summary);
+        assert_eq!(parsed.body, note.body);
+        assert!(parsed.is_pin_locked());
+    }
 }

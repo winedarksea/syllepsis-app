@@ -8,6 +8,7 @@
 
 use crate::config::SummaryConfig;
 use crate::id::NoteId;
+use crate::model::encryption::EncryptionMeta;
 use crate::model::metadata::Metadata;
 use crate::model::object_type::ObjectType;
 use crate::model::prior::PriorEdge;
@@ -57,6 +58,10 @@ pub struct Note {
     /// Present only for commentary child objects stored under `_commentary/`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commentary: Option<CommentaryMetadata>,
+    /// Present iff `summary`/`body` on disk are ciphertext rather than plaintext (PIN-lock,
+    /// privacy-security.md). Title/categories/metadata are never encrypted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption: Option<EncryptionMeta>,
     pub metadata: Metadata,
 }
 
@@ -90,6 +95,7 @@ impl Note {
             location: None,
             asset: None,
             commentary: None,
+            encryption: None,
             metadata: Metadata::now(),
         }
     }
@@ -97,6 +103,25 @@ impl Note {
     /// A note has a place in the narrative iff it has a prior.
     pub fn is_sorted(&self) -> bool {
         self.prior.is_some()
+    }
+
+    /// True when `summary`/`body` are PIN-lock ciphertext rather than plaintext.
+    pub fn is_pin_locked(&self) -> bool {
+        self.encryption.is_some()
+    }
+
+    /// Whether the note participates in search + RAG retrieval. A locked note has no plaintext to
+    /// index and is unconditionally excluded regardless of the underlying [`Metadata::is_searchable`]
+    /// flags (privacy-security.md "PIN-Locked Notes": no persistent plaintext-derived artifacts).
+    pub fn is_searchable(&self) -> bool {
+        self.encryption.is_none() && self.metadata.is_searchable()
+    }
+
+    /// Asset object types (Picture/Drawing) and Table notes refuse PIN-lock in phase 1: their
+    /// canonical content lives outside `summary`/`body` (image bytes, CSV companion), so encrypting
+    /// just the frontmatter fields would not actually protect the content.
+    pub fn supports_pin_lock(&self) -> bool {
+        self.object_type.is_text()
     }
 
     /// Rename the title, regenerating the cosmetic slug while preserving the canonical ulid.

@@ -2,6 +2,7 @@
 
 use crate::commands::text_import_llm::ImportLlmJobResult;
 use crate::local_ai::LocalAiWorker;
+use crate::pin_session::PinSession;
 use crate::server::ServerHandle;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -83,6 +84,10 @@ pub struct AppState {
     pub sync_debounce_gen: Arc<AtomicU64>,
     /// Running search API server instance, if enabled. `None` when the API is off.
     pub search_api_server: Mutex<Option<ServerHandle>>,
+    /// In-memory PIN-lock session for the currently open book (privacy-security.md
+    /// "PIN-Locked Notes"). Process-only — never persisted — and cleared whenever the open book
+    /// changes (see `open_book`/`create_book`).
+    pub pin_session: Mutex<PinSession>,
 }
 
 impl AppState {
@@ -102,6 +107,7 @@ impl AppState {
             sync_lock: Arc::new(Mutex::new(())),
             sync_debounce_gen: Arc::new(AtomicU64::new(0)),
             search_api_server: Mutex::new(None),
+            pin_session: Mutex::new(PinSession::new()),
         }
     }
 

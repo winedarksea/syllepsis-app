@@ -89,7 +89,8 @@ export function PrivacyView() {
 
   const nothing =
     restrictedNotes.length === 0 && policy.archived_notes.length === 0 &&
-    policy.locked_notes.length === 0 && restrictedCategories.length === 0;
+    policy.locked_notes.length === 0 && policy.pin_locked_notes.length === 0 &&
+    restrictedCategories.length === 0;
 
   return (
     <div className="pv-root">
@@ -132,6 +133,20 @@ export function PrivacyView() {
               <button className="pv-name" onClick={() => openEditor(n.id)}>{n.title || '(untitled)'}</button>
               <span className="pv-tag">{n.mode === 'unlock_delay' ? 'unlock delay' : 'fact-check gate'}</span>
               <button className="pv-undo" disabled={busy} onClick={() => act(() => api.setNoteLock(n.id, 'none'), 'Unlocked.')}>Unlock</button>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {policy.pin_locked_notes.length > 0 && (
+        <section className="pv-section">
+          <h3 className="pv-section-title">PIN-locked notes ({policy.pin_locked_notes.length})</h3>
+          <p className="pv-hint">
+            Summary and body are encrypted. Open a note and enter the book's PIN in the Privacy section to view or unlock it.
+          </p>
+          {policy.pin_locked_notes.map((n) => (
+            <div key={n.id} className="pv-row">
+              <button className="pv-name" onClick={() => openEditor(n.id)}>{n.title || '(untitled)'}</button>
             </div>
           ))}
         </section>

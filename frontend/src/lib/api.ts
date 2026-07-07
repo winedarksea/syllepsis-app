@@ -17,7 +17,8 @@ import type {
   SyncReport, DeleteCurrentBookReport,
   World, Overlay, LookupEntry, ResolvedLocation, CreateImageWorldRequest, WorldDeletionImpact,
   LockMode, PolicyOverview,
-  ExportSpec, PackManifest, ImportPreview, ImportOptions, ImportReport,
+  PinLockStatus,
+  ExportSpec, ExportPackResult, PackManifest, ImportPreview, ImportOptions, ImportReport,
   PublishReport, GitignoreReport,
   BookStats, StyleCard, CrossBookNote, SearchFilter, CreateNoteOptions, NoteVisibility, NoteLoadIssue,
   TextImportOptions, TextImportPreview, TextImportCommitRequest, TextImportReport,
@@ -245,9 +246,25 @@ export const api = {
   purgeAllTrash: () => invoke<string[]>('purge_all_trash'),
   deleteImageObjectNow: (id: string) => invoke<void>('delete_image_object_now', { id }),
 
+  // PIN-locked notes
+  getPinLockStatus: () => invoke<PinLockStatus>('get_pin_lock_status'),
+  setBookPin: (pin: string, hint?: string | null) =>
+    invoke<PinLockStatus>('set_book_pin', { pin, hint: hint ?? null }),
+  unlockBook: (pin: string, remember: boolean) =>
+    invoke<PinLockStatus>('unlock_book', { pin, remember }),
+  unlockBookWithDeviceCredential: () =>
+    invoke<PinLockStatus>('unlock_book_with_device_credential'),
+  lockBookNow: () => invoke<PinLockStatus>('lock_book_now'),
+  changeBookPin: (oldPin: string, newPin: string, hint?: string | null) =>
+    invoke<PinLockStatus>('change_book_pin', { oldPin, newPin, hint: hint ?? null }),
+  removeBookPin: (pin: string) => invoke<PinLockStatus>('remove_book_pin', { pin }),
+  setPinHint: (hint?: string | null) => invoke<PinLockStatus>('set_pin_hint', { hint: hint ?? null }),
+  setNotePinLocked: (id: string, locked: boolean) =>
+    invoke<NoteDto>('set_note_pin_locked', { id, locked }),
+
   // Knowledge packs (Phase 6)
   exportPack: (spec: ExportSpec, path: string) =>
-    invoke<PackManifest>('export_pack', { spec, path }),
+    invoke<ExportPackResult>('export_pack', { spec, path }),
   readPackManifest: (path: string) => invoke<PackManifest>('read_pack_manifest', { path }),
   previewPack: (path: string) => invoke<ImportPreview>('preview_pack', { path }),
   importPack: (path: string, options: ImportOptions) =>

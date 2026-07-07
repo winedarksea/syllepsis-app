@@ -48,6 +48,17 @@ pub struct LlmSecret {
     pub base_url: Option<String>,
 }
 
+/// A remembered PIN-lock book key (privacy-security.md "PIN-Locked Notes" — "remember on this
+/// device"). OS-keychain protected like everything else in the vault; `key_id` lets
+/// `unlock_book_with_device_credential` detect a stale entry (the book's PIN was changed/removed
+/// since) before handing back a key that no longer matches the book's keycheck.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredBookKey {
+    /// Base64 32-byte key.
+    pub key_b64: String,
+    pub key_id: String,
+}
+
 /// The whole secret document stored in the single keychain item.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecretsVault {
@@ -55,6 +66,11 @@ pub struct SecretsVault {
     pub sync: BTreeMap<String, SyncTokens>,
     #[serde(default)]
     pub llm: BTreeMap<String, LlmSecret>,
+    /// Remembered PIN-lock keys, keyed by book id (`BookMetadata::book_id`) — desktop only today
+    /// (Android has no keyring backend; `keyring` is excluded from that target in Cargo.toml, so
+    /// this map is simply never populated there and Android falls back to PIN-per-session).
+    #[serde(default)]
+    pub pinlock: BTreeMap<String, StoredBookKey>,
 }
 
 /// Read/write access to the single vault item plus the legacy items consulted during migration.
@@ -301,6 +317,34 @@ pub fn delete_llm_secret(store: &mut impl VaultStore, provider: &str) -> Result<
     Ok(())
 }
 
+/// Read a remembered PIN-lock key for `book_id`. `None` means nothing is remembered for that book.
+pub fn read_pinlock_key(
+    store: &mut impl VaultStore,
+    book_id: &str,
+) -> Result<Option<StoredBookKey>, String> {
+    Ok(load_vault(store)?.pinlock.get(book_id).cloned())
+}
+
+/// Remember a PIN-lock key for `book_id` (the "remember on this device" option).
+pub fn write_pinlock_key(
+    store: &mut impl VaultStore,
+    book_id: &str,
+    key: StoredBookKey,
+) -> Result<(), String> {
+    let mut vault = load_vault(store)?;
+    vault.pinlock.insert(book_id.to_string(), key);
+    save_vault(store, &vault)
+}
+
+/// Forget a remembered PIN-lock key for `book_id` (PIN changed/removed, or the user opted out).
+pub fn delete_pinlock_key(store: &mut impl VaultStore, book_id: &str) -> Result<(), String> {
+    let mut vault = load_vault(store)?;
+    if vault.pinlock.remove(book_id).is_some() {
+        save_vault(store, &vault)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
@@ -469,6 +513,27 @@ mod tests {
         assert_eq!(vault, SecretsVault::default());
         // No secret was found, so no item is created — nothing to prompt for.
         assert!(store.get_vault().unwrap().is_none());
+    }
+
+    #[test]
+    fn pinlock_key_round_trips_and_deletes() {
+        let mut store = MemoryVaultStore::default();
+        assert!(read_pinlock_key(&mut store, "book-1").unwrap().is_none());
+
+        write_pinlock_key(
+            &mut store,
+            "book-1",
+            StoredBookKey {
+                key_b64: "base64key".to_string(),
+                key_id: "abcd1234".to_string(),
+            },
+        )
+        .unwrap();
+        let stored = read_pinlock_key(&mut store, "book-1").unwrap().unwrap();
+        assert_eq!(stored.key_id, "abcd1234");
+
+        delete_pinlock_key(&mut store, "book-1").unwrap();
+        assert!(read_pinlock_key(&mut store, "book-1").unwrap().is_none());
     }
 
     #[test]

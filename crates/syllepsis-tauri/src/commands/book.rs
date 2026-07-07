@@ -71,6 +71,7 @@ pub fn open_book(app: AppHandle, state: State<AppState>, path: String) -> Result
     };
     track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
+    state.pin_session.lock().unwrap().lock();
     state.invalidate_llm_service();
     state.invalidate_graph_corpus();
     if let Some(book) = state.book.lock().unwrap().as_ref() {
@@ -101,6 +102,7 @@ pub fn create_book(
     let info = book_info(&book_path, &book);
     track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
+    state.pin_session.lock().unwrap().lock();
     state.invalidate_llm_service();
     state.invalidate_graph_corpus();
     if let Some(book) = state.book.lock().unwrap().as_ref() {
@@ -129,6 +131,7 @@ pub fn create_book_in_parent(
     let info = book_info(&book_path, &book);
     track_book_path(&app, &book_path)?;
     *state.book.lock().unwrap() = Some(book);
+    state.pin_session.lock().unwrap().lock();
     state.invalidate_llm_service();
     state.invalidate_graph_corpus();
     if let Some(book) = state.book.lock().unwrap().as_ref() {

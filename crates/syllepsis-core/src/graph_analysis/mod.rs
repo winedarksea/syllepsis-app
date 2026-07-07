@@ -48,6 +48,7 @@ impl SemanticGraphCorpus {
             .filter(|note| {
                 note.object_type != ObjectType::Commentary
                     && note.metadata.is_visible_in_default_views()
+                    && !note.is_pin_locked()
             })
             .collect();
         notes.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
@@ -709,6 +710,7 @@ pub fn current_corpus_fingerprint(book: &Book) -> CoreResult<String> {
         .filter(|note| {
             note.object_type != ObjectType::Commentary
                 && note.metadata.is_visible_in_default_views()
+                && !note.is_pin_locked()
         })
         .collect();
     notes.sort_by(|left, right| left.id.to_string().cmp(&right.id.to_string()));

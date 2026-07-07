@@ -8,6 +8,7 @@ pub mod llm;
 pub mod local_ai;
 pub mod notes;
 pub mod pack;
+pub mod pinlock;
 pub mod plugins;
 pub mod publish;
 pub mod search;

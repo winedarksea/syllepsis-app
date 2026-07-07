@@ -30,6 +30,7 @@ import { Icon } from '../components/Icon';
 import { useThemeStyle } from '../components/useThemeIcons';
 import { PageHeader } from '../components/PageHeader';
 import { CloudLlmModelPicker } from '../components/CloudLlmModelPicker';
+import { usePinLockStore } from '../lib/pinLock';
 import './SettingsView.css';
 
 // Evocative section sub-text, varying by the active theme's flavor language.
@@ -184,6 +185,7 @@ export function SettingsView({ launchMode = false }: Props) {
                   onSaved={(privacy) => { setConfig((p) => p && { ...p, privacy }); flash('Privacy saved.'); }}
                   onError={reportError}
                 />
+                <PinLockPanel onNotice={flash} onError={reportError} />
               </Section>
 
               <Section title="Publishing" subtitle={SUBTITLES.publishing[flavorLang]}>
@@ -884,7 +886,177 @@ function PrivacyPanel({ value, onSaved, onError }: {
       <Field label="Confirmation delay (hours)" hint="Wait before a delete or unlock confirmation takes effect.">
         <NumberInput value={draft.confirmation_delay_hours} onChange={(n) => setDraft({ ...draft, confirmation_delay_hours: n })} />
       </Field>
+      <Field label="PIN-lock idle timeout (minutes)" hint="Auto-relock an unlocked PIN-lock session after this many minutes of inactivity. 0 = never.">
+        <NumberInput value={draft.pin_idle_relock_minutes} onChange={(n) => setDraft({ ...draft, pin_idle_relock_minutes: n })} />
+      </Field>
       <SaveBar saving={saving} dirty={dirty} onSave={commit} />
+    </div>
+  );
+}
+
+// ── PIN-locked notes (privacy-security.md "PIN-Locked Notes") ──────────────────
+
+function PinLockPanel({ onNotice, onError }: { onNotice: (m: string) => void; onError: (m: string) => void }) {
+  const status = usePinLockStore((s) => s.status);
+  const refresh = usePinLockStore((s) => s.refresh);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [hint, setHint] = useState('');
+  const [oldPin, setOldPin] = useState('');
+  const [mode, setMode] = useState<'set' | 'change' | 'remove'>('set');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setPin('');
+    setConfirmPin('');
+    setOldPin('');
+  }, [mode]);
+
+  const resetForm = () => { setPin(''); setConfirmPin(''); setOldPin(''); setHint(''); };
+
+  const submitNewPin = useCallback(async () => {
+    if (pin.length < 4) { onError('PIN must be at least 4 characters.'); return; }
+    if (pin !== confirmPin) { onError('PINs do not match.'); return; }
+    setBusy(true);
+    try {
+      await api.setBookPin(pin, hint || null);
+      await refresh();
+      resetForm();
+      onNotice('Book PIN set. Forgetting it is unrecoverable — the hint above is your only aid.');
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [pin, confirmPin, hint, refresh, onNotice, onError]);
+
+  const submitChangePin = useCallback(async () => {
+    if (pin.length < 4) { onError('New PIN must be at least 4 characters.'); return; }
+    if (pin !== confirmPin) { onError('New PINs do not match.'); return; }
+    setBusy(true);
+    try {
+      await api.changeBookPin(oldPin, pin, hint || null);
+      await refresh();
+      resetForm();
+      onNotice('Book PIN changed — every locked note was re-encrypted under the new PIN.');
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [oldPin, pin, confirmPin, hint, refresh, onNotice, onError]);
+
+  const submitRemovePin = useCallback(async () => {
+    setBusy(true);
+    try {
+      await api.removeBookPin(oldPin);
+      await refresh();
+      resetForm();
+      setMode('set');
+      onNotice('Book PIN removed — every locked note was decrypted back to plaintext.');
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [oldPin, refresh, onNotice, onError]);
+
+  const lockNow = useCallback(async () => {
+    setBusy(true);
+    try {
+      await api.lockBookNow();
+      await refresh();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [refresh, onError]);
+
+  if (!status) return <p className="sv-hint">Loading PIN-lock status…</p>;
+
+  return (
+    <div className="sv-subpanel">
+      <p className="sv-hint">
+        One PIN protects every note you individually lock in this book (toggled per-note in the editor's Privacy section).
+        There is no recovery for a forgotten PIN besides the hint you write here — write it down somewhere safe.
+      </p>
+
+      {status.configured ? (
+        <>
+          <p className="sv-hint">
+            Session: <strong>{status.unlocked ? 'unlocked' : 'locked'}</strong>
+            {status.hint ? ` — hint: “${status.hint}”` : ' — no hint set'}
+          </p>
+          <div className="sv-savebar">
+            <button className="sv-btn" disabled={busy || !status.unlocked} onClick={lockNow}>Lock now</button>
+          </div>
+
+          <div className="sv-choice-row">
+            <label className={`sv-choice-option${mode === 'change' ? ' active' : ''}`}>
+              <input type="radio" name="pinlock-mode" checked={mode === 'change'} onChange={() => setMode('change')} />
+              Change PIN
+            </label>
+            <label className={`sv-choice-option${mode === 'remove' ? ' active' : ''}`}>
+              <input type="radio" name="pinlock-mode" checked={mode === 'remove'} onChange={() => setMode('remove')} />
+              Remove PIN
+            </label>
+          </div>
+
+          <Field label="Current PIN">
+            <input type="password" className="sv-input" value={oldPin} onChange={(e) => setOldPin(e.target.value)} />
+          </Field>
+
+          {mode === 'change' && (
+            <>
+              <Field label="New PIN">
+                <input type="password" className="sv-input" value={pin} onChange={(e) => setPin(e.target.value)} />
+              </Field>
+              <Field label="Confirm new PIN">
+                <input type="password" className="sv-input" value={confirmPin} onChange={(e) => setConfirmPin(e.target.value)} />
+              </Field>
+              <Field label="Hint (optional)">
+                <input className="sv-input" value={hint} onChange={(e) => setHint(e.target.value)} />
+              </Field>
+              <div className="sv-savebar">
+                <button className="sv-btn sv-btn-primary" disabled={busy || !oldPin || !pin} onClick={submitChangePin}>
+                  {busy ? 'Changing…' : 'Change PIN'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {mode === 'remove' && (
+            <>
+              <p className="sv-hint">Removing the PIN decrypts every currently-locked note back to plaintext.</p>
+              <div className="sv-savebar">
+                <button className="sv-btn sv-btn-primary" disabled={busy || !oldPin} onClick={submitRemovePin}>
+                  {busy ? 'Removing…' : 'Remove PIN'}
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <Field label="New PIN">
+            <input type="password" className="sv-input" value={pin} onChange={(e) => setPin(e.target.value)} />
+          </Field>
+          <Field label="Confirm PIN">
+            <input type="password" className="sv-input" value={confirmPin} onChange={(e) => setConfirmPin(e.target.value)} />
+          </Field>
+          <Field label="Hint (optional)" hint="Shown on the unlock prompt and on new devices. Never store the PIN itself here.">
+            <input className="sv-input" value={hint} onChange={(e) => setHint(e.target.value)} />
+          </Field>
+          <div className="sv-savebar">
+            <button className="sv-btn sv-btn-primary" disabled={busy || !pin} onClick={submitNewPin}>
+              {busy ? 'Setting…' : 'Set PIN'}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

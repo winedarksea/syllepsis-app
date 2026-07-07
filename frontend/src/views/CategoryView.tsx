@@ -211,11 +211,18 @@ export function CategoryView() {
             >
               <div className="cv-card-header">
                 <span className="cv-card-title">{displayTitle(note.title, note.summary, note.body)}</span>
+                {note.pin_locked && <Icon name="lock" size={12} title="PIN-locked" />}
                 <span className="cv-card-type">{note.type}</span>
               </div>
-              {note.summary && <p className="cv-card-summary">{note.summary}</p>}
-              {note.body && (
-                <p className="cv-card-body">{note.body.slice(0, 180)}{note.body.length > 180 ? '…' : ''}</p>
+              {note.pin_locked ? (
+                <p className="cv-card-summary">Locked — enter PIN to view</p>
+              ) : (
+                <>
+                  {note.summary && <p className="cv-card-summary">{note.summary}</p>}
+                  {note.body && (
+                    <p className="cv-card-body">{note.body.slice(0, 180)}{note.body.length > 180 ? '…' : ''}</p>
+                  )}
+                </>
               )}
               <div className="cv-card-meta">
                 <span className={note.sorted ? 'cv-status cv-status-done' : 'cv-status cv-status-pending'}>

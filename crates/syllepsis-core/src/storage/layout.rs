@@ -38,6 +38,12 @@ pub const SYNC_DIR: &str = "_sync";
 pub const PACKS_DIR: &str = "_packs";
 pub const BOOK_META_FILE: &str = "_book.md";
 pub const CONFIG_FILE: &str = "_config.yaml";
+/// The book's PIN-lock keycheck payload (salt, Argon2id params, AEAD key-check, hint). Lives at
+/// the book root — not `_sync/` — because it must sync to every device (privacy-security.md
+/// "PIN-Locked Notes"). Contains no note content and no derivable key material on its own, but
+/// the salt+hint are excluded from the book's `.gitignore` and the publish gitignore base so they
+/// never reach a public git publish.
+pub const PINLOCK_FILE: &str = "_pinlock.json";
 /// Sidecar extension for the per-note CRDT snapshot files inside `_crdt/`.
 pub const CRDT_EXTENSION: &str = "crdt";
 /// Text→coordinate lookup table inside `_worlds/` (spatial-worlds.md). A flat CSV (not
@@ -128,6 +134,11 @@ pub fn config_path(root: &Path) -> PathBuf {
     root.join(CONFIG_FILE)
 }
 
+/// The book's PIN-lock keycheck file path (`_pinlock.json` at book root).
+pub fn pinlock_path(root: &Path) -> PathBuf {
+    root.join(PINLOCK_FILE)
+}
+
 /// Default filename for a note: `{id}.md`. The id is filename-safe on every platform (no
 /// colons), so this is a clean default even though the canonical id lives in frontmatter.
 pub fn note_filename(id: &NoteId) -> String {
@@ -155,9 +166,9 @@ pub fn is_reserved_dir(name: &str) -> bool {
     RESERVED_DIRS.contains(&name)
 }
 
-/// True if a top-level file is a reserved book file (book meta / config), not a note.
+/// True if a top-level file is a reserved book file (book meta / config / pinlock), not a note.
 pub fn is_reserved_file(name: &str) -> bool {
-    name == BOOK_META_FILE || name == CONFIG_FILE
+    name == BOOK_META_FILE || name == CONFIG_FILE || name == PINLOCK_FILE
 }
 
 #[cfg(test)]

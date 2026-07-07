@@ -51,7 +51,6 @@ plain markdown on your device, synced to your own cloud (Google Drive, GitHub). 
 - optional git integration allows versioned note releases and rollbacks, while also allowing another sync and sharing option via platforms like GitHub
 - Cloud sync tokens and LLM API tokens are saved securely in your device's keychain/credential manager. However this may mean you are annoyed by prompts to unlock said keychain.
 
-
 **Privacy and lifecycle**
 - Private, archived, locked, and mark-for-deletion states per note or category
 - 24-hour timed unlock gate with optional fact-check requirement allow users to protect their most critical notes from accidental or impulsive updates.

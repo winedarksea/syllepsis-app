@@ -54,5 +54,12 @@ syllepsis-core = { path = "../syllepsis-core", features = ["loro"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
+# Mobile-only: gates PIN-lock "remember on this device" release behind an OS biometric/device-
+# credential prompt (privacy-security.md "PIN-Locked Notes" — remembered-key + biometrics). Only
+# supports Android/iOS upstream; desktop's equivalent trust boundary is the OS keychain prompt
+# itself (`keyring`), so this plugin has no desktop build at all.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-biometric = "2"
+
 [dev-dependencies]
 tempfile = "3"

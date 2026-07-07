@@ -152,6 +152,12 @@ export interface NoteDto {
   // from a stale one (disk changed since load) and merge through the CRDT layer instead of
   // blindly overwriting. Omit for callers that don't track a baseline.
   baseline_body?: string;
+  // PIN-locked notes (privacy-security.md "PIN-Locked Notes"): pin_locked mirrors
+  // `encryption.is_some()` on the stored note; unlocked is only ever true when the tauri
+  // boundary decrypted this specific DTO (a session-unlocked read). summary/body are the
+  // real plaintext only when both are true — otherwise they're blanked placeholders.
+  pin_locked?: boolean;
+  unlocked?: boolean;
 }
 
 export interface CommentarySummary {
@@ -342,6 +348,10 @@ export interface RenderedNote {
   list_depth: number;
   indented: boolean;
   numbered: boolean;
+  // PIN-locked notes: summary/body are blanked (never ciphertext) whenever this is true. The
+  // continuous book view has no session key to decrypt with, so this is always the placeholder —
+  // unlike the note-level DTO read paths, there's no unlocked variant here yet.
+  pin_locked?: boolean;
 }
 
 export type RenderItem =
@@ -698,6 +708,7 @@ export interface CleanupConfig {
 export interface PrivacyConfig {
   unlock_delay_hours: number;
   confirmation_delay_hours: number;
+  pin_idle_relock_minutes: number;
 }
 
 export interface EmbeddingConfig {
@@ -1077,11 +1088,22 @@ export interface PolicyOverview {
   publish_excluded_notes: NoteRef[];
   archived_notes: NoteRef[];
   locked_notes: LockedNote[];
+  pin_locked_notes: NoteRef[];
   pending_deletion: PendingDeletion[];
   hidden_categories: string[];
   search_excluded_categories: string[];
   publish_excluded_categories: string[];
   unlock_delay_hours: number;
+}
+
+// ── PIN-locked notes (mirrors syllepsis_tauri::commands::pinlock) ──
+
+export interface PinLockStatus {
+  configured: boolean;
+  hint: string | null;
+  unlocked: boolean;
+  idle_relock_minutes: number;
+  remembered_key_available: boolean;
 }
 
 // ── Knowledge packs (mirrors syllepsis_core::app::pack and ::pack) ──
@@ -1096,6 +1118,8 @@ export interface PackManifest {
   export_kind: ExportKind;
 }
 
+export type LockedNoteHandling = 'skip' | 'decrypt';
+
 export interface ExportSpec {
   id: string;
   name: string;
@@ -1105,6 +1129,12 @@ export interface ExportSpec {
   note_ids: string[];
   export_all: boolean;
   include_commentary?: boolean;
+  locked_note_handling?: LockedNoteHandling;
+}
+
+export interface ExportPackResult {
+  manifest: PackManifest;
+  skipped_locked_notes: number;
 }
 
 export type ImportStatus = 'new' | 'update' | 'locally_modified';

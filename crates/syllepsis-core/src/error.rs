@@ -70,6 +70,12 @@ pub enum CoreError {
     /// Semantic graph analysis could not produce a valid clustering or projection.
     #[error("graph analysis error: {0}")]
     GraphAnalysis(String),
+
+    /// A PIN-lock operation failed: wrong PIN, tampered/foreign-key ciphertext, an operation
+    /// attempted on an asset note that cannot be locked, or the book session is locked. Distinct
+    /// from [`CoreError::Locked`], which is the unrelated unlock-delay/fact-check-gate feature.
+    #[error("pin-lock error: {0}")]
+    PinLock(String),
 }
 
 impl CoreError {
