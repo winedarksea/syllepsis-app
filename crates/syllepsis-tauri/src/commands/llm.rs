@@ -254,6 +254,17 @@ async fn run_queued_llm_job(
         let proposal_result = run_queued_llm_job_inner(&state, &request, &options);
         match proposal_result {
             Ok(proposal) => {
+                if !request.store_result_as_commentary {
+                    update_job_status(
+                        &state,
+                        &job_id,
+                        QueuedLlmJobStatus::Complete,
+                        Some(proposal),
+                        None,
+                        None,
+                    );
+                    return;
+                }
                 let commentary_result = {
                     let guard = state.book.lock().unwrap();
                     match guard.as_ref() {

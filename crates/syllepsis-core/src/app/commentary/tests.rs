@@ -141,3 +141,95 @@ fn parent_commentary_deletion_uses_stable_identity() {
         .parent_note_id
         .same_identity(&parent.id));
 }
+
+#[test]
+fn restore_parent_commentary_keeps_resolved_items_resolved() {
+    let (_dir, book) = book();
+    let parent = note(&book, "body");
+    let open =
+        create_commentary(&book, parent.id.as_str(), CommentaryKind::Comment, "open").unwrap();
+    let pinned =
+        create_commentary(&book, parent.id.as_str(), CommentaryKind::Comment, "pinned").unwrap();
+    pin_commentary(&book, &pinned.id).unwrap();
+    let dismissed = create_commentary(
+        &book,
+        parent.id.as_str(),
+        CommentaryKind::Comment,
+        "dismissed",
+    )
+    .unwrap();
+    dismiss_commentary(&book, &dismissed.id).unwrap();
+
+    mark_parent_commentary_for_deletion(&book, parent.id.as_str()).unwrap();
+    assert!(list_commentary(&book, parent.id.as_str(), false)
+        .unwrap()
+        .is_empty());
+
+    restore_parent_commentary_from_deletion(&book, parent.id.as_str()).unwrap();
+
+    let active = list_commentary(&book, parent.id.as_str(), false).unwrap();
+    assert_eq!(active.len(), 2);
+    assert!(active.iter().any(|item| item.id == open.id));
+    assert!(active.iter().any(|item| item.id == pinned.id));
+
+    let resolved = list_commentary(&book, parent.id.as_str(), true).unwrap();
+    let dismissed = resolved
+        .iter()
+        .find(|item| item.id == dismissed.id)
+        .expect("dismissed commentary remains stored");
+    assert!(dismissed.metadata.status == CommentaryStatus::Dismissed);
+    assert!(book
+        .read_commentary_note(&NoteId::parse(&dismissed.id).unwrap())
+        .unwrap()
+        .metadata
+        .lifecycle
+        .marked_for_deletion_at
+        .is_some());
+}
+
+#[test]
+fn fact_check_gate_applies_only_with_linked_passing_fact_check() {
+    let (_dir, book) = book();
+    let mut parent = note(&book, "original");
+    parent.metadata.lifecycle.lock = LockMode::FactCheckGate;
+    book.save_note(&parent).unwrap();
+    let proposal = create_commentary(
+        &book,
+        parent.id.as_str(),
+        CommentaryKind::Proposal,
+        "checked replacement",
+    )
+    .unwrap();
+
+    let mut unrelated_meta = CommentaryMetadata::new(
+        parent.id.clone(),
+        CommentaryKind::FactCheck,
+        CommentarySource::Ai,
+    );
+    unrelated_meta.fact_check_passed = Some(true);
+    let mut unrelated = book
+        .new_commentary_note("unlinked fact check", unrelated_meta)
+        .unwrap();
+    unrelated.body = "Looks fine, but not linked.".to_string();
+    book.save_commentary_note(&unrelated).unwrap();
+
+    let err = apply_commentary(&book, &proposal.id, ApplyCommentaryOptions::default())
+        .expect_err("unlinked fact-check must not satisfy the gate");
+    assert!(err.to_string().contains("requires a passing fact-check"));
+
+    let mut linked_meta = CommentaryMetadata::new(
+        parent.id.clone(),
+        CommentaryKind::FactCheck,
+        CommentarySource::Ai,
+    );
+    linked_meta.fact_check_passed = Some(true);
+    linked_meta.approves_commentary_id = Some(NoteId::parse(&proposal.id).unwrap());
+    let mut linked = book
+        .new_commentary_note("linked fact check", linked_meta)
+        .unwrap();
+    linked.body = "Passing linked fact-check.".to_string();
+    book.save_commentary_note(&linked).unwrap();
+
+    let updated = apply_commentary(&book, &proposal.id, ApplyCommentaryOptions::default()).unwrap();
+    assert_eq!(updated.body, "checked replacement");
+}

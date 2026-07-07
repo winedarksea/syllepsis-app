@@ -229,6 +229,31 @@ pub fn mark_parent_commentary_for_deletion(book: &Book, parent_note_id: &str) ->
     Ok(())
 }
 
+pub fn restore_parent_commentary_from_deletion(
+    book: &Book,
+    parent_note_id: &str,
+) -> CoreResult<()> {
+    let parent = NoteId::parse(parent_note_id)?;
+    for mut commentary in book.read_all_commentary_notes()? {
+        let Some(metadata) = commentary.commentary.as_ref() else {
+            continue;
+        };
+        if !metadata.parent_note_id.same_identity(&parent) {
+            continue;
+        }
+        if matches!(
+            metadata.status,
+            CommentaryStatus::Merged | CommentaryStatus::Dismissed
+        ) {
+            continue;
+        }
+        commentary.metadata.lifecycle.marked_for_deletion_at = None;
+        commentary.metadata.dates.updated = Utc::now();
+        book.save_commentary_note(&commentary)?;
+    }
+    Ok(())
+}
+
 pub fn delete_parent_commentary_now(book: &Book, parent_note_id: &str) -> CoreResult<()> {
     let parent = NoteId::parse(parent_note_id)?;
     for commentary in book.read_all_commentary_notes()? {

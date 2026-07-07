@@ -210,6 +210,41 @@ interface CompletionItem {
 // on every text change.
 const AUTOCOMPLETE_TOKEN_PATTERN = /(#([\w-]*)|@([\w-]*)|(?:due|start|done|loc|waiting|blocked-by):([\w-]*))$/;
 
+const LOCKED_NOTE_DRAFT_PREFIX = 'syllepsis.lockedDraft';
+
+function editorStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function stableTextHash(text: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function lockedDraftKey(note: NoteDto): string {
+  return `${LOCKED_NOTE_DRAFT_PREFIX}.${note.id}.${stableTextHash(note.body)}`;
+}
+
+function readLockedDraft(note: NoteDto): string | null {
+  return editorStorage()?.getItem(lockedDraftKey(note)) ?? null;
+}
+
+function writeLockedDraft(note: NoteDto, draftBody: string) {
+  editorStorage()?.setItem(lockedDraftKey(note), draftBody);
+}
+
+function removeLockedDraft(note: NoteDto) {
+  editorStorage()?.removeItem(lockedDraftKey(note));
+}
+
 function AutocompletePlugin({
   categories,
   notes,
@@ -330,6 +365,8 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const transformersRef = useRef(transformers);
   transformersRef.current = transformers;
   const [note, setNote] = useState<NoteDto | null>(null);
+  const noteRef = useRef<NoteDto | null>(null);
+  noteRef.current = note;
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
   const [body, setBody] = useState('');
@@ -374,12 +411,17 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     setProposalDraftDirty(false);
     api.getNote(noteId)
       .then(async (n) => {
+        const locked = !!(n.metadata.lifecycle?.lock && n.metadata.lifecycle.lock !== 'none');
+        const restoredDraft = locked ? readLockedDraft(n) : null;
+        const displayedBody = restoredDraft ?? n.body;
         setNote(n);
         setTitle(n.title);
         setSummary(n.summary);
-        setBody(n.body);
-        setEditModeSearchText(n.body);
-        if (initialMode === 'source') setRawText(n.body);
+        setBody(displayedBody);
+        getCurrentBody.current = () => displayedBody;
+        setEditModeSearchText(displayedBody);
+        if (initialMode === 'source') setRawText(displayedBody);
+        if (restoredDraft !== null && restoredDraft !== n.body) setProposalDraftDirty(true);
         if (n.type === 'table') {
           const data = await api.readTableData(noteId);
           setRows(data.length > 0 ? data : defaultTableRows());
@@ -474,6 +516,10 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       const editorPlainText = $getRoot().getAllTextNodes().map((node) => node.getTextContent()).join('');
       getCurrentBody.current = () => markdown;
       setEditModeSearchText(editorPlainText);
+      const currentNote = noteRef.current;
+      if (currentNote?.metadata.lifecycle?.lock && currentNote.metadata.lifecycle.lock !== 'none') {
+        writeLockedDraft(currentNote, markdown);
+      }
     });
   }, []);
 
@@ -516,16 +562,24 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         setNote(updated);
       } else if (noteTypeRef.current === 'drawing' && drawingSvgRef.current) {
         const svg = await drawingSvgRef.current();
+        let latestNote = note;
         if (svg) {
           const updated = await api.saveDrawingSvg(noteId, svg);
+          latestNote = updated;
           // Sync body link list (best-effort, no throw on failure).
-          const syncFn = (drawingSvgRef as unknown as { _syncLinks?: () => Promise<void> })._syncLinks;
-          if (syncFn) await syncFn().catch(() => {});
-          setNote(updated);
+          const syncFn = (drawingSvgRef as unknown as { _syncLinks?: (noteForSync: NoteDto) => Promise<NoteDto> })._syncLinks;
+          if (syncFn) latestNote = await syncFn(latestNote).catch(() => latestNote);
         }
         // Also persist title/summary changes.
-        const metaUpdated = await api.updateNote({ ...note, title, summary });
+        const metaUpdated = await api.updateNote({
+          ...latestNote,
+          title,
+          summary,
+          baseline_body: latestNote.body,
+        });
         setNote(metaUpdated);
+        setBody(metaUpdated.body);
+        getCurrentBody.current = () => metaUpdated.body;
       } else {
         // Locked notes: send back the stored body so the draft stays local.
         const isNoteLocked = !!(note.metadata.lifecycle?.lock && note.metadata.lifecycle.lock !== 'none');
@@ -588,10 +642,11 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   // Flush a pending save when the editor unmounts (e.g. switching to Settings or another view
   // mid-edit, which clears the autosave debounce). Without this, up to 1.5s of edits could be lost.
   useEffect(() => () => {
+    flushPendingBody();
     if (dirtyRef.current) void saveRef.current();
     if (bodyComputeTimerRef.current) clearTimeout(bodyComputeTimerRef.current);
     void api.noteEditingFinished(noteId);
-  }, [noteId]);
+  }, [flushPendingBody, noteId]);
 
   const handleBack = useCallback(async () => {
     if (dirtyRef.current) await saveRef.current();
@@ -620,6 +675,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
 
   const switchMode = useCallback((nextMode: NoteScreenMode) => {
     if (nextMode === mode) return;
+    flushPendingBody();
     if (mode === 'source') {
       if (noteTypeRef.current === 'table') {
         setRows(csvToRows(rawTextRef.current));
@@ -639,7 +695,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       setBody(text);
     }
     setMode(nextMode);
-  }, [mode]);
+  }, [flushPendingBody, mode]);
 
   // Table grid callbacks (only used when note.type === 'table')
   const updateCell = useCallback((r: number, c: number, value: string) => {
@@ -808,6 +864,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
 
   const handleSplit = useCallback(async (splitAt: number, secondTitle?: string) => {
     if (!note || note.type === 'table' || note.type === 'picture' || note.type === 'drawing') return;
+    flushPendingBody();
     if (!Number.isFinite(splitAt) || splitAt < 0) {
       setError('Split offset must be a non-negative number.');
       return;
@@ -827,7 +884,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     } catch (error) {
       setError(String(error));
     }
-  }, [note]);
+  }, [flushPendingBody, note]);
 
   const handleFork = useCallback(async () => {
     if (!note || forking) return;
@@ -862,6 +919,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
 
   const discardDraft = useCallback(() => {
     if (!note) return;
+    removeLockedDraft(note);
     setBody(note.body);
     setRawText(note.body);
     getCurrentBody.current = () => note.body;
@@ -871,6 +929,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
 
   const submitProposal = useCallback(async () => {
     if (!note) return;
+    flushPendingBody();
     const draftBody = getCurrentBody.current();
     setSubmittingProposal(true);
     setError(null);
@@ -892,7 +951,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     } finally {
       setSubmittingProposal(false);
     }
-  }, [note, noteId, discardDraft]);
+  }, [note, noteId, discardDraft, flushPendingBody]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -983,7 +1042,10 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             </button>
             <button
               className="editor-tool-btn"
-              onClick={() => setSplitDialogOpen(true)}
+              onClick={() => {
+                flushPendingBody();
+                setSplitDialogOpen(true);
+              }}
               title="Split this note at an offset"
               disabled={isTable || isImageObject}
             >
@@ -1197,7 +1259,17 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             ref={rawTextareaRef}
             className="editor-raw-textarea"
             value={rawText}
-            onChange={(e) => { setRawText(e.target.value); markDirty(); }}
+            onChange={(e) => {
+              const value = e.target.value;
+              setRawText(value);
+              getCurrentBody.current = () => value;
+              if (isLocked && note) {
+                writeLockedDraft(note, value);
+                setProposalDraftDirty(true);
+              } else {
+                markDirty();
+              }
+            }}
             spellCheck={false}
           />
           <BodyStats count={charCount} visible={!isImageObject} />

@@ -302,34 +302,41 @@ export function DrawingEditor({ note, markDirty, getSvgRef, onSaved }: Props) {
   }, [getSvgRef, isViewOnly]);
 
   // Sync the body's linked-note list when the link set changes.
-  const syncBodyLinks = useCallback(async (elements: readonly ExcalidrawElement[]) => {
+  const syncBodyLinks = useCallback(async (
+    elements: readonly ExcalidrawElement[],
+    noteForSync: NoteDto = note,
+  ): Promise<NoteDto> => {
     const currentIds = noteLinksFromElements(elements);
     const lastIds = lastSavedLinkIdsRef.current;
     const changed =
       currentIds.size !== lastIds.size ||
       [...currentIds].some((id) => !lastIds.has(id));
-    if (!changed) return;
-    lastSavedLinkIdsRef.current = new Set(currentIds);
+    if (!changed) return noteForSync;
     const sortedIds = [...currentIds].sort();
     const noteTitles: Record<string, string> = {};
     for (const id of sortedIds) {
       const n = allNotes.find((x) => x.id === id);
       if (n) noteTitles[id] = n.title;
     }
-    const baseBody = note.body.replace(/\n\n<!-- linked notes -->[\s\S]*$/, '');
+    const baseBody = noteForSync.body.replace(/\n\n<!-- linked notes -->[\s\S]*$/, '');
     const newBody = bodyWithNoteLinks(baseBody, sortedIds, noteTitles);
-    if (newBody !== note.body) {
-      const updated = await api.updateNote({ ...note, body: newBody });
-      onSaved?.(updated);
-    }
+    if (newBody === noteForSync.body) return noteForSync;
+    const updated = await api.updateNote({
+      ...noteForSync,
+      body: newBody,
+      baseline_body: noteForSync.body,
+    });
+    lastSavedLinkIdsRef.current = new Set(currentIds);
+    onSaved?.(updated);
+    return updated;
   }, [allNotes, note, onSaved]);
 
   // Store syncBodyLinks on the ref so Editor.tsx can access it post-save.
   const syncBodyLinksRef = useRef(syncBodyLinks);
   syncBodyLinksRef.current = syncBodyLinks;
   useEffect(() => {
-    (getSvgRef as unknown as { _syncLinks: () => Promise<void> })._syncLinks = () =>
-      syncBodyLinksRef.current(latestElementsRef.current);
+    (getSvgRef as unknown as { _syncLinks: (noteForSync: NoteDto) => Promise<NoteDto> })._syncLinks = (noteForSync) =>
+      syncBodyLinksRef.current(latestElementsRef.current, noteForSync);
   }, [getSvgRef]);
 
   const handleChange = useCallback(

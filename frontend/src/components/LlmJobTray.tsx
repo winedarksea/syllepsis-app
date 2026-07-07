@@ -148,7 +148,7 @@ export function LlmJobTray() {
     else openEditor(job.target_note_id, 'read');
   }, [openCommentary, openEditor]);
 
-  const visibleJobs = jobs.filter((job) => job.status !== 'complete' || job.commentary_id);
+  const visibleJobs = jobs.filter((job) => job.status !== 'complete' || job.commentary_id || job.proposal);
   if (visibleJobs.length === 0 && !error && !historyOpen) return null;
 
   return (

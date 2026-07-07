@@ -221,14 +221,17 @@ pub fn delete_image_object_now(book: &Book, id: &str) -> CoreResult<()> {
             let _ = std::fs::remove_file(&sidecar_path);
         }
     }
+    crate::app::commentary::delete_parent_commentary_now(book, note.id.as_str())?;
     book.delete_note(&id)
 }
 
 /// Cancel a pending deletion, returning the note to active use.
 pub fn restore_note(book: &Book, id: &str) -> CoreResult<NoteDto> {
-    edit_note(book, id, |note| {
+    let updated = edit_note(book, id, |note| {
         note.metadata.lifecycle.marked_for_deletion_at = None
-    })
+    })?;
+    crate::app::commentary::restore_parent_commentary_from_deletion(book, id)?;
+    Ok(updated)
 }
 
 /// Permanently remove every note whose deletion delay has elapsed or whose `vanish_at` has passed,
@@ -240,6 +243,7 @@ pub fn purge_expired(book: &Book, now: DateTime<Utc>) -> CoreResult<Vec<String>>
     for note in book.store.read_all_notes()? {
         if is_due_for_purge(&note, delay, now) {
             crate::app::image_assets::delete_inline_assets(&book.root, &note.body);
+            crate::app::commentary::delete_parent_commentary_now(book, note.id.as_str())?;
             book.delete_note(&note.id)?;
             purged.push(note.id.to_string());
         }
@@ -267,6 +271,7 @@ pub fn purge_all_trash(book: &Book) -> CoreResult<Vec<String>> {
     for note in book.store.read_all_notes()? {
         if note.metadata.lifecycle.marked_for_deletion_at.is_some() {
             crate::app::image_assets::delete_inline_assets(&book.root, &note.body);
+            crate::app::commentary::delete_parent_commentary_now(book, note.id.as_str())?;
             book.delete_note(&note.id)?;
             purged.push(note.id.to_string());
         }
@@ -459,6 +464,7 @@ pub fn guard_locked_merge(
 mod tests {
     use super::*;
     use crate::app::commands::create_note;
+    use crate::app::commentary::{create_commentary, list_commentary};
     use crate::model::{Category, ObjectType};
 
     fn book() -> (tempfile::TempDir, Book) {
@@ -588,6 +594,37 @@ mod tests {
     }
 
     #[test]
+    fn restore_note_restores_open_and_pinned_parent_commentary() {
+        let (_d, book) = book();
+        let note = create_note(&book, ObjectType::Note, "saved", None).unwrap();
+        let open = create_commentary(
+            &book,
+            &note.id,
+            crate::model::CommentaryKind::Comment,
+            "open",
+        )
+        .unwrap();
+        let pinned = create_commentary(
+            &book,
+            &note.id,
+            crate::model::CommentaryKind::Comment,
+            "pinned",
+        )
+        .unwrap();
+        crate::app::commentary::pin_commentary(&book, &pinned.id).unwrap();
+
+        request_deletion(&book, &note.id).unwrap();
+        assert!(list_commentary(&book, &note.id, false).unwrap().is_empty());
+
+        restore_note(&book, &note.id).unwrap();
+
+        let restored = list_commentary(&book, &note.id, false).unwrap();
+        assert_eq!(restored.len(), 2);
+        assert!(restored.iter().any(|item| item.id == open.id));
+        assert!(restored.iter().any(|item| item.id == pinned.id));
+    }
+
+    #[test]
     fn vanishing_note_self_destructs_at_its_time() {
         let (_d, book) = book();
         let mut note = create_note(&book, ObjectType::Note, "ephemeral", None).unwrap();
@@ -602,6 +639,31 @@ mod tests {
         assert!(purge_expired(&book, Utc::now()).unwrap().is_empty());
         let after = Utc::now() + Duration::hours(3);
         assert_eq!(purge_expired(&book, after).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn purge_expired_deletes_parent_commentary_for_vanishing_note() {
+        let (_d, book) = book();
+        let note = create_note(&book, ObjectType::Note, "ephemeral", None).unwrap();
+        create_commentary(
+            &book,
+            &note.id,
+            crate::model::CommentaryKind::Comment,
+            "linked",
+        )
+        .unwrap();
+        let mut stored = book
+            .store
+            .read_note(&NoteId::parse(&note.id).unwrap())
+            .unwrap();
+        stored.metadata.lifecycle.vanish_at = Some(Utc::now() + Duration::hours(1));
+        book.save_note(&stored).unwrap();
+
+        let after = Utc::now() + Duration::hours(2);
+        let purged = purge_expired(&book, after).unwrap();
+
+        assert_eq!(purged, vec![note.id.clone()]);
+        assert!(book.read_all_commentary_notes().unwrap().is_empty());
     }
 
     #[test]
@@ -636,6 +698,24 @@ mod tests {
         assert!(crate::app::commands::get_note(&book, &imported.id).is_err());
         assert!(!asset_path.exists());
         assert!(!sidecar_path.exists());
+    }
+
+    #[test]
+    fn delete_image_object_now_deletes_parent_commentary() {
+        let (_directory, book) = book();
+        let drawing = crate::app::image_assets::create_drawing_object(&book, "sketch").unwrap();
+        create_commentary(
+            &book,
+            &drawing.id,
+            crate::model::CommentaryKind::Comment,
+            "linked",
+        )
+        .unwrap();
+
+        delete_image_object_now(&book, &drawing.id).unwrap();
+
+        assert!(crate::app::commands::get_note(&book, &drawing.id).is_err());
+        assert!(book.read_all_commentary_notes().unwrap().is_empty());
     }
 
     #[test]
