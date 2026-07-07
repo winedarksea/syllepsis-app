@@ -58,7 +58,9 @@ pub fn extract_frontmatter(text: &str) -> (Option<TextImportFrontmatter>, String
             return (
                 None,
                 text.to_string(),
-                vec!["Frontmatter could not be parsed as YAML; imported as plain text.".to_string()],
+                vec![
+                    "Frontmatter could not be parsed as YAML; imported as plain text.".to_string(),
+                ],
             );
         }
     };
@@ -222,15 +224,21 @@ mod tests {
 
     #[test]
     fn tags_accept_sequence_or_comma_string_and_slugify_nested() {
-        let seq = extract_frontmatter("---\ntags:\n  - area/health\n  - Second Tag\n---\nx").0.unwrap();
+        let seq = extract_frontmatter("---\ntags:\n  - area/health\n  - Second Tag\n---\nx")
+            .0
+            .unwrap();
         assert_eq!(seq.tags, vec!["area-health", "second-tag"]);
-        let csv = extract_frontmatter("---\ntag: alpha, beta/gamma\n---\nx").0.unwrap();
+        let csv = extract_frontmatter("---\ntag: alpha, beta/gamma\n---\nx")
+            .0
+            .unwrap();
         assert_eq!(csv.tags, vec!["alpha", "beta-gamma"]);
     }
 
     #[test]
     fn aliases_accept_sequence_or_single_string() {
-        let seq = extract_frontmatter("---\naliases:\n  - One\n  - Two\n---\nx").0.unwrap();
+        let seq = extract_frontmatter("---\naliases:\n  - One\n  - Two\n---\nx")
+            .0
+            .unwrap();
         assert_eq!(seq.aliases, vec!["One", "Two"]);
         let single = extract_frontmatter("---\nalias: Solo\n---\nx").0.unwrap();
         assert_eq!(single.aliases, vec!["Solo"]);
@@ -238,12 +246,27 @@ mod tests {
 
     #[test]
     fn parses_date_forms_and_warns_on_garbage() {
-        let rfc = extract_frontmatter("---\ncreated: 2024-01-02T13:45:00+02:00\n---\nx").0.unwrap();
-        assert_eq!(rfc.created, Some(Utc.with_ymd_and_hms(2024, 1, 2, 11, 45, 0).unwrap()));
-        let linter = extract_frontmatter("---\ncreated: 2024-01-02 13:45\n---\nx").0.unwrap();
-        assert_eq!(linter.created, Some(Utc.with_ymd_and_hms(2024, 1, 2, 13, 45, 0).unwrap()));
-        let bare = extract_frontmatter("---\ncreated: 2024-01-02\n---\nx").0.unwrap();
-        assert_eq!(bare.created, Some(Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap()));
+        let rfc = extract_frontmatter("---\ncreated: 2024-01-02T13:45:00+02:00\n---\nx")
+            .0
+            .unwrap();
+        assert_eq!(
+            rfc.created,
+            Some(Utc.with_ymd_and_hms(2024, 1, 2, 11, 45, 0).unwrap())
+        );
+        let linter = extract_frontmatter("---\ncreated: 2024-01-02 13:45\n---\nx")
+            .0
+            .unwrap();
+        assert_eq!(
+            linter.created,
+            Some(Utc.with_ymd_and_hms(2024, 1, 2, 13, 45, 0).unwrap())
+        );
+        let bare = extract_frontmatter("---\ncreated: 2024-01-02\n---\nx")
+            .0
+            .unwrap();
+        assert_eq!(
+            bare.created,
+            Some(Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap())
+        );
         let (fm, _, warnings) = extract_frontmatter("---\ncreated: not a date\n---\nx");
         assert_eq!(fm.unwrap().created, None);
         assert_eq!(warnings.len(), 1);
@@ -259,7 +282,9 @@ mod tests {
             ("Completed", NoteStatus::Done),
             ("needs_clarification", NoteStatus::NeedsClarification),
         ] {
-            let fm = extract_frontmatter(&format!("---\nstatus: {raw}\n---\nx")).0.unwrap();
+            let fm = extract_frontmatter(&format!("---\nstatus: {raw}\n---\nx"))
+                .0
+                .unwrap();
             assert_eq!(fm.status, Some(expected), "status {raw}");
         }
         let (fm, _, warnings) = extract_frontmatter("---\nstatus: frozen\n---\nx");

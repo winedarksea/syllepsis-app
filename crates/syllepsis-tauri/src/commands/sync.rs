@@ -2030,10 +2030,7 @@ fn apply_oauth_client_secret_baked(provider: &str, config: &mut CloudSyncOAuthCl
         "google_drive" => option_env!("SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET"),
         _ => None,
     };
-    if let Some(secret) = baked
-        .map(str::trim)
-        .filter(|secret| !secret.is_empty())
-    {
+    if let Some(secret) = baked.map(str::trim).filter(|secret| !secret.is_empty()) {
         config.client_secret = Some(secret.to_string());
     }
 }

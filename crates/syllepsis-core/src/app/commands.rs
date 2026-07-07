@@ -1390,7 +1390,8 @@ mod tests {
         let hidden = update_note(&book, hidden).unwrap();
 
         // Hidden note that is also pending deletion: excluded from the Hidden view.
-        let mut hidden_trashed = create_note(&book, ObjectType::Note, "hidden_trashed", None).unwrap();
+        let mut hidden_trashed =
+            create_note(&book, ObjectType::Note, "hidden_trashed", None).unwrap();
         hidden_trashed.metadata.lifecycle.hidden = true;
         let hidden_trashed = update_note(&book, hidden_trashed).unwrap();
         crate::app::lifecycle::request_deletion(&book, &hidden_trashed.id).unwrap();

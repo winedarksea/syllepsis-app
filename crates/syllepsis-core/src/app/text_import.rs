@@ -1176,7 +1176,9 @@ mod tests {
             assert!(note.categories.contains(&"idea".to_string()));
             assert_eq!(note.summary, "Also known as: Alt Name");
         }
-        assert!(report.created_categories.contains(&"project-alpha".to_string()));
+        assert!(report
+            .created_categories
+            .contains(&"project-alpha".to_string()));
         assert!(report.created_categories.contains(&"idea".to_string()));
     }
 
