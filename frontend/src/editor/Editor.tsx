@@ -353,7 +353,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const {
     closeEditor, openEditor, setCategories, setActiveCategory, setView, categories,
     pluginRenderLanguages, pluginsLoaded, noteReloadSignal, commentaryFocusId, clearCommentaryFocus,
-    editorFocusMode, setEditorFocusMode,
+    editorFocusMode, setEditorFocusMode, setSidebarOpen, setDesktopSidebarCollapsed,
   } = useStore();
 
   // Map plugin-claimed code languages to a rendered PluginBlockNode; all other code fences keep
@@ -401,6 +401,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const [proposalDraftDirty, setProposalDraftDirty] = useState(false);
   const [submittingProposal, setSubmittingProposal] = useState(false);
   const [unlockDelayHours, setUnlockDelayHours] = useState(24);
+  const [relatedNotesCollapsed, setRelatedNotesCollapsed] = useState(() =>
+    typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 720px)').matches,
+  );
 
   useEffect(() => {
     setNote(null);
@@ -953,6 +956,14 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     }
   }, [note, noteId, discardDraft, flushPendingBody]);
 
+  const toggleEditorFocusMode = useCallback(() => {
+    const enteringFocusMode = !editorFocusMode;
+    setEditorFocusMode(enteringFocusMode);
+    setSidebarOpen(false);
+    setDesktopSidebarCollapsed(enteringFocusMode);
+    if (enteringFocusMode) setRelatedNotesCollapsed(true);
+  }, [editorFocusMode, setDesktopSidebarCollapsed, setEditorFocusMode, setSidebarOpen]);
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   if (!note) {
@@ -1058,7 +1069,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           </span>
           <button
             className="editor-tool-btn editor-focus-btn"
-            onClick={() => setEditorFocusMode(!editorFocusMode)}
+            onClick={toggleEditorFocusMode}
             title={editorFocusMode ? 'Exit focus mode' : 'Focus mode'}
             aria-pressed={editorFocusMode}
           >
@@ -1321,7 +1332,13 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           unlockDelayHours={unlockDelayHours}
         />
       )}
-      {!commentaryOpen && <RelatedCarousel noteId={noteId} />}
+      {!commentaryOpen && (
+        <RelatedCarousel
+          noteId={noteId}
+          collapsed={relatedNotesCollapsed}
+          onCollapsedChange={setRelatedNotesCollapsed}
+        />
+      )}
       {mergeDialogOpen && (
         <MergeDialog
           target={note}

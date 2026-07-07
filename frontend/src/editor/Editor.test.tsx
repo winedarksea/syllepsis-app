@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Editor } from './Editor';
+import { useStore } from '../lib/store';
 import type { NoteDto } from '../types';
 
 const mocks = vi.hoisted(() => ({
@@ -47,7 +48,22 @@ vi.mock('./DrawingEditor', () => ({
 }));
 
 vi.mock('../components/RelatedCarousel', () => ({
-  RelatedCarousel: () => null,
+  RelatedCarousel: ({
+    collapsed,
+    onCollapsedChange,
+  }: {
+    collapsed?: boolean;
+    onCollapsedChange?: (collapsed: boolean) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="related-carousel"
+      aria-pressed={collapsed ?? false}
+      onClick={() => onCollapsedChange?.(!(collapsed ?? false))}
+    >
+      {collapsed ? 'related collapsed' : 'related open'}
+    </button>
+  ),
 }));
 
 vi.mock('../components/MarkdownRenderer', () => ({
@@ -85,6 +101,18 @@ function lockedNote(): NoteDto {
   };
 }
 
+function unlockedNote(): NoteDto {
+  return {
+    ...lockedNote(),
+    id: 'note-unlocked-01j00000000000000000000000',
+    title: 'Unlocked',
+    metadata: {
+      ...lockedNote().metadata,
+      lifecycle: {},
+    },
+  };
+}
+
 function installLocalStorageStub() {
   const values = new Map<string, string>();
   vi.stubGlobal('localStorage', {
@@ -105,6 +133,12 @@ describe('Editor locked-note drafts', () => {
     installLocalStorageStub();
     localStorage.clear();
     vi.clearAllMocks();
+    useStore.setState({
+      editorFocusMode: false,
+      desktopSidebarCollapsed: false,
+      sidebarOpen: false,
+      pluginsLoaded: true,
+    });
     mocks.getNote.mockResolvedValue(lockedNote());
   });
 
@@ -139,5 +173,52 @@ describe('Editor locked-note drafts', () => {
     cleanup();
     render(<Editor noteId={lockedNote().id} initialMode="source" />);
     expect(await screen.findByDisplayValue('baseline body')).toBeTruthy();
+  });
+});
+
+describe('Editor focus mode layout controls', () => {
+  beforeEach(() => {
+    cleanup();
+    installLocalStorageStub();
+    localStorage.clear();
+    vi.clearAllMocks();
+    useStore.setState({
+      editorFocusMode: false,
+      desktopSidebarCollapsed: false,
+      sidebarOpen: true,
+      pluginsLoaded: true,
+    });
+    mocks.getNote.mockResolvedValue(unlockedNote());
+  });
+
+  it('collapses related notes and both sidebar modes when entering focus mode', async () => {
+    render(<Editor noteId={unlockedNote().id} initialMode="read" />);
+
+    expect((await screen.findByTestId('related-carousel')).textContent).toBe('related open');
+
+    fireEvent.click(screen.getByTitle('Focus mode'));
+
+    expect(useStore.getState().editorFocusMode).toBe(true);
+    expect(useStore.getState().desktopSidebarCollapsed).toBe(true);
+    expect(useStore.getState().sidebarOpen).toBe(false);
+    expect(screen.getByTestId('related-carousel').textContent).toBe('related collapsed');
+  });
+
+  it('expands the desktop sidebar on exit without reopening mobile sidebar or changing related notes', async () => {
+    render(<Editor noteId={unlockedNote().id} initialMode="read" />);
+
+    const relatedCarousel = await screen.findByTestId('related-carousel');
+    fireEvent.click(relatedCarousel);
+    expect(screen.getByTestId('related-carousel').textContent).toBe('related collapsed');
+
+    fireEvent.click(screen.getByTitle('Focus mode'));
+    expect(screen.getByTestId('related-carousel').textContent).toBe('related collapsed');
+
+    fireEvent.click(screen.getByTitle('Exit focus mode'));
+
+    expect(useStore.getState().editorFocusMode).toBe(false);
+    expect(useStore.getState().desktopSidebarCollapsed).toBe(false);
+    expect(useStore.getState().sidebarOpen).toBe(false);
+    expect(screen.getByTestId('related-carousel').textContent).toBe('related collapsed');
   });
 });

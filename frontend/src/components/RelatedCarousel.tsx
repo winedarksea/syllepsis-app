@@ -10,17 +10,24 @@ import './RelatedCarousel.css';
 
 interface Props {
   noteId: string;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
-export function RelatedCarousel({ noteId }: Props) {
+export function RelatedCarousel({ noteId, collapsed, onCollapsedChange }: Props) {
   const { openEditor } = useStore();
   const [related, setRelated] = useState<RelatedNote[]>([]);
   const [loadedForNoteId, setLoadedForNoteId] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(() =>
-    typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches,
+  const [internalCollapsed, setInternalCollapsed] = useState(() =>
+    typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 720px)').matches,
   );
+  const isCollapsed = collapsed ?? internalCollapsed;
 
   const loading = loadedForNoteId !== noteId;
+  const setCollapsedState = (nextCollapsed: boolean) => {
+    if (onCollapsedChange) onCollapsedChange(nextCollapsed);
+    else setInternalCollapsed(nextCollapsed);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -47,13 +54,13 @@ export function RelatedCarousel({ noteId }: Props) {
     <div className="rc-root">
       <button
         className="rc-label rc-toggle"
-        onClick={() => setCollapsed((value) => !value)}
-        title={collapsed ? 'Show related notes' : 'Hide related notes'}
+        onClick={() => setCollapsedState(!isCollapsed)}
+        title={isCollapsed ? 'Show related notes' : 'Hide related notes'}
       >
-        <span className="rc-chevron">{collapsed ? '▸' : '▾'}</span>
+        <span className="rc-chevron">{isCollapsed ? '▸' : '▾'}</span>
         Related notes ({related.length})
       </button>
-      {!collapsed && (
+      {!isCollapsed && (
         <div className="rc-track">
           {related.map((r) => (
             <button
