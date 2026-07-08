@@ -17,7 +17,7 @@ pub mod notecrypt;
 pub use keycheck::{
     create_pinlock, load_pinlock, remove_pinlock, verify_pin, KdfParams, KeyCheck, KeyCheckPayload,
 };
-pub use notecrypt::{decrypt_note, encrypt_for_save, encrypt_note};
+pub use notecrypt::{decrypt_note, decrypt_note_with_recovered_body, encrypt_for_save, encrypt_note};
 
 use zeroize::Zeroizing;
 

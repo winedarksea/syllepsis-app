@@ -69,7 +69,6 @@ pub fn start_pin_session_relock_poll(app: AppHandle) {
 
 /// Everything the settings card / unlock modal need to render.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct PinLockStatus {
     pub configured: bool,
     pub hint: Option<String>,
@@ -103,38 +102,51 @@ pub fn get_pin_lock_status(state: State<AppState>) -> Result<PinLockStatus, Stri
 }
 
 /// Set the book's PIN for the first time.
+///
+/// The Argon2id derivation behind [`app::set_book_pin`] is deliberately expensive (tens to a
+/// couple hundred milliseconds), and Tauri's synchronous IPC handlers run on the same thread that
+/// pumps the webview's message loop — so running it inline would visibly freeze the UI for that
+/// long. `spawn_blocking` moves it onto a dedicated thread-pool thread instead.
 #[tauri::command]
-pub fn set_book_pin(
+pub async fn set_book_pin(
     app: AppHandle,
-    state: State<AppState>,
     pin: String,
     hint: Option<String>,
 ) -> Result<PinLockStatus, String> {
-    let key =
-        with_book!(state, book, { app::set_book_pin(book, &pin, hint).map_err(|e| e.to_string()) })?;
-    state.pin_session.lock().unwrap().unlock(key, SystemTime::now());
-    emit_session_changed(&app);
-    status(&state)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let key = with_book!(state, book, {
+            app::set_book_pin(book, &pin, hint).map_err(|e| e.to_string())
+        })?;
+        state.pin_session.lock().unwrap().unlock(key, SystemTime::now());
+        emit_session_changed(&app);
+        status(&state)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Verify `pin` and unlock the session, optionally remembering the key on this device.
+///
+/// See [`set_book_pin`] for why the Argon2id-driven work runs via `spawn_blocking` rather than
+/// inline on the IPC thread.
 #[tauri::command]
-pub fn unlock_book(
-    app: AppHandle,
-    state: State<AppState>,
-    pin: String,
-    remember: bool,
-) -> Result<PinLockStatus, String> {
-    let (key, book_id) = with_book!(state, book, {
-        let key = app::unlock_book(book, &pin).map_err(|e| e.to_string())?;
-        Ok::<_, String>((key, book.metadata.book_id.clone()))
-    })?;
-    if remember {
-        remember_key(&state, &book_id, &key)?;
-    }
-    state.pin_session.lock().unwrap().unlock(key, SystemTime::now());
-    emit_session_changed(&app);
-    status(&state)
+pub async fn unlock_book(app: AppHandle, pin: String, remember: bool) -> Result<PinLockStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let (key, book_id) = with_book!(state, book, {
+            let key = app::unlock_book(book, &pin).map_err(|e| e.to_string())?;
+            Ok::<_, String>((key, book.metadata.book_id.clone()))
+        })?;
+        if remember {
+            remember_key(&state, &book_id, &key)?;
+        }
+        state.pin_session.lock().unwrap().unlock(key, SystemTime::now());
+        emit_session_changed(&app);
+        status(&state)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Unlock using a previously-remembered device key (desktop only — see
@@ -206,41 +218,53 @@ pub fn lock_book_now(app: AppHandle, state: State<AppState>) -> Result<PinLockSt
 
 /// Change the book's PIN (requires the old one). Re-encrypts every locked note under the new key
 /// and drops any remembered device key, since it no longer matches.
+///
+/// See [`set_book_pin`] for why the Argon2id-driven work runs via `spawn_blocking` rather than
+/// inline on the IPC thread — this one derives keys for *both* the old and new PIN.
 #[tauri::command]
-pub fn change_book_pin(
+pub async fn change_book_pin(
     app: AppHandle,
-    state: State<AppState>,
     old_pin: String,
     new_pin: String,
     hint: Option<String>,
 ) -> Result<PinLockStatus, String> {
-    let (key, book_id) = with_book!(state, book, {
-        let key = app::change_book_pin(book, &old_pin, &new_pin, hint).map_err(|e| e.to_string())?;
-        Ok::<_, String>((key, book.metadata.book_id.clone()))
-    })?;
-    let _ = forget_remembered_key(&state, &book_id);
-    state.pin_session.lock().unwrap().unlock(key, SystemTime::now());
-    emit_session_changed(&app);
-    status(&state)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let (key, book_id) = with_book!(state, book, {
+            let key =
+                app::change_book_pin(book, &old_pin, &new_pin, hint).map_err(|e| e.to_string())?;
+            Ok::<_, String>((key, book.metadata.book_id.clone()))
+        })?;
+        let _ = forget_remembered_key(&state, &book_id);
+        state.pin_session.lock().unwrap().unlock(key, SystemTime::now());
+        emit_session_changed(&app);
+        status(&state)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Remove the book's PIN entirely (requires the current PIN): every locked note is decrypted back
 /// to plaintext, the keycheck is deleted, and any remembered device key is forgotten.
+///
+/// See [`set_book_pin`] for why the Argon2id-driven work runs via `spawn_blocking` rather than
+/// inline on the IPC thread.
 #[tauri::command]
-pub fn remove_book_pin(
-    app: AppHandle,
-    state: State<AppState>,
-    pin: String,
-) -> Result<PinLockStatus, String> {
-    let book_id = with_book!(state, book, {
-        let key = app::unlock_book(book, &pin).map_err(|e| e.to_string())?;
-        app::remove_book_pin(book, &key).map_err(|e| e.to_string())?;
-        Ok::<_, String>(book.metadata.book_id.clone())
-    })?;
-    let _ = forget_remembered_key(&state, &book_id);
-    state.pin_session.lock().unwrap().lock();
-    emit_session_changed(&app);
-    status(&state)
+pub async fn remove_book_pin(app: AppHandle, pin: String) -> Result<PinLockStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let book_id = with_book!(state, book, {
+            let key = app::unlock_book(book, &pin).map_err(|e| e.to_string())?;
+            app::remove_book_pin(book, &key).map_err(|e| e.to_string())?;
+            Ok::<_, String>(book.metadata.book_id.clone())
+        })?;
+        let _ = forget_remembered_key(&state, &book_id);
+        state.pin_session.lock().unwrap().lock();
+        emit_session_changed(&app);
+        status(&state)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Update the PIN hint without changing the PIN.
@@ -273,7 +297,7 @@ pub fn present(book: &Book, dto: NoteDto, session: &mut PinSession) -> NoteDto {
     let Ok(note) = book.store.read_note(&note_id) else {
         return dto;
     };
-    match syllepsis_core::pinlock::decrypt_note(&note, &key) {
+    match syllepsis_core::app::pinlock::decrypt_note_with_recovery(book, &note, &key) {
         Ok(plain) => {
             session.touch(SystemTime::now());
             NoteDto::from_decrypted(&note, plain.summary, plain.body)
@@ -300,7 +324,12 @@ pub fn set_note_pin_locked(
     with_book!(state, book, {
         let dto = app::set_note_pin_locked(book, &id, locked, &key).map_err(|e| e.to_string())?;
         state.invalidate_graph_corpus();
-        Ok(dto)
+        // `app::set_note_pin_locked` always returns the fail-safe blanked DTO (`NoteDto::from_note`).
+        // That's correct on its own, but the session right here already holds the key that just did
+        // the encrypting, so without `present()` the editor would flip straight to its "locked"
+        // placeholder immediately after the user locks a note, even though they can still see it.
+        let mut session = state.pin_session.lock().unwrap();
+        Ok(crate::commands::pinlock::present(book, dto, &mut session))
     })
 }
 

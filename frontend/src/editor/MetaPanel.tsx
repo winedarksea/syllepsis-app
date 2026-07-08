@@ -204,7 +204,10 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
       ? `${humanize(note.type)} notes can't be PIN-locked yet`
       : undefined;
   const togglePinLock = async () => {
-    if (pinLockDisabledReason) return;
+    if (pinLockDisabledReason) {
+      window.alert(pinLockDisabledReason);
+      return;
+    }
     try {
       if (!usePinLockStore.getState().status?.unlocked) {
         const unlocked = await requestUnlock();
@@ -589,9 +592,8 @@ export function MetaPanel({ note, categories, allNotes, embeddingDetails, onChan
                     No publish
                   </button>
                   <button
-                    className={`dp-privacy-chip${note.pin_locked ? ' dp-privacy-chip--on' : ''}`}
+                    className={`dp-privacy-chip${note.pin_locked ? ' dp-privacy-chip--on' : ''}${pinLockDisabledReason ? ' dp-privacy-chip--disabled' : ''}`}
                     onClick={togglePinLock}
-                    disabled={!!pinLockDisabledReason}
                     title={pinLockDisabledReason ?? 'Summary/body are encrypted until the book is unlocked with its PIN'}
                   >
                     Locked (PIN)

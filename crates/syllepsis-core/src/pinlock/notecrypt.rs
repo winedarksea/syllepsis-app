@@ -109,6 +109,32 @@ pub fn decrypt_note(note: &Note, key: &BookKey) -> CoreResult<Note> {
     Ok(plain)
 }
 
+/// Decrypt a note's summary while taking the body from a trusted recovery source, usually a
+/// plaintext CRDT sidecar left behind by an older broken lock transition. Normal callers should use
+/// [`decrypt_note`]; this exists only to protect user notes from earlier ciphertext corruption.
+pub fn decrypt_note_with_recovered_body(
+    note: &Note,
+    key: &BookKey,
+    recovered_body: String,
+) -> CoreResult<Note> {
+    let meta = note
+        .encryption
+        .as_ref()
+        .ok_or_else(|| CoreError::PinLock("note is not locked".to_string()))?;
+    if meta.key_id != key.key_id() {
+        return Err(CoreError::PinLock(
+            "note was encrypted under a different key".to_string(),
+        ));
+    }
+    let ulid = note.id.ulid().to_string();
+    let summary = decrypt_field(&meta.summary_nonce, &note.summary, key, &field_aad(&ulid, "summary"))?;
+    let mut plain = note.clone();
+    plain.summary = summary;
+    plain.body = recovered_body;
+    plain.encryption = None;
+    Ok(plain)
+}
+
 /// Re-encrypt `note`'s summary/body for `new_summary`/`new_body` under `key`, but **only** where
 /// the plaintext actually changed: each field is first decrypted and compared against the
 /// incoming value, and if they match the stored nonce+ciphertext bytes are left untouched. This is

@@ -213,7 +213,12 @@ pub fn update_note(state: State<AppState>, note: NoteDto) -> Result<NoteDto, Str
                 .enqueue_note(book, updated.id.clone(), false)?;
         }
         state.invalidate_graph_corpus();
-        Ok(updated)
+        // Without this, saving any metadata change on an already-unlocked locked note (including
+        // the lock toggle itself, which marks the note dirty and triggers an autosave) would
+        // re-blank the response and flip `unlocked` back to false in the UI even though the
+        // session still holds the key.
+        let mut session = state.pin_session.lock().unwrap();
+        Ok(crate::commands::pinlock::present(book, updated, &mut session))
     })
 }
 

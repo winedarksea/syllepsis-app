@@ -1055,14 +1055,19 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
               <Icon name="forum" size={16} />
               {commentaryCount > 0 && <span className="editor-commentary-count">{commentaryCount}</span>}
             </button>
-            <button className="editor-tool-btn" onClick={() => setMergeDialogOpen(true)} title="Merge another note into this note">
+            <button
+              className="editor-tool-btn"
+              onClick={() => setMergeDialogOpen(true)}
+              title={note.pin_locked ? 'PIN-locked notes cannot be merged' : 'Merge another note into this note'}
+              disabled={note.pin_locked}
+            >
               Merge
             </button>
             <button
               className="editor-tool-btn"
               onClick={handleFork}
-              title="Duplicate this note"
-              disabled={forking}
+              title={note.pin_locked ? 'PIN-locked notes cannot be forked' : 'Duplicate this note'}
+              disabled={forking || note.pin_locked}
               aria-busy={forking}
             >
               <Icon name="content_copy" size={14} />
@@ -1074,8 +1079,8 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
                 flushPendingBody();
                 setSplitDialogOpen(true);
               }}
-              title="Split this note at an offset"
-              disabled={isTable || isImageObject}
+              title={note.pin_locked ? 'PIN-locked notes cannot be split' : 'Split this note at an offset'}
+              disabled={isTable || isImageObject || note.pin_locked}
             >
               Split
             </button>
@@ -1520,6 +1525,9 @@ function MergeDialog({
     const q = query.trim().toLowerCase();
     return allNotes
       .filter((note) => note.id !== target.id)
+      // PIN-locked notes store ciphertext in summary/body — merging one in (in either direction)
+      // would splice ciphertext together with unrelated text and corrupt it irrecoverably.
+      .filter((note) => !note.pin_locked)
       .filter((note) => !q || note.id.toLowerCase().includes(q) || note.title.toLowerCase().includes(q) || note.summary.toLowerCase().includes(q))
       .slice(0, 40);
   }, [allNotes, query, target.id]);

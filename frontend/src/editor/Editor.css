@@ -1849,6 +1849,7 @@ pre.plugin-block {
 .dp-privacy-preset { font-weight: 500; color: var(--color-text); }
 .dp-privacy-preset.dp-privacy-chip--on { color: var(--color-accent); }
 .dp-privacy-preset.dp-privacy-chip--partial { color: var(--color-text-secondary); }
+.dp-privacy-chip--disabled { opacity: 0.5; }
 
 /* DateField: null state → "—" button; set state → input + clear button */
 .dp-date-label {

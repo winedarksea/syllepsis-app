@@ -287,8 +287,9 @@ impl SyncEngine {
     /// register regardless of the book's configured backend: fine-grained merge (Loro) over
     /// ciphertext is meaningless (any concurrent byte-level merge just produces undecryptable
     /// garbage), and LWW is compiled into every build so a locked note's sidecar never depends on
-    /// an optional feature. Concurrent edits to the same locked note resolve whole-body LWW —
-    /// acceptable, same conflict semantics as any other LWW note.
+    /// an optional feature. If the note file itself conflicts, [`Self::merge_note`] resolves it as
+    /// a whole-file conflict instead of merging only the body, because the ciphertext body and
+    /// nonce-bearing frontmatter must stay paired.
     fn doc_backend_for(&self, note: &Note) -> &dyn CrdtBackend {
         if note.is_pin_locked() {
             &Self::LOCKED_NOTE_BACKEND
@@ -372,6 +373,23 @@ impl SyncEngine {
                 return Ok(false);
             }
         };
+        if note.is_pin_locked() {
+            self.resolve_conflict(path, state)?;
+            return Ok(false);
+        }
+        let remote_bytes = self.provider.get(path)?;
+        let Ok(remote_text) = String::from_utf8(remote_bytes) else {
+            self.resolve_conflict(path, state)?;
+            return Ok(false);
+        };
+        let Ok(remote_note) = frontmatter::parse_note(&remote_text) else {
+            self.resolve_conflict(path, state)?;
+            return Ok(false);
+        };
+        if remote_note.is_pin_locked() {
+            self.resolve_conflict(path, state)?;
+            return Ok(false);
+        }
 
         let backend = self.doc_backend_for(&note);
         let mut doc = if sidecar_full.exists() {
@@ -1371,6 +1389,47 @@ mod tests {
         b.sync();
         assert!(a.sync().is_noop(), "device A re-sync should be a no-op");
         assert!(b.sync().is_noop(), "device B re-sync should be a no-op");
+    }
+
+    #[test]
+    fn concurrent_locked_note_edits_keep_ciphertext_and_nonce_metadata_paired() {
+        let (_tmp, a, b) = two_devices();
+        let mut note = a.book.new_note(ObjectType::Note, "diary").unwrap();
+        note.body = "base secret".into();
+        lock_note(&a, &mut note);
+
+        a.sync();
+        b.sync();
+        b.book.store.refresh().unwrap();
+
+        let mut edit_a = a.book.store.read_note(&note.id).unwrap();
+        crate::pinlock::encrypt_for_save(&mut edit_a, "", "secret from a", &book_key()).unwrap();
+        a.book.save_note(&edit_a).unwrap();
+
+        let mut edit_b = b.book.store.read_note(&note.id).unwrap();
+        crate::pinlock::encrypt_for_save(&mut edit_b, "", "secret from b", &book_key()).unwrap();
+        b.book.save_note(&edit_b).unwrap();
+
+        a.sync();
+        let report = b.sync();
+        assert!(
+            report.conflicted.iter().any(|path| path.ends_with(".md")),
+            "locked note conflicts must use whole-file conflict resolution"
+        );
+        a.sync();
+        a.book.store.refresh().unwrap();
+        b.book.store.refresh().unwrap();
+
+        let final_a = a.book.store.read_note(&note.id).unwrap();
+        let final_b = b.book.store.read_note(&note.id).unwrap();
+        let plain_a = crate::pinlock::decrypt_note(&final_a, &book_key()).unwrap();
+        let plain_b = crate::pinlock::decrypt_note(&final_b, &book_key()).unwrap();
+        assert_eq!(plain_a.body, plain_b.body);
+        assert!(
+            plain_a.body == "secret from a" || plain_a.body == "secret from b",
+            "winner must be one complete encrypted variant, got {:?}",
+            plain_a.body
+        );
     }
 
     #[test]

@@ -779,8 +779,19 @@ pub fn set_prior(book: &Book, id: &str, prior: Option<PriorEdge>) -> CoreResult<
 }
 
 /// Fork a note into a new identity that records its lineage.
+///
+/// Refuses PIN-locked notes: forking copies the stored ciphertext verbatim under a fresh id, but
+/// `pinlock::notecrypt`'s AAD binds each field's ciphertext to its *own* ulid, so the fork would be
+/// permanently undecryptable (an AEAD authentication failure) the moment anyone tried to unlock it.
 pub fn fork_note(book: &Book, id: &str) -> CoreResult<NoteDto> {
-    let forked = book.fork_note(&NoteId::parse(id)?)?;
+    let note_id = NoteId::parse(id)?;
+    let existing = book.store.read_note(&note_id)?;
+    if existing.is_pin_locked() {
+        return Err(CoreError::PinLock(
+            "cannot fork a PIN-locked note; unlock it first".to_string(),
+        ));
+    }
+    let forked = book.fork_note(&note_id)?;
     Ok(NoteDto::from_note(&forked))
 }
 
@@ -849,9 +860,18 @@ fn stored_vector(stored: &StoredEmbedding) -> Vec<f32> {
     stored.vector.0.clone()
 }
 
+/// Refuses PIN-locked notes on either side of the merge: `book.store.read_note` returns the raw
+/// stored `Note`, which for a locked note means base64 ciphertext in `summary`/`body`. Merging that
+/// as if it were plaintext would splice ciphertext together with unrelated text, corrupting it —
+/// `B64.decode` (or the AEAD tag) then fails the next time anyone tries to unlock it.
 pub fn merge_notes(book: &Book, request: MergeNotesRequest) -> CoreResult<NoteDto> {
     let target_id = NoteId::parse(&request.target_note_id)?;
     let mut target = book.store.read_note(&target_id)?;
+    if target.is_pin_locked() {
+        return Err(CoreError::PinLock(
+            "cannot merge into a PIN-locked note; unlock it first".to_string(),
+        ));
+    }
     let mut merged_sections = vec![target.body.trim().to_string()]
         .into_iter()
         .filter(|section| !section.is_empty())
@@ -861,6 +881,11 @@ pub fn merge_notes(book: &Book, request: MergeNotesRequest) -> CoreResult<NoteDt
             continue;
         }
         let source = book.store.read_note(&NoteId::parse(source_id)?)?;
+        if source.is_pin_locked() {
+            return Err(CoreError::PinLock(
+                "cannot merge a PIN-locked note; unlock it first".to_string(),
+            ));
+        }
         if !source.summary.trim().is_empty() && target.summary.trim().is_empty() {
             target.summary = source.summary.clone();
         }
@@ -893,9 +918,18 @@ fn merge_metadata_for_note_change(mut metadata: Metadata) -> Metadata {
     metadata
 }
 
+/// Refuses PIN-locked notes: like [`merge_notes`], the offset and body it operates on come from
+/// `book.store.read_note`'s raw stored representation — base64 ciphertext for a locked note — so
+/// splitting it would slice ciphertext at an arbitrary byte offset with no relation to the AEAD
+/// tag or the encoded chunks, corrupting both halves.
 pub fn split_note(book: &Book, request: SplitNoteRequest) -> CoreResult<(NoteDto, NoteDto)> {
     let note_id = NoteId::parse(&request.note_id)?;
     let mut first = book.store.read_note(&note_id)?;
+    if first.is_pin_locked() {
+        return Err(CoreError::PinLock(
+            "cannot split a PIN-locked note; unlock it first".to_string(),
+        ));
+    }
     let split_at = request.split_at.min(first.body.len());
     if !first.body.is_char_boundary(split_at) {
         return Err(CoreError::InvalidBook(
@@ -1113,6 +1147,59 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let book = Book::create(dir.path(), "Test").unwrap();
         (dir, book)
+    }
+
+    #[test]
+    fn merge_notes_refuses_a_locked_target_or_source_instead_of_corrupting_ciphertext() {
+        use crate::app::pinlock::{set_book_pin, set_note_pin_locked};
+        use crate::pinlock::decrypt_note;
+        let (_dir, book) = book();
+        let key = set_book_pin(&book, "1234", None).unwrap();
+        let mut target = create_note(&book, ObjectType::Note, "locked target", None).unwrap();
+        target.body = "secret content".into();
+        let target = update_note(&book, target).unwrap();
+        set_note_pin_locked(&book, &target.id, true, &key).unwrap();
+
+        let mut source = create_note(&book, ObjectType::Note, "source", None).unwrap();
+        source.body = "some plaintext with an = sign in it, e.g. url?x=1".into();
+        update_note(&book, source.clone()).unwrap();
+
+        // Locked target: refused, ciphertext untouched and still decryptable.
+        assert!(merge_notes(&book, MergeNotesRequest {
+            target_note_id: target.id.clone(),
+            source_note_ids: vec![source.id.clone()],
+        }).is_err());
+        let stored = book.store.read_note(&crate::id::NoteId::parse(&target.id).unwrap()).unwrap();
+        assert!(decrypt_note(&stored, &key).is_ok());
+
+        // Locked source into an unlocked target: also refused.
+        set_note_pin_locked(&book, &target.id, false, &key).unwrap();
+        let mut other_target = create_note(&book, ObjectType::Note, "unlocked target", None).unwrap();
+        other_target.body = "host body".into();
+        let other_target = update_note(&book, other_target).unwrap();
+        set_note_pin_locked(&book, &source.id, true, &key).unwrap();
+        assert!(merge_notes(&book, MergeNotesRequest {
+            target_note_id: other_target.id,
+            source_note_ids: vec![source.id],
+        }).is_err());
+    }
+
+    #[test]
+    fn fork_and_split_refuse_locked_notes() {
+        use crate::app::pinlock::{set_book_pin, set_note_pin_locked};
+        let (_dir, book) = book();
+        let key = set_book_pin(&book, "1234", None).unwrap();
+        let mut note = create_note(&book, ObjectType::Note, "locked", None).unwrap();
+        note.body = "secret content".into();
+        let note = update_note(&book, note).unwrap();
+        set_note_pin_locked(&book, &note.id, true, &key).unwrap();
+
+        assert!(fork_note(&book, &note.id).is_err());
+        assert!(split_note(&book, SplitNoteRequest {
+            note_id: note.id,
+            split_at: 3,
+            second_title: None,
+        }).is_err());
     }
 
     #[test]
