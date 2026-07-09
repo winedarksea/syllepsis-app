@@ -118,7 +118,11 @@ pub async fn set_book_pin(
         let key = with_book!(state, book, {
             app::set_book_pin(book, &pin, hint).map_err(|e| e.to_string())
         })?;
-        state.pin_session.lock().unwrap().unlock(key, SystemTime::now());
+        state
+            .pin_session
+            .lock()
+            .unwrap()
+            .unlock(key, SystemTime::now());
         emit_session_changed(&app);
         status(&state)
     })
@@ -131,7 +135,11 @@ pub async fn set_book_pin(
 /// See [`set_book_pin`] for why the Argon2id-driven work runs via `spawn_blocking` rather than
 /// inline on the IPC thread.
 #[tauri::command]
-pub async fn unlock_book(app: AppHandle, pin: String, remember: bool) -> Result<PinLockStatus, String> {
+pub async fn unlock_book(
+    app: AppHandle,
+    pin: String,
+    remember: bool,
+) -> Result<PinLockStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let (key, book_id) = with_book!(state, book, {
@@ -141,7 +149,11 @@ pub async fn unlock_book(app: AppHandle, pin: String, remember: bool) -> Result<
         if remember {
             remember_key(&state, &book_id, &key)?;
         }
-        state.pin_session.lock().unwrap().unlock(key, SystemTime::now());
+        state
+            .pin_session
+            .lock()
+            .unwrap()
+            .unlock(key, SystemTime::now());
         emit_session_changed(&app);
         status(&state)
     })
@@ -177,14 +189,19 @@ pub fn unlock_book_with_device_credential(
     let key = BookKey::new(key_bytes, stored.key_id.clone());
 
     with_book!(state, book, {
-        let current = syllepsis_core::pinlock::load_pinlock(&book.root).map_err(|e| e.to_string())?;
+        let current =
+            syllepsis_core::pinlock::load_pinlock(&book.root).map_err(|e| e.to_string())?;
         if current.key_id != stored.key_id {
             return Err("the book's PIN changed; the remembered key is stale".to_string());
         }
         Ok::<(), String>(())
     })?;
 
-    state.pin_session.lock().unwrap().unlock(key, SystemTime::now());
+    state
+        .pin_session
+        .lock()
+        .unwrap()
+        .unlock(key, SystemTime::now());
     emit_session_changed(&app);
     status(&state)
 }
@@ -236,7 +253,11 @@ pub async fn change_book_pin(
             Ok::<_, String>((key, book.metadata.book_id.clone()))
         })?;
         let _ = forget_remembered_key(&state, &book_id);
-        state.pin_session.lock().unwrap().unlock(key, SystemTime::now());
+        state
+            .pin_session
+            .lock()
+            .unwrap()
+            .unlock(key, SystemTime::now());
         emit_session_changed(&app);
         status(&state)
     })
@@ -394,7 +415,10 @@ mod tests {
         let dto = syllepsis_core::app::commands::get_note(&book, &id).unwrap();
 
         let mut session = PinSession::new();
-        session.unlock(BookKey::new([9u8; 32], "wrongkey".to_string()), SystemTime::now());
+        session.unlock(
+            BookKey::new([9u8; 32], "wrongkey".to_string()),
+            SystemTime::now(),
+        );
 
         let presented = present(&book, dto, &mut session);
         assert!(!presented.unlocked);

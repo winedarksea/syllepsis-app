@@ -87,7 +87,11 @@ fn derive_raw_key(pin: &str, salt: &[u8], params: &KdfParams) -> CoreResult<[u8;
     }
     let argon_params = argon2::Params::new(params.m_kib, params.t, params.p, Some(32))
         .map_err(|error| CoreError::PinLock(format!("invalid argon2 parameters: {error}")))?;
-    let argon2 = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, argon_params);
+    let argon2 = argon2::Argon2::new(
+        argon2::Algorithm::Argon2id,
+        argon2::Version::V0x13,
+        argon_params,
+    );
     let mut key = [0u8; 32];
     argon2
         .hash_password_into(pin.as_bytes(), salt, &mut key)

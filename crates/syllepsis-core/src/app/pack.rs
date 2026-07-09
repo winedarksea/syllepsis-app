@@ -127,8 +127,7 @@ pub fn build_pack_with_key(
             LockedNoteHandling::Decrypt => {
                 let key = key.ok_or_else(|| {
                     CoreError::PinLock(
-                        "a session key is required to decrypt locked notes for export"
-                            .to_string(),
+                        "a session key is required to decrypt locked notes for export".to_string(),
                     )
                 })?;
                 selected.push(crate::pinlock::decrypt_note(&note, key)?);
@@ -1565,7 +1564,10 @@ mod tests {
         dto.categories = vec![cat.to_string()];
         dto.body = body.to_string();
         let saved = update_note(book, dto).unwrap();
-        let mut note = book.store.read_note(&NoteId::parse(&saved.id).unwrap()).unwrap();
+        let mut note = book
+            .store
+            .read_note(&NoteId::parse(&saved.id).unwrap())
+            .unwrap();
         crate::pinlock::encrypt_note(&mut note, &book_key()).unwrap();
         book.save_note(&note).unwrap();
     }

@@ -1165,23 +1165,35 @@ mod tests {
         update_note(&book, source.clone()).unwrap();
 
         // Locked target: refused, ciphertext untouched and still decryptable.
-        assert!(merge_notes(&book, MergeNotesRequest {
-            target_note_id: target.id.clone(),
-            source_note_ids: vec![source.id.clone()],
-        }).is_err());
-        let stored = book.store.read_note(&crate::id::NoteId::parse(&target.id).unwrap()).unwrap();
+        assert!(merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: target.id.clone(),
+                source_note_ids: vec![source.id.clone()],
+            }
+        )
+        .is_err());
+        let stored = book
+            .store
+            .read_note(&crate::id::NoteId::parse(&target.id).unwrap())
+            .unwrap();
         assert!(decrypt_note(&stored, &key).is_ok());
 
         // Locked source into an unlocked target: also refused.
         set_note_pin_locked(&book, &target.id, false, &key).unwrap();
-        let mut other_target = create_note(&book, ObjectType::Note, "unlocked target", None).unwrap();
+        let mut other_target =
+            create_note(&book, ObjectType::Note, "unlocked target", None).unwrap();
         other_target.body = "host body".into();
         let other_target = update_note(&book, other_target).unwrap();
         set_note_pin_locked(&book, &source.id, true, &key).unwrap();
-        assert!(merge_notes(&book, MergeNotesRequest {
-            target_note_id: other_target.id,
-            source_note_ids: vec![source.id],
-        }).is_err());
+        assert!(merge_notes(
+            &book,
+            MergeNotesRequest {
+                target_note_id: other_target.id,
+                source_note_ids: vec![source.id],
+            }
+        )
+        .is_err());
     }
 
     #[test]
@@ -1195,11 +1207,15 @@ mod tests {
         set_note_pin_locked(&book, &note.id, true, &key).unwrap();
 
         assert!(fork_note(&book, &note.id).is_err());
-        assert!(split_note(&book, SplitNoteRequest {
-            note_id: note.id,
-            split_at: 3,
-            second_title: None,
-        }).is_err());
+        assert!(split_note(
+            &book,
+            SplitNoteRequest {
+                note_id: note.id,
+                split_at: 3,
+                second_title: None,
+            }
+        )
+        .is_err());
     }
 
     #[test]

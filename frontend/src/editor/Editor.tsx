@@ -376,6 +376,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<NoteScreenMode>(initialMode);
   const [rawText, setRawText] = useState('');
+  const [currentBody, setCurrentBody] = useState('');
   const rawTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const summaryRef = useRef<HTMLTextAreaElement | null>(null);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
@@ -422,7 +423,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         setTitle(n.title);
         setSummary(n.summary);
         setBody(displayedBody);
-        getCurrentBody.current = () => displayedBody;
+        setCurrentBody(displayedBody);
         setEditModeSearchText(displayedBody);
         if (initialMode === 'source') setRawText(displayedBody);
         if (restoredDraft !== null && restoredDraft !== n.body) setProposalDraftDirty(true);
@@ -444,7 +445,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       setTitle(n.title);
       setSummary(n.summary);
       setBody(n.body);
-      getCurrentBody.current = () => n.body;
+      setCurrentBody(n.body);
       setEditModeSearchText(n.body);
     }).catch(() => {});
   }, [pinLockUnlocked, note, noteId]);
@@ -500,10 +501,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     markDirty();
   }, [markDirty]);
 
-  // Live ref to the current markdown body (Lexical → string). Seeded from the loaded body
-  // state so toggling Raw before Lexical fires OnChangePlugin returns the correct content.
-  const getCurrentBody = useRef<() => string>(() => body);
-  useEffect(() => { getCurrentBody.current = () => body; }, [body]);
+  useEffect(() => {
+    setCurrentBody(body);
+  }, [body]);
 
   // Live refs so save/autosave callbacks don't need frequent rebinding.
   const savingRef = useRef(false);
@@ -533,7 +533,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     state.read(() => {
       const markdown = $convertToMarkdownString(transformersRef.current);
       const editorPlainText = $getRoot().getAllTextNodes().map((node) => node.getTextContent()).join('');
-      getCurrentBody.current = () => markdown;
+      setCurrentBody(markdown);
       setEditModeSearchText(editorPlainText);
       const currentNote = noteRef.current;
       if (currentNote?.metadata.lifecycle?.lock && currentNote.metadata.lifecycle.lock !== 'none') {
@@ -598,13 +598,13 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         });
         setNote(metaUpdated);
         setBody(metaUpdated.body);
-        getCurrentBody.current = () => metaUpdated.body;
+        setCurrentBody(metaUpdated.body);
       } else {
         // Locked notes: send back the stored body so the draft stays local.
         const isNoteLocked = !!(note.metadata.lifecycle?.lock && note.metadata.lifecycle.lock !== 'none');
         const nextBody = isNoteLocked
           ? note.body
-          : (modeRef.current === 'source' ? rawTextRef.current : getCurrentBody.current());
+          : (modeRef.current === 'source' ? rawTextRef.current : currentBody);
         const updated = await api.updateNote({
           ...note,
           title,
@@ -618,7 +618,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         if (!isNoteLocked && updated.body !== nextBody) {
           setBody(updated.body);
           setRawText(updated.body);
-          getCurrentBody.current = () => updated.body;
+          setCurrentBody(updated.body);
           setReloadKey((key) => key + 1);
           setMode('read');
           setCommentaryOpen(true);
@@ -636,7 +636,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [note, title, summary, noteId, setCategories, flushPendingBody]);
+  }, [note, title, summary, noteId, setCategories, flushPendingBody, currentBody]);
 
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -701,20 +701,20 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       } else {
         const text = rawTextRef.current;
         setBody(text);
-        getCurrentBody.current = () => text;
+        setCurrentBody(text);
         setReloadKey((k) => k + 1);
       }
     } else if (nextMode === 'source') {
       const text = noteTypeRef.current === 'table'
         ? rowsToCsv(rowsRef.current)
-        : getCurrentBody.current();
+        : currentBody;
       setRawText(text);
     } else if (mode === 'edit') {
-      const text = getCurrentBody.current();
+      const text = currentBody;
       setBody(text);
     }
     setMode(nextMode);
-  }, [flushPendingBody, mode]);
+  }, [flushPendingBody, mode, currentBody]);
 
   // Table grid callbacks (only used when note.type === 'table')
   const updateCell = useCallback((r: number, c: number, value: string) => {
@@ -776,14 +776,14 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     if (!detected) return;
     setBody(detected.innerMarkdown);
     setRawText(detected.innerMarkdown);
-    getCurrentBody.current = () => detected.innerMarkdown;
+    setCurrentBody(detected.innerMarkdown);
     markDirty();
   }, [body, markDirty]);
 
   const bodyForRead = useMemo(
-    () => mode === 'source' ? rawText : mode === 'read' ? body : getCurrentBody.current(),
+    () => mode === 'source' ? rawText : mode === 'read' ? body : currentBody,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mode, rawText, revision, body],
+    [mode, rawText, revision, body, currentBody],
   );
 
   const accidentalWholeNoteFence = useMemo(
@@ -798,9 +798,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       setCharCount(null);
       return;
     }
-    const text = mode === 'source' ? rawText : getCurrentBody.current();
+    const text = mode === 'source' ? rawText : currentBody;
     setCharCount(text.length);
-  }, [mode, rawText, revision]);
+  }, [mode, rawText, revision, currentBody]);
 
   const findSearchText = useMemo(() => {
     if (mode === 'source') return rawText;
@@ -871,7 +871,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       setTitle(updated.title);
       setSummary(updated.summary);
       setBody(updated.body);
-      getCurrentBody.current = () => updated.body;
+      setCurrentBody(updated.body);
       setReloadKey((key) => key + 1);
       setDirty(false);
       setMode('read');
@@ -895,7 +895,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       setTitle(result.first.title);
       setSummary(result.first.summary);
       setBody(result.first.body);
-      getCurrentBody.current = () => result.first.body;
+      setCurrentBody(result.first.body);
       setReloadKey((key) => key + 1);
       setDirty(false);
       setMode('read');
@@ -928,7 +928,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     setTitle(updated.title);
     setSummary(updated.summary);
     setBody(updated.body);
-    getCurrentBody.current = () => updated.body;
+    setCurrentBody(updated.body);
     setReloadKey((key) => key + 1);
     setDirty(false);
     setProposalDraftDirty(false);
@@ -941,7 +941,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     removeLockedDraft(note);
     setBody(note.body);
     setRawText(note.body);
-    getCurrentBody.current = () => note.body;
+    setCurrentBody(note.body);
     setReloadKey((k) => k + 1);
     setProposalDraftDirty(false);
   }, [note]);
@@ -949,7 +949,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const submitProposal = useCallback(async () => {
     if (!note) return;
     flushPendingBody();
-    const draftBody = getCurrentBody.current();
+    const draftBody = currentBody;
     setSubmittingProposal(true);
     setError(null);
     try {
@@ -970,7 +970,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     } finally {
       setSubmittingProposal(false);
     }
-  }, [note, noteId, discardDraft, flushPendingBody]);
+  }, [note, noteId, discardDraft, flushPendingBody, currentBody]);
 
   const toggleEditorFocusMode = useCallback(() => {
     const enteringFocusMode = !editorFocusMode;
@@ -1216,7 +1216,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             onSaved={(updated) => {
               setNote(updated);
               setBody(updated.body);
-              getCurrentBody.current = () => updated.body;
+              setCurrentBody(updated.body);
             }}
           />
         ) : (
@@ -1239,7 +1239,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
               onChange={(event) => {
                 const value = event.target.value;
                 setBody(value);
-                getCurrentBody.current = () => value;
+                setCurrentBody(value);
                 markDirty();
               }}
               placeholder="Caption, provenance, or description…"
@@ -1297,7 +1297,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             onChange={(e) => {
               const value = e.target.value;
               setRawText(value);
-              getCurrentBody.current = () => value;
+              setCurrentBody(value);
               if (isLocked && note) {
                 writeLockedDraft(note, value);
                 setProposalDraftDirty(true);
@@ -1376,8 +1376,8 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       )}
       {splitDialogOpen && (
         <SplitDialog
-          body={getCurrentBody.current()}
-          defaultOffset={mode === 'source' ? rawTextareaRef.current?.selectionStart ?? rawText.length : getCurrentBody.current().length}
+          body={currentBody}
+          defaultOffset={mode === 'source' ? rawTextareaRef.current?.selectionStart ?? rawText.length : currentBody.length}
           onClose={() => setSplitDialogOpen(false)}
           onSplit={(splitAt, secondTitle) => {
             setSplitDialogOpen(false);

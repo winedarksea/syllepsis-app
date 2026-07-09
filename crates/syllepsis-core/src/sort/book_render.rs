@@ -148,8 +148,16 @@ fn flatten_notes(nodes: &[NoteNode], parent_list_depth: u8, items: &mut Vec<Rend
         let pin_locked = node.note.is_pin_locked();
         items.push(RenderItem::Note(RenderedNote {
             id: node.note.id.clone(),
-            summary: if pin_locked { String::new() } else { node.note.summary.clone() },
-            body: if pin_locked { String::new() } else { node.note.body.clone() },
+            summary: if pin_locked {
+                String::new()
+            } else {
+                node.note.summary.clone()
+            },
+            body: if pin_locked {
+                String::new()
+            } else {
+                node.note.body.clone()
+            },
             join: node.join,
             list_depth,
             indented: node.join == PriorKind::IndentedNewParagraph,

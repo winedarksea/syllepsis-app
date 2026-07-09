@@ -88,7 +88,8 @@ fn highlight(language: &str, code: &str) -> String {
         // Numbers
         if c.is_ascii_digit() {
             let start = i;
-            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == '_')
+            while i < chars.len()
+                && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == '_')
             {
                 i += 1;
             }
@@ -121,10 +122,40 @@ fn keywords_for(language: &str) -> &'static [&'static str] {
             "continue", "and", "or", "not", "in", "is", "None", "True", "False", "global",
         ],
         "javascript" | "js" | "typescript" | "ts" => &[
-            "const", "let", "var", "function", "return", "if", "else", "for", "while", "switch",
-            "case", "break", "continue", "class", "extends", "new", "this", "import", "export",
-            "from", "default", "async", "await", "try", "catch", "finally", "throw", "typeof",
-            "instanceof", "void", "null", "undefined", "true", "false",
+            "const",
+            "let",
+            "var",
+            "function",
+            "return",
+            "if",
+            "else",
+            "for",
+            "while",
+            "switch",
+            "case",
+            "break",
+            "continue",
+            "class",
+            "extends",
+            "new",
+            "this",
+            "import",
+            "export",
+            "from",
+            "default",
+            "async",
+            "await",
+            "try",
+            "catch",
+            "finally",
+            "throw",
+            "typeof",
+            "instanceof",
+            "void",
+            "null",
+            "undefined",
+            "true",
+            "false",
         ],
         _ => &[],
     }

@@ -321,18 +321,17 @@ impl SyncEngine {
             let sidecar_full = self.full(&sidecar_rel);
             let backend = self.doc_backend_for(&note);
             if sidecar_full.exists() {
-                let (mut doc, corrupt) = match backend
-                    .load_document(&self.actor, &std::fs::read(&sidecar_full)?)
-                {
-                    Ok(doc) => (doc, false),
-                    Err(_) => {
-                        // Corrupt sidecar: markdown is the source of truth, rebuild from it. Also
-                        // the migration path for a pre-existing Loro sidecar on a note that has
-                        // since been locked: it fails to load under LWW and rebuilds here.
-                        report.rebuilt_sidecars.push(rel.clone());
-                        (backend.new_document(&self.actor, &note.body), true)
-                    }
-                };
+                let (mut doc, corrupt) =
+                    match backend.load_document(&self.actor, &std::fs::read(&sidecar_full)?) {
+                        Ok(doc) => (doc, false),
+                        Err(_) => {
+                            // Corrupt sidecar: markdown is the source of truth, rebuild from it. Also
+                            // the migration path for a pre-existing Loro sidecar on a note that has
+                            // since been locked: it fails to load under LWW and rebuilds here.
+                            report.rebuilt_sidecars.push(rel.clone());
+                            (backend.new_document(&self.actor, &note.body), true)
+                        }
+                    };
                 if corrupt || doc.text() != note.body {
                     doc.set_text(&note.body); // captures the local/external edit (idempotent if equal)
                     self.write_sidecar(&sidecar_full, doc.as_ref())?;
@@ -1344,8 +1343,13 @@ mod tests {
         // Edit on B the way the tauri boundary would: decrypt, edit, re-encrypt via
         // `encrypt_for_save`, save — then propagate back to A.
         let mut edited = on_b;
-        crate::pinlock::encrypt_for_save(&mut edited, "private summary", "edited on b", &book_key())
-            .unwrap();
+        crate::pinlock::encrypt_for_save(
+            &mut edited,
+            "private summary",
+            "edited on b",
+            &book_key(),
+        )
+        .unwrap();
         b.book.save_note(&edited).unwrap();
         b.sync();
         a.sync();
@@ -1474,18 +1478,24 @@ mod tests {
         b.sync();
 
         let actor = actor_id_for(&a.book.root).unwrap();
-        let locked_sidecar_bytes =
-            std::fs::read(crate::storage::layout::crdt_sidecar_path(&a.book.root, &locked.id))
-                .unwrap();
+        let locked_sidecar_bytes = std::fs::read(crate::storage::layout::crdt_sidecar_path(
+            &a.book.root,
+            &locked.id,
+        ))
+        .unwrap();
         assert!(
             LwwBackend.load_document(&actor, &locked_sidecar_bytes).is_ok(),
             "a locked note's sidecar must be an LWW document regardless of the book's configured backend"
         );
-        let plain_sidecar_bytes =
-            std::fs::read(crate::storage::layout::crdt_sidecar_path(&a.book.root, &plain.id))
-                .unwrap();
+        let plain_sidecar_bytes = std::fs::read(crate::storage::layout::crdt_sidecar_path(
+            &a.book.root,
+            &plain.id,
+        ))
+        .unwrap();
         assert!(
-            LwwBackend.load_document(&actor, &plain_sidecar_bytes).is_err(),
+            LwwBackend
+                .load_document(&actor, &plain_sidecar_bytes)
+                .is_err(),
             "an unlocked note under a Loro-configured book must actually use Loro, not LWW"
         );
 
@@ -1521,6 +1531,10 @@ mod tests {
         let rebuilt = LwwBackend
             .load_document(&actor, &std::fs::read(&sidecar_path).unwrap())
             .unwrap();
-        assert_eq!(rebuilt.text(), note.body, "rebuilt sidecar holds the ciphertext body");
+        assert_eq!(
+            rebuilt.text(),
+            note.body,
+            "rebuilt sidecar holds the ciphertext body"
+        );
     }
 }

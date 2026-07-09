@@ -170,11 +170,12 @@ pub fn decrypt_note_with_recovery(book: &Book, note: &Note, key: &BookKey) -> Co
     match pinlock::decrypt_note(note, key) {
         Ok(plain) => Ok(plain),
         Err(decrypt_error) => {
-            let recovered_body = recover_body_from_plaintext_artifacts(book, note).map_err(|recovery_error| {
-                CoreError::PinLock(format!(
-                    "{decrypt_error}; plaintext recovery failed: {recovery_error}"
-                ))
-            })?;
+            let recovered_body =
+                recover_body_from_plaintext_artifacts(book, note).map_err(|recovery_error| {
+                    CoreError::PinLock(format!(
+                        "{decrypt_error}; plaintext recovery failed: {recovery_error}"
+                    ))
+                })?;
             pinlock::decrypt_note_with_recovered_body(note, key, recovered_body)
         }
     }
@@ -192,10 +193,17 @@ fn purge_embedding_sidecar(book: &Book, id: &NoteId) -> CoreResult<()> {
 /// body under `backend`. A full replace — not a merge — so no prior history survives: this is
 /// both the "destroy plaintext CRDT history" step on lock and the "restore configured backend"
 /// step on unlock.
-fn reseed_sidecar(book: &Book, note: &Note, backend: &dyn crate::crdt::CrdtBackend) -> CoreResult<()> {
+fn reseed_sidecar(
+    book: &Book,
+    note: &Note,
+    backend: &dyn crate::crdt::CrdtBackend,
+) -> CoreResult<()> {
     let actor = crate::sync::actor_id_for(&book.root)?;
     let doc = backend.new_document(&actor, &note.body);
-    write_atomic(&layout::crdt_sidecar_path(&book.root, &note.id), &doc.snapshot()?)
+    write_atomic(
+        &layout::crdt_sidecar_path(&book.root, &note.id),
+        &doc.snapshot()?,
+    )
 }
 
 fn recover_body_from_plaintext_artifacts(book: &Book, note: &Note) -> CoreResult<String> {
@@ -308,8 +316,7 @@ mod tests {
         // Hygiene: embedding sidecar purged, CRDT sidecar reseeded from ciphertext.
         assert!(!layout::embedding_sidecar_path(&book.root, &note.id).exists());
         let actor = crate::sync::actor_id_for(&book.root).unwrap();
-        let sidecar_bytes =
-            std::fs::read(layout::crdt_sidecar_path(&book.root, &note.id)).unwrap();
+        let sidecar_bytes = std::fs::read(layout::crdt_sidecar_path(&book.root, &note.id)).unwrap();
         let doc = LwwBackend.load_document(&actor, &sidecar_bytes).unwrap();
         assert_eq!(doc.text(), stored.body);
         assert!(!stored.is_searchable());
@@ -364,7 +371,9 @@ mod tests {
     fn unlock_recovers_from_commentary_base_body_when_sidecar_text_is_corrupted_too() {
         let (_d, book) = book();
         let key = set_book_pin(&book, "1234", None).unwrap();
-        let mut note = book.new_note(ObjectType::Note, "old broken lock with commentary").unwrap();
+        let mut note = book
+            .new_note(ObjectType::Note, "old broken lock with commentary")
+            .unwrap();
         note.summary = "short summary".into();
         note.body = "body preserved in commentary metadata".into();
         book.save_note(&note).unwrap();
@@ -379,11 +388,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        commentary
-            .commentary
-            .as_mut()
-            .unwrap()
-            .base_body = Some(note.body.clone());
+        commentary.commentary.as_mut().unwrap().base_body = Some(note.body.clone());
         book.save_commentary_note(&commentary).unwrap();
 
         pinlock::encrypt_note(&mut note, &key).unwrap();

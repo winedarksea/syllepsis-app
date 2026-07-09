@@ -38,7 +38,12 @@ fn encrypt_field(plain: &str, key: &BookKey, aad: &[u8]) -> CoreResult<(String, 
     Ok((B64.encode(nonce_bytes), B64.encode(ciphertext)))
 }
 
-fn decrypt_field(nonce_b64: &str, ciphertext_b64: &str, key: &BookKey, aad: &[u8]) -> CoreResult<String> {
+fn decrypt_field(
+    nonce_b64: &str,
+    ciphertext_b64: &str,
+    key: &BookKey,
+    aad: &[u8],
+) -> CoreResult<String> {
     let nonce = B64
         .decode(nonce_b64)
         .map_err(|error| CoreError::PinLock(format!("malformed nonce: {error}")))?;
@@ -100,7 +105,12 @@ pub fn decrypt_note(note: &Note, key: &BookKey) -> CoreResult<Note> {
         ));
     }
     let ulid = note.id.ulid().to_string();
-    let summary = decrypt_field(&meta.summary_nonce, &note.summary, key, &field_aad(&ulid, "summary"))?;
+    let summary = decrypt_field(
+        &meta.summary_nonce,
+        &note.summary,
+        key,
+        &field_aad(&ulid, "summary"),
+    )?;
     let body = decrypt_field(&meta.body_nonce, &note.body, key, &field_aad(&ulid, "body"))?;
     let mut plain = note.clone();
     plain.summary = summary;
@@ -127,7 +137,12 @@ pub fn decrypt_note_with_recovered_body(
         ));
     }
     let ulid = note.id.ulid().to_string();
-    let summary = decrypt_field(&meta.summary_nonce, &note.summary, key, &field_aad(&ulid, "summary"))?;
+    let summary = decrypt_field(
+        &meta.summary_nonce,
+        &note.summary,
+        key,
+        &field_aad(&ulid, "summary"),
+    )?;
     let mut plain = note.clone();
     plain.summary = summary;
     plain.body = recovered_body;
@@ -143,7 +158,12 @@ pub fn decrypt_note_with_recovered_body(
 ///
 /// Requires `note.encryption` to already be set (the note must already be locked) and `key` to
 /// match its `key_id`.
-pub fn encrypt_for_save(note: &mut Note, new_summary: &str, new_body: &str, key: &BookKey) -> CoreResult<()> {
+pub fn encrypt_for_save(
+    note: &mut Note,
+    new_summary: &str,
+    new_body: &str,
+    key: &BookKey,
+) -> CoreResult<()> {
     let meta = note
         .encryption
         .clone()
@@ -156,20 +176,28 @@ pub fn encrypt_for_save(note: &mut Note, new_summary: &str, new_body: &str, key:
     let ulid = note.id.ulid().to_string();
 
     let summary_aad = field_aad(&ulid, "summary");
-    let (summary_nonce, summary_cipher) = match decrypt_field(&meta.summary_nonce, &note.summary, key, &summary_aad) {
-        Ok(current) if current == new_summary => (meta.summary_nonce.clone(), note.summary.clone()),
-        _ => encrypt_field(new_summary, key, &summary_aad)?,
-    };
+    let (summary_nonce, summary_cipher) =
+        match decrypt_field(&meta.summary_nonce, &note.summary, key, &summary_aad) {
+            Ok(current) if current == new_summary => {
+                (meta.summary_nonce.clone(), note.summary.clone())
+            }
+            _ => encrypt_field(new_summary, key, &summary_aad)?,
+        };
 
     let body_aad = field_aad(&ulid, "body");
-    let (body_nonce, body_cipher) = match decrypt_field(&meta.body_nonce, &note.body, key, &body_aad) {
-        Ok(current) if current == new_body => (meta.body_nonce.clone(), note.body.clone()),
-        _ => encrypt_field(new_body, key, &body_aad)?,
-    };
+    let (body_nonce, body_cipher) =
+        match decrypt_field(&meta.body_nonce, &note.body, key, &body_aad) {
+            Ok(current) if current == new_body => (meta.body_nonce.clone(), note.body.clone()),
+            _ => encrypt_field(new_body, key, &body_aad)?,
+        };
 
     note.summary = summary_cipher;
     note.body = body_cipher;
-    note.encryption = Some(EncryptionMeta::new(key.key_id().to_string(), summary_nonce, body_nonce));
+    note.encryption = Some(EncryptionMeta::new(
+        key.key_id().to_string(),
+        summary_nonce,
+        body_nonce,
+    ));
     Ok(())
 }
 

@@ -160,8 +160,7 @@ pub fn create_note(
 #[tauri::command]
 pub fn update_note(state: State<AppState>, note: NoteDto) -> Result<NoteDto, String> {
     with_book!(state, book, {
-        let note_id =
-            syllepsis_core::id::NoteId::parse(&note.id).map_err(|e| e.to_string())?;
+        let note_id = syllepsis_core::id::NoteId::parse(&note.id).map_err(|e| e.to_string())?;
         let stored = book.store.read_note(&note_id).ok();
         let mut note = note;
         if let Some(stored) = &stored {
@@ -218,7 +217,11 @@ pub fn update_note(state: State<AppState>, note: NoteDto) -> Result<NoteDto, Str
         // re-blank the response and flip `unlocked` back to false in the UI even though the
         // session still holds the key.
         let mut session = state.pin_session.lock().unwrap();
-        Ok(crate::commands::pinlock::present(book, updated, &mut session))
+        Ok(crate::commands::pinlock::present(
+            book,
+            updated,
+            &mut session,
+        ))
     })
 }
 
