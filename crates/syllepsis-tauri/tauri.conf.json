@@ -7,7 +7,7 @@
     "frontendDist": "../../frontend/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm --prefix ../frontend run dev",
-    "beforeBuildCommand": "../scripts/prepare-bundled-models.sh && npm --prefix ../frontend run build"
+    "beforeBuildCommand": "node ../scripts/prepare-bundled-models.mjs && npm --prefix ../frontend run build"
   },
   "app": {
     "windows": [
