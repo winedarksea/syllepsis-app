@@ -10,7 +10,9 @@ use tauri::{AppHandle, Manager, State};
 
 use syllepsis_core::app::plugin::{self as app_plugin, PluginDescriptor};
 use syllepsis_core::app::text_import::{TextImportOptions, TextImportPreview};
-use syllepsis_core::plugin::{PluginHost, PluginRegistry};
+#[cfg(not(target_os = "android"))]
+use syllepsis_core::plugin::PluginHost;
+use syllepsis_core::plugin::PluginRegistry;
 
 use crate::state::AppState;
 
@@ -20,8 +22,14 @@ pub const PLUGIN_DIR_ENV_VAR: &str = "SYLLEPSIS_PLUGIN_DIR";
 
 /// The app-level plugin runtime: the discovered registry plus the loaded WASM host. Built once at
 /// startup and shared as Tauri state (its methods take `&self`).
+///
+/// On Android there is no `extism` (wasmtime has no backend there — see the Cargo.toml target
+/// split), so the host is absent: discovery still works but every plugin execution path reports
+/// plugins as unsupported. Call sites go through [`PluginRuntime::set_book_root`] and
+/// [`PluginRuntime::render_code_block`] so this file holds all the target gating.
 pub struct PluginRuntime {
     pub registry: PluginRegistry,
+    #[cfg(not(target_os = "android"))]
     pub host: PluginHost,
     /// Persisted set of disabled plugin ids. Snapshot before passing to WASM to release the lock.
     pub disabled_ids: Mutex<HashSet<String>>,
@@ -56,12 +64,39 @@ impl PluginRuntime {
                 );
             }
         }
+        #[cfg(not(target_os = "android"))]
         let host = PluginHost::load(&registry);
         PluginRuntime {
             registry,
+            #[cfg(not(target_os = "android"))]
             host,
             disabled_ids: Mutex::new(disabled_ids),
             prefs_path,
+        }
+    }
+
+    /// Point the note-write host functions at the open book. No-op on Android (no WASM host).
+    pub fn set_book_root(&self, root: Option<PathBuf>) {
+        #[cfg(not(target_os = "android"))]
+        self.host.set_book_root(root);
+        #[cfg(target_os = "android")]
+        let _ = root;
+    }
+
+    /// Render a fenced code block via the enabled renderer plugin that claims `language`,
+    /// or `None` if no plugin claims it (always `None` on Android — no WASM host).
+    pub fn render_code_block(&self, language: &str, code: &str) -> Option<String> {
+        #[cfg(not(target_os = "android"))]
+        {
+            // Snapshot disabled set before entering WASM (releases the lock before the call).
+            let disabled = self.disabled_ids.lock().unwrap().clone();
+            app_plugin::run_render_plugin(&self.host, &self.registry, &disabled, language, code)
+                .ok()
+        }
+        #[cfg(target_os = "android")]
+        {
+            let _ = (language, code);
+            None
         }
     }
 }
@@ -164,6 +199,7 @@ pub fn install_user_plugin(app: AppHandle, source_path: String) -> Result<String
 
 /// Render a fenced code block with the renderer plugin that claims `language`. Returns the
 /// plugin's HTML, which the frontend sanitizes before displaying.
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn run_render_plugin(
     state: State<AppState>,
@@ -187,8 +223,20 @@ pub fn run_render_plugin(
     .map_err(|e| e.to_string())
 }
 
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn run_render_plugin(
+    _state: State<AppState>,
+    _plugins: State<PluginRuntime>,
+    _language: String,
+    _code: String,
+) -> Result<String, String> {
+    Err("WASM plugins are not supported on Android".to_string())
+}
+
 /// Run an import-source plugin over a chosen file and return a text-import preview, so the rest of
 /// the Note Importer flow (chunk + commit) is identical to a pasted/text-file import.
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn preview_plugin_import(
     state: State<AppState>,
@@ -212,4 +260,16 @@ pub fn preview_plugin_import(
         &options,
     )
     .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn preview_plugin_import(
+    _state: State<AppState>,
+    _plugins: State<PluginRuntime>,
+    _plugin_id: String,
+    _path: String,
+    _options: TextImportOptions,
+) -> Result<TextImportPreview, String> {
+    Err("WASM plugins are not supported on Android".to_string())
 }

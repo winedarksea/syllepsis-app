@@ -10,8 +10,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(target_os = "android"))]
 const SECRETS_KEYCHAIN_SERVICE: &str = "syllepsis.secrets";
+#[cfg(not(target_os = "android"))]
 const DEVELOPMENT_SECRETS_KEYCHAIN_SERVICE: &str = "syllepsis.secrets.dev";
+#[cfg(not(target_os = "android"))]
 const VAULT_ACCOUNT: &str = "vault";
 
 /// Legacy per-field keychain items, read once during migration and then deleted.
@@ -83,7 +86,9 @@ pub trait VaultStore {
     fn delete_legacy(&mut self, service: &str, account: &str) -> Result<(), String>;
 }
 
-/// Vault backed by the OS keychain.
+/// Vault backed by the OS keychain — except on Android, where `keyring` has no backend
+/// (see the Cargo.toml target split): there the vault lives in process memory only, so
+/// credentials last for the app session and are re-entered on the next launch.
 pub struct KeyringVaultStore;
 
 impl KeyringVaultStore {
@@ -98,6 +103,7 @@ impl Default for KeyringVaultStore {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 impl VaultStore for KeyringVaultStore {
     fn get_vault(&self) -> Result<Option<String>, String> {
         keyring_get(secrets_keychain_service(), VAULT_ACCOUNT)
@@ -125,6 +131,32 @@ impl VaultStore for KeyringVaultStore {
     }
 }
 
+/// Session-only vault storage for Android. Legacy per-field items never existed on Android
+/// (this target shipped after the vault migration), so the legacy accessors are inert.
+#[cfg(target_os = "android")]
+static IN_MEMORY_VAULT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+#[cfg(target_os = "android")]
+impl VaultStore for KeyringVaultStore {
+    fn get_vault(&self) -> Result<Option<String>, String> {
+        Ok(IN_MEMORY_VAULT.lock().unwrap().clone())
+    }
+
+    fn set_vault(&mut self, value: &str) -> Result<(), String> {
+        *IN_MEMORY_VAULT.lock().unwrap() = Some(value.to_string());
+        Ok(())
+    }
+
+    fn get_legacy(&self, _service: &str, _account: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    fn delete_legacy(&mut self, _service: &str, _account: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[cfg(not(target_os = "android"))]
 fn keyring_get(service: &str, account: &str) -> Result<Option<String>, String> {
     let entry =
         keyring::Entry::new(service, account).map_err(|e| format!("open keychain entry: {e}"))?;
@@ -135,6 +167,7 @@ fn keyring_get(service: &str, account: &str) -> Result<Option<String>, String> {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 fn secrets_keychain_service() -> &'static str {
     if cfg!(debug_assertions) {
         DEVELOPMENT_SECRETS_KEYCHAIN_SERVICE

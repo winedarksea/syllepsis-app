@@ -61,8 +61,8 @@ A category's vector is computed as an average of its member notes' vectors. This
 ## Local LLM (bundled)
 
 Goal: package a small-but-capable model so LLM features **just work** on the user's device with no
-configuration. The bundled model is **Gemma 4 E2B IT, 4-bit quantized** using the ONNX Community
-split text path (`embed_tokens_q4.onnx` + `decoder_model_merged_q4.onnx`, with external
+configuration. The bundled model is **Gemma 4 E2B IT QAT mobile** using the ONNX Community
+split text path (`embed_tokens_q2f16.onnx` + `decoder_model_merged_q2f16.onnx`, with external
 `.onnx_data` files). Replacing it with a later Gemma release is a manifest entry, not a code
 change. Users with capable machines can opt into a larger model, gated behind a RAM check.
 

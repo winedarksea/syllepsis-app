@@ -558,6 +558,7 @@ pub fn builtin_model_cache_statuses(
 }
 
 /// Download any missing files for a built-in model into the machine-local app-data cache.
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn download_builtin_model(
     app: AppHandle,
@@ -591,6 +592,20 @@ pub fn download_builtin_model(
         model_id,
         downloaded_files: downloaded,
     })
+}
+
+/// No `onnx` on Android (Cargo.toml target split) — there is no local-model runtime to download
+/// for; local AI is desktop-only initially.
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn download_builtin_model(
+    _app: AppHandle,
+    _state: State<AppState>,
+    model_id: String,
+) -> Result<ModelDownloadReport, String> {
+    Err(format!(
+        "local model {model_id} cannot be downloaded on Android: local AI is desktop-only"
+    ))
 }
 
 #[cfg(test)]

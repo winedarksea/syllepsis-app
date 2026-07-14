@@ -1,16 +1,21 @@
 //! Commands for note CRUD, the unsorted queue, and the continuous book view.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+#[cfg(not(target_os = "android"))]
+use tauri::Manager;
+use tauri::{AppHandle, State};
 
-use syllepsis_core::app::{commands as app, dto::NoteDto, plugin as app_plugin};
+use syllepsis_core::app::{commands as app, dto::NoteDto};
 use syllepsis_core::model::{NoteStatus, NoteVisibility, ObjectType, PriorEdge};
+#[cfg(not(target_os = "android"))]
 use syllepsis_core::onnx::{self, ModelCache};
 use syllepsis_core::sort::RenderItem;
 use syllepsis_core::storage::NoteStore;
 
 use crate::commands::plugins::PluginRuntime;
-use crate::state::{models_root_from_app_data, AppState};
+#[cfg(not(target_os = "android"))]
+use crate::state::models_root_from_app_data;
+use crate::state::AppState;
 
 macro_rules! with_book {
     ($state:expr, $book:ident, $body:expr) => {{
@@ -67,22 +72,12 @@ pub fn render_note_markdown(
     request: RenderNoteMarkdownRequest,
 ) -> Result<String, String> {
     with_book!(state, book, {
-        plugins.host.set_book_root(Some(book.root.clone()));
-        let disabled = plugins.disabled_ids.lock().unwrap().clone();
+        plugins.set_book_root(Some(book.root.clone()));
         app::render_note_markdown(
             book,
             request.note_id.as_deref(),
             request.markdown.as_deref(),
-            &|lang, code| {
-                app_plugin::run_render_plugin(
-                    &plugins.host,
-                    &plugins.registry,
-                    &disabled,
-                    lang,
-                    code,
-                )
-                .ok()
-            },
+            &|lang, code| plugins.render_code_block(lang, code),
         )
         .map_err(|e| e.to_string())
     })
@@ -486,6 +481,18 @@ pub fn note_token_count(
     Ok(app::note_token_count_from_shared_tokenizer(&text))
 }
 
+/// No `onnx` on Android (Cargo.toml target split) — the caller falls back to the shared-tokenizer
+/// estimate.
+#[cfg(target_os = "android")]
+fn exact_embedding_token_count(
+    _app_handle: &AppHandle,
+    _embedding_model_id: &str,
+    _text: &str,
+) -> Result<app::NoteTokenCount, String> {
+    Err("embedding tokenizer is not available on Android".to_string())
+}
+
+#[cfg(not(target_os = "android"))]
 fn exact_embedding_token_count(
     app_handle: &AppHandle,
     embedding_model_id: &str,
@@ -571,13 +578,9 @@ pub fn export_html(
     path: String,
 ) -> Result<(), String> {
     with_book!(state, book, {
-        plugins.host.set_book_root(Some(book.root.clone()));
-        let disabled = plugins.disabled_ids.lock().unwrap().clone();
-        let html = app::export_html(book, &|lang, code| {
-            app_plugin::run_render_plugin(&plugins.host, &plugins.registry, &disabled, lang, code)
-                .ok()
-        })
-        .map_err(|e| e.to_string())?;
+        plugins.set_book_root(Some(book.root.clone()));
+        let html = app::export_html(book, &|lang, code| plugins.render_code_block(lang, code))
+            .map_err(|e| e.to_string())?;
         std::fs::write(&path, html).map_err(|e| format!("write HTML: {e}"))
     })
 }

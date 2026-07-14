@@ -107,7 +107,7 @@ mod tests {
         let m = builtin(BUNDLED_LLM_ID).unwrap();
         let weights = m.llm_decoder_graph_file().unwrap();
         let p = cache.file_path(&m, weights);
-        assert!(p.ends_with("gemma-4-e2b/decoder_model_merged_q4.onnx"));
+        assert!(p.ends_with("gemma-4-e2b/decoder_model_merged_q2f16.onnx"));
     }
 
     #[test]

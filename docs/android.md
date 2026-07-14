@@ -1,9 +1,10 @@
 # Android build setup
 
 Android is its own phase: the CI workflow (`.github/workflows/android.yml`) and the config
-overlay (`crates/syllepsis-tauri/tauri.android.conf.json`) are in place, but two things must be
-done **locally** (they need the Android NDK and iterative compilation) before the workflow can
-build green.
+overlay (`crates/syllepsis-tauri/tauri.android.conf.json`) are in place, and the local
+one-time setup below (source cfg-gating, `cargo tauri android init`, Gradle signing) is
+**done and committed** — kept here as the record of how it was produced. What remains before
+a release build ships is external: the `ANDROID_*` GitHub secrets and the Play Console app.
 
 ## What's already wired
 
@@ -16,19 +17,23 @@ build green.
 - **`android.yml`** — JDK 17 + Android SDK + NDK 27, builds `--apk --aab`, signs from a
   gitignored `keystore.properties`, uploads to the tag's draft release. iOS stub commented out.
 
-## Remaining local work
+## One-time local setup (done)
 
-### 1. cfg-gate the Android-excluded features in source
+### 1. cfg-gate the Android-excluded features in source ✅
 
 Because Android drops `extism`, `onnx`, and `keyring`, every `syllepsis-tauri` code path that
-uses them must be gated for `target_os = "android"` (or moved behind the desktop feature set).
-Expect to touch:
+uses them is gated for `target_os = "android"`:
 
-- **`src/secrets.rs`** — keyring-backed credential storage; provide an Android stub or gate it.
-- Semantic-search / embeddings command paths that call into the `onnx` feature.
-- WASM plugin runtime paths that call into the `extism` feature.
+- **`src/secrets.rs`** — `KeyringVaultStore` keeps its name but is backed by an in-process
+  static on Android (credentials are session-only until a real Android backend lands).
+- **`src/commands/plugins.rs`** — `PluginRuntime.host` exists only off-Android; all callers go
+  through `set_book_root`/`render_code_block` helpers so the gating lives in one file, and the
+  two WASM-executing commands return "not supported" errors on Android.
+- **`src/commands/llm.rs`** (`download_builtin_model`), **`src/commands/notes.rs`**
+  (`exact_embedding_token_count` falls back to the shared-tokenizer estimate), and
+  **`src/lib.rs`** (`model_bootstrap` is desktop-only).
 
-Iterate with the Android target until it compiles:
+To iterate on the Android target when touching these paths:
 
 ```sh
 rustup target add aarch64-linux-android wasm32-wasip1
@@ -40,7 +45,7 @@ cargo check --target aarch64-linux-android --config tauri.android.conf.json
 > fallback is desktop-only semantic search on Android initially — which the feature split above
 > already assumes (no `onnx` on Android).
 
-### 2. Initialize and commit the Android project
+### 2. Initialize and commit the Android project ✅
 
 ```sh
 export ANDROID_HOME="$HOME/Library/Android/sdk"
@@ -49,8 +54,9 @@ cd crates/syllepsis-tauri
 cargo tauri android init
 ```
 
-Then edit `gen/android/app/build.gradle.kts` to read signing config from a gitignored
-`keystore.properties` (the CI workflow writes this file from secrets):
+`gen/android/app/build.gradle.kts` reads signing config from a gitignored
+`keystore.properties` (the CI workflow writes this file from secrets); release builds without
+that file are simply unsigned, so local builds keep working:
 
 ```kotlin
 import java.util.Properties
@@ -81,7 +87,7 @@ android {
 }
 ```
 
-Commit `gen/android` (minus `keystore.properties`, which is gitignored).
+`gen/android` is committed (minus `keystore.properties`, which is gitignored).
 
 ### 3. Generate the upload keystore
 

@@ -82,3 +82,10 @@ Optional (Add when code-signing certs are ready):
 13. APPLE_ID — Apple ID email
 14. APPLE_PASSWORD — Apple ID app-specific password
 15. APPLE_TEAM_ID — Apple Team ID
+
+keytool -genkeypair \
+  -keystore upload-keystore.jks \
+  -alias actions \
+  -keyalg RSA -keysize 2048 \
+  -validity 10000 \
+  -storetype JKS

@@ -81,6 +81,10 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set (see docs/android.md)"
+            exit 1
+          fi
           keystore="$RUNNER_TEMP/upload.jks"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
           props="crates/syllepsis-tauri/gen/android/keystore.properties"
@@ -97,7 +101,7 @@ jobs:
           SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
         working-directory: crates/syllepsis-tauri
         # The android overlay config drops model prep + the bundled-models resource so the
-        # APK stays small (runtime HF download fallback covers it).
+        # APK stays small (no `onnx` on Android — local AI is desktop-only, see docs/android.md).
         run: cargo tauri android build --apk --aab --target aarch64 --config tauri.android.conf.json
 
       - name: Collect artifacts

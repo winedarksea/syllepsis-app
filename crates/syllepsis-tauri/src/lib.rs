@@ -2,6 +2,8 @@
 
 pub mod commands;
 pub mod local_ai;
+// No `onnx` on Android (Cargo.toml target split), so there is no embedding model to provision.
+#[cfg(not(target_os = "android"))]
 mod model_bootstrap;
 pub mod pin_session;
 pub mod search_api_config;
@@ -77,6 +79,7 @@ pub fn run() {
             }
             commands::sync::start_managed_cloud_auto_sync(app.handle().clone());
             commands::pinlock::start_pin_session_relock_poll(app.handle().clone());
+            #[cfg(not(target_os = "android"))]
             model_bootstrap::provision_default_embedding_model(app.handle())?;
             // Start the search API server if it was enabled when the app was last quit.
             if let Ok(app_data_dir) = app.path().app_data_dir() {

@@ -1,0 +1,10 @@
+/src/main/**/generated
+/src/main/jniLibs/**/*.so
+/src/main/assets/tauri.conf.json
+# Build-time copies of tauri.conf.json `resources` — regenerated every build; a stale
+# `models` dir can appear from desktop leftovers (the android overlay excludes models).
+/src/main/assets/plugins
+/src/main/assets/models
+/tauri.build.gradle.kts
+/proguard-tauri.pro
+/tauri.properties

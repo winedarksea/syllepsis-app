@@ -36,6 +36,8 @@ pub enum Quantization {
     Q4,
     /// 4-bit weights with fp16 activations and I/O; smallest, but requires half-precision I/O.
     Q4F16,
+    /// Mobile QAT weights with 2-bit decoder layers and fp16 activations and I/O.
+    Q2F16,
 }
 
 /// How a transformer's per-token hidden states are reduced to one sentence vector.
@@ -242,72 +244,75 @@ fn embeddinggemma_300m() -> ModelManifest {
     }
 }
 
-/// [Gemma 4 E2B IT](https://huggingface.co/onnx-community/gemma-4-E2B-it-ONNX): the bundled
-/// local LLM (Phase 3). The text path is a split ORT export: token ids first pass through
-/// `embed_tokens_q4.onnx`, then embeddings feed `decoder_model_merged_q4.onnx`. Both graphs
-/// have external `.onnx_data` files, so the manifest must download them next to the graphs.
+/// [Gemma 4 E2B IT QAT mobile](https://huggingface.co/onnx-community/gemma-4-E2B-it-qat-mobile-ONNX):
+/// the bundled local LLM (Phase 3). The text path is a split ORT export: token ids first pass
+/// through `embed_tokens_q2f16.onnx`, then embeddings feed `decoder_model_merged_q2f16.onnx`.
+/// The mobile QAT export carries per-layer embeddings and uses fp16 activations around its 2-bit
+/// decoder weights. Both graphs have external `.onnx_data` files.
 ///
-/// The QAT-mobile repo is not a drop-in replacement for this manifest today: its text graphs are
-/// named `q2f16`, while the built-in local model path requires a Q4 text export.
+/// Rollback: to use the general desktop export again, change `repo`, `quantization`,
+/// `hidden_size`, and every pinned file/hash/size below together to the corresponding values from
+/// `onnx-community/gemma-4-E2B-it-ONNX` (`*_q4.onnx`). Keeping the stable `id` preserves existing
+/// book configs; changed file names make the cache re-download the selected variant.
 fn gemma_4_e2b() -> ModelManifest {
     ModelManifest {
         id: BUNDLED_LLM_ID.to_string(),
         display_name: "Gemma 4 E2B".to_string(),
-        repo: "onnx-community/gemma-4-E2B-it-ONNX".to_string(),
+        repo: "onnx-community/gemma-4-E2B-it-qat-mobile-ONNX".to_string(),
         revision: "main".to_string(),
         kind: ModelKind::Llm,
-        quantization: Quantization::Q4,
+        quantization: Quantization::Q2F16,
         files: vec![
             ModelFile::pinned(
-                "onnx/embed_tokens_q4.onnx",
+                "onnx/embed_tokens_q2f16.onnx",
                 FileRole::TokenEmbeddings,
-                "2d8c8a2bcc30e8ded7f636967c2a58a346116583356dd933720b005fc88079c4",
-                5_142,
+                "ee1b97a04187ba19a23a8ca1761bcd5f241e37ef9ed29ccedb4c1f15e54ec114",
+                5_491,
             ),
             ModelFile::pinned(
-                "onnx/embed_tokens_q4.onnx_data",
+                "onnx/embed_tokens_q2f16.onnx_data",
                 FileRole::WeightsData,
-                "40fa957d9988b8a0160c8b0eb5c3f781a237627e9f7153f30514a4ffb2e62888",
-                1_762_656_256,
+                "a4e548ba02cabd151b9aea983c0338d8ce80b34b00a02a17a3fff50509f03076",
+                1_296_564_224,
             ),
             ModelFile::pinned(
-                "onnx/decoder_model_merged_q4.onnx",
+                "onnx/decoder_model_merged_q2f16.onnx",
                 FileRole::Decoder,
-                "c6edb929bf342c524728d37efd400285ee71525e8fe64ff996341f78c3e577d2",
-                647_599,
+                "c0e72ee12b6715bc968621a09ee695e232f6e5f1190f4fae6d02ba2c5319ddee",
+                807_184,
             ),
             ModelFile::pinned(
-                "onnx/decoder_model_merged_q4.onnx_data",
+                "onnx/decoder_model_merged_q2f16.onnx_data",
                 FileRole::WeightsData,
-                "b879fe4b946c9b9ff6acb60f7c5eda3d2c9c4df8625895feb2d1e269002f0345",
-                1_864_102_912,
+                "9b9e8d541335ccdd0226c697882a84a1cb77ac2726ce097e5847589b1e632bcc",
+                994_621_440,
             ),
             ModelFile::pinned(
                 "tokenizer.json",
                 FileRole::Tokenizer,
-                "47bd35616c7c782aaca6ccf48c75f3461d5877170984b8836b375107d0a9f566",
-                19_439_251,
+                "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+                32_169_626,
             ),
             ModelFile::pinned(
                 "tokenizer_config.json",
                 FileRole::TokenizerConfig,
-                "06afbf54e228050cba79c4a0afd83543cc89070a2d62b8337d0aa8b4cdc348c3",
-                18_807,
+                "68e2ea668d2b18a3c9b2868cccc1911e3c3b432c8f786557b17f164b346d9667",
+                2_095,
             ),
             ModelFile::pinned(
                 "config.json",
                 FileRole::Config,
-                "5494e6677d9e150ea20ba3101ae8a32b0f141004626f052725d8bf48991b9faa",
-                5_549,
+                "2387efbdf9d703a03f5e18f5de054eaff7956bb9dbce392bc576e38974f93654",
+                6_673,
             ),
             ModelFile::pinned(
                 "generation_config.json",
                 FileRole::GenerationConfig,
-                "e6a0b50de21a511f15ac4857b7f227f68ee60ecb1f11255d07b75e0bdc60e155",
-                238,
+                "fb53f4c64e58896a63472e8eb304397db4a39453e1da0f5d57625ec5a8c1050e",
+                209,
             ),
         ],
-        hidden_size: 2048,
+        hidden_size: 1536,
         max_context_tokens: 8_192,
         min_ram_mb: 3_072,
         preferred_execution_providers: vec![
@@ -342,7 +347,7 @@ mod tests {
     fn lookup_by_id_round_trips() {
         let m = builtin(BUNDLED_LLM_ID).expect("bundled llm present");
         assert_eq!(m.kind, ModelKind::Llm);
-        assert_eq!(m.quantization, Quantization::Q4);
+        assert_eq!(m.quantization, Quantization::Q2F16);
         assert_eq!(
             builtin(LEGACY_QWEN3_EMBEDDING_ID).unwrap().id,
             EMBEDDINGGEMMA_ID
@@ -398,16 +403,15 @@ mod tests {
     #[test]
     fn gemma_manifest_matches_split_text_export() {
         let m = builtin(BUNDLED_LLM_ID).unwrap();
-        assert_eq!(m.repo, "onnx-community/gemma-4-E2B-it-ONNX");
-        assert_ne!(m.repo, "onnx-community/gemma-4-E2B-it-qat-mobile-ONNX");
-        assert_eq!(m.quantization, Quantization::Q4);
+        assert_eq!(m.repo, "onnx-community/gemma-4-E2B-it-qat-mobile-ONNX");
+        assert_eq!(m.quantization, Quantization::Q2F16);
         assert_eq!(
             m.token_embeddings_file().unwrap().repo_path,
-            "onnx/embed_tokens_q4.onnx"
+            "onnx/embed_tokens_q2f16.onnx"
         );
         assert_eq!(
             m.decoder_file().unwrap().repo_path,
-            "onnx/decoder_model_merged_q4.onnx"
+            "onnx/decoder_model_merged_q2f16.onnx"
         );
         assert_eq!(
             m.files

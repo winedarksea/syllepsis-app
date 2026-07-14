@@ -153,7 +153,7 @@ mod tests {
         let weights = m.llm_decoder_graph_file().unwrap();
         assert_eq!(
             file_url(&m, weights),
-            "https://huggingface.co/onnx-community/gemma-4-E2B-it-ONNX/resolve/main/onnx/decoder_model_merged_q4.onnx"
+            "https://huggingface.co/onnx-community/gemma-4-E2B-it-qat-mobile-ONNX/resolve/main/onnx/decoder_model_merged_q2f16.onnx"
         );
     }
 
@@ -280,7 +280,7 @@ mod tests {
         assert_eq!(report.len(), 1);
         assert_eq!(
             fetcher.fetched.borrow().as_slice(),
-            ["embed_tokens_q4.onnx"]
+            ["embed_tokens_q2f16.onnx"]
         );
         assert!(cache.is_cached(&m));
     }

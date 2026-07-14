@@ -201,6 +201,7 @@ fn quantization_name(quantization: Quantization) -> &'static str {
         Quantization::Int8 => "int8",
         Quantization::Q4 => "q4",
         Quantization::Q4F16 => "q4f16",
+        Quantization::Q2F16 => "q2f16",
     }
 }
 
