@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use syllepsis_core::onnx::{
-    builtin, download_missing, HttpModelFetcher, ModelCache, ModelManifest, EMBEDDINGGEMMA_ID,
+    builtin, download_missing, HttpModelFetcher, ModelCache, ModelManifest, BUNDLED_LLM_ID,
+    EMBEDDINGGEMMA_ID,
 };
 use tauri::{AppHandle, Manager};
 
@@ -41,8 +42,38 @@ pub fn provision_default_embedding_model(app: &AppHandle) -> Result<(), String> 
     Ok(())
 }
 
+/// Install the bundled local LLM on first launch. A changed manifest file name intentionally
+/// makes an older model cache incomplete, so this also migrates desktop-model installations to
+/// the QAT-mobile export without altering the stable configured model id.
+pub fn provision_bundled_local_llm(app: &AppHandle) -> Result<(), String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("resolve app data dir: {error}"))?;
+    let destination_root = models_root_from_app_data(&app_data_dir);
+    let manifest = local_llm_manifest()?;
+    let destination_cache = ModelCache::new(&destination_root);
+    if destination_cache.is_cached(&manifest) {
+        return Ok(());
+    }
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled_cache = ModelCache::new(resource_dir.join("models"));
+        if bundled_cache.is_cached(&manifest) {
+            return copy_bundled_model(&bundled_cache, &destination_cache, &manifest);
+        }
+    }
+
+    spawn_llm_download_fallback(destination_root);
+    Ok(())
+}
+
 fn embedding_manifest() -> Result<ModelManifest, String> {
     builtin(EMBEDDINGGEMMA_ID).ok_or_else(|| "EmbeddingGemma manifest is unavailable".to_string())
+}
+
+fn local_llm_manifest() -> Result<ModelManifest, String> {
+    builtin(BUNDLED_LLM_ID).ok_or_else(|| "bundled local LLM manifest is unavailable".to_string())
 }
 
 fn copy_bundled_model(
@@ -121,6 +152,24 @@ fn spawn_download_fallback(app: AppHandle, destination_root: PathBuf) {
             }
         })
         .expect("start embedding model bootstrap");
+}
+
+fn spawn_llm_download_fallback(destination_root: PathBuf) {
+    std::thread::Builder::new()
+        .name("syllepsis-llm-model-bootstrap".into())
+        .spawn(move || {
+            let result = (|| {
+                let manifest = local_llm_manifest()?;
+                let fetcher = HttpModelFetcher::new().map_err(|error| error.to_string())?;
+                download_missing(&ModelCache::new(destination_root), &manifest, &fetcher)
+                    .map_err(|error| error.to_string())?;
+                Ok::<(), String>(())
+            })();
+            if let Err(error) = result {
+                tracing::error!(error = %error, "automatic local LLM provisioning failed");
+            }
+        })
+        .expect("start local LLM model bootstrap");
 }
 
 fn resume_embedding_queue(app: &AppHandle) {

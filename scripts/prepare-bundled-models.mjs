@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// Cross-platform entry point for preparing the bundled ONNX models.
-//
-// Tauri runs `beforeBuildCommand` through the platform shell (cmd.exe on Windows),
-// which cannot execute the sibling `.sh` script. This Node wrapper works identically
-// on Windows, macOS, and Linux and simply shells out to the same `cargo run` the shell
-// script does. Keep this in sync with prepare-bundled-models.sh.
+// Cross-platform entry point for preparing the bundled ONNX models. Tauri runs
+// `beforeBuildCommand` through the platform shell (cmd.exe on Windows), so this Node
+// wrapper keeps the download step identical on Windows, macOS, and Linux.
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -32,6 +29,7 @@ const result = spawnSync(
     "--",
     bundleCache,
     "embeddinggemma-300m",
+    "gemma-4-e2b",
   ],
   { stdio: "inherit", shell: false },
 );

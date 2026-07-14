@@ -110,8 +110,8 @@ jobs:
             plugins/syntax-highlight
           key: ${{ matrix.target }}
 
-      # The ~207 MB HuggingFace download for the bundled model is deterministic; cache it so
-      # only the first run pays the cost. Key on the prep script + the model manifest source.
+      # The bundled embedding and QAT-mobile LLM downloads are deterministic; cache them so
+      # only the first run pays the multi-gigabyte transfer. Key on the prep script + manifest.
       - name: Cache bundled models
         uses: actions/cache@v4
         with:
@@ -133,6 +133,13 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm --prefix frontend ci
+
+      # Verify the exact model cache that Tauri will package. The preparation example verifies
+      # every pinned SHA-256 after downloading, and exits non-zero if a manifest file is absent,
+      # wrong-sized, or corrupt. Keep this separate from `beforeBuildCommand` so a release log
+      # makes the bundled-model gate explicit before installer creation begins.
+      - name: Prepare and verify bundled ONNX models
+        run: node scripts/prepare-bundled-models.mjs
 
       - name: Install Tauri CLI
         uses: taiki-e/install-action@v2

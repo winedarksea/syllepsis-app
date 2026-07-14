@@ -80,7 +80,10 @@ pub fn run() {
             commands::sync::start_managed_cloud_auto_sync(app.handle().clone());
             commands::pinlock::start_pin_session_relock_poll(app.handle().clone());
             #[cfg(not(target_os = "android"))]
-            model_bootstrap::provision_default_embedding_model(app.handle())?;
+            {
+                model_bootstrap::provision_default_embedding_model(app.handle())?;
+                model_bootstrap::provision_bundled_local_llm(app.handle())?;
+            }
             // Start the search API server if it was enabled when the app was last quit.
             if let Ok(app_data_dir) = app.path().app_data_dir() {
                 let cfg = search_api_config::SearchApiConfig::load(&app_data_dir);
