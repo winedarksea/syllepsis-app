@@ -1,6 +1,10 @@
 //! Make the canonical embedder available without requiring user setup.
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs::{File, OpenOptions},
+    io::{self, BufReader},
+    path::{Path, PathBuf},
+};
 
 use syllepsis_core::onnx::{
     builtin, download_missing, HttpModelFetcher, ModelCache, ModelManifest, BUNDLED_LLM_ID,
@@ -23,9 +27,9 @@ pub fn provision_default_embedding_model(app: &AppHandle) -> Result<(), String> 
     }
 
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled_cache = ModelCache::new(resource_dir.join("models"));
-        if bundled_cache.is_cached(&manifest) {
-            match copy_bundled_model(&bundled_cache, &destination_cache, &manifest) {
+        let archive_path = bundled_model_archive_path(&resource_dir);
+        if archive_path.is_file() {
+            match extract_bundled_model_archive(&archive_path, &destination_cache, &manifest) {
                 Ok(()) => {
                     resume_embedding_queue(app);
                     return Ok(());
@@ -58,9 +62,9 @@ pub fn provision_bundled_local_llm(app: &AppHandle) -> Result<(), String> {
     }
 
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled_cache = ModelCache::new(resource_dir.join("models"));
-        if bundled_cache.is_cached(&manifest) {
-            return copy_bundled_model(&bundled_cache, &destination_cache, &manifest);
+        let archive_path = bundled_model_archive_path(&resource_dir);
+        if archive_path.is_file() {
+            return extract_bundled_model_archive(&archive_path, &destination_cache, &manifest);
         }
     }
 
@@ -76,50 +80,94 @@ fn local_llm_manifest() -> Result<ModelManifest, String> {
     builtin(BUNDLED_LLM_ID).ok_or_else(|| "bundled local LLM manifest is unavailable".to_string())
 }
 
-fn copy_bundled_model(
-    source: &ModelCache,
+fn bundled_model_archive_path(resource_dir: &Path) -> PathBuf {
+    resource_dir.join("model-archives").join("models.tar.xz")
+}
+
+/// Extract only one model from the app resource archive. Files are staged beside their final
+/// paths and renamed only after every expected byte count has been written, so an interrupted
+/// first launch cannot leave a cache that looks complete.
+fn extract_bundled_model_archive(
+    archive_path: &Path,
     destination: &ModelCache,
     manifest: &ModelManifest,
 ) -> Result<(), String> {
-    std::fs::create_dir_all(destination.model_dir(manifest)).map_err(|error| error.to_string())?;
-    for file in &manifest.files {
-        let destination_path = destination.file_path(manifest, file);
-        if destination_path
-            .metadata()
-            .ok()
-            .is_some_and(|metadata| file.size_bytes == Some(metadata.len()))
-        {
-            continue;
-        }
-        copy_file_atomically(&source.file_path(manifest, file), &destination_path)?;
-    }
-    destination
-        .is_cached(manifest)
-        .then_some(())
-        .ok_or_else(|| "bundled EmbeddingGemma files did not produce a complete cache".into())
-}
-
-fn copy_file_atomically(source: &Path, destination: &Path) -> Result<(), String> {
-    let temporary = temporary_copy_path(destination);
+    let mut temporary_paths = Vec::with_capacity(manifest.files.len());
     let result = (|| {
-        // A hard link avoids consuming another ~207 MB when the application resources and app
-        // data are on the same volume. Cross-volume and restricted filesystems fall back to copy.
-        if std::fs::hard_link(source, &temporary).is_err() {
-            std::fs::copy(source, &temporary).map_err(|error| {
-                format!(
-                    "copy bundled model {} to {}: {error}",
-                    source.display(),
-                    temporary.display()
-                )
-            })?;
+        std::fs::create_dir_all(destination.model_dir(manifest))
+            .map_err(|error| error.to_string())?;
+        let archive_file = File::open(archive_path).map_err(|error| error.to_string())?;
+        let decoder = xz2::read::XzDecoder::new(BufReader::new(archive_file));
+        let mut archive = tar::Archive::new(decoder);
+
+        for entry in archive.entries().map_err(|error| error.to_string())? {
+            let mut entry = entry.map_err(|error| error.to_string())?;
+            if !entry.header().entry_type().is_file() {
+                continue;
+            }
+            let archive_entry_path = entry.path().map_err(|error| error.to_string())?;
+            let Some(model_file) = manifest
+                .files
+                .iter()
+                .find(|file| archive_entry_matches_model_file(&archive_entry_path, manifest, file))
+            else {
+                continue;
+            };
+
+            let destination_path = destination.file_path(manifest, model_file);
+            let temporary_path = temporary_copy_path(&destination_path);
+            let _ = std::fs::remove_file(&temporary_path);
+            let mut output = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary_path)
+                .map_err(|error| error.to_string())?;
+            let written = io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+            if model_file
+                .size_bytes
+                .is_some_and(|expected| expected != written)
+            {
+                return Err(format!(
+                    "bundled archive entry {} has an unexpected size",
+                    model_file.file_name()
+                ));
+            }
+            temporary_paths.push((temporary_path, destination_path));
         }
-        std::fs::rename(&temporary, destination)
-            .map_err(|error| format!("install bundled model {}: {error}", destination.display()))
+
+        if temporary_paths.len() != manifest.files.len() {
+            return Err(format!(
+                "bundled archive does not contain every file for {}",
+                manifest.id
+            ));
+        }
+        for (temporary_path, destination_path) in &temporary_paths {
+            std::fs::rename(temporary_path, destination_path).map_err(|error| error.to_string())?;
+        }
+        destination
+            .is_cached(manifest)
+            .then_some(())
+            .ok_or_else(|| "bundled archive extraction did not produce a complete cache".into())
     })();
     if result.is_err() {
-        let _ = std::fs::remove_file(temporary);
+        for (temporary_path, _) in temporary_paths {
+            let _ = std::fs::remove_file(temporary_path);
+        }
     }
     result
+}
+
+fn archive_entry_matches_model_file(
+    archive_path: &Path,
+    manifest: &ModelManifest,
+    file: &syllepsis_core::onnx::ModelFile,
+) -> bool {
+    let components: Vec<_> = archive_path
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .filter(|component| *component != ".")
+        .collect();
+    components == [manifest.id.as_str(), file.file_name()]
 }
 
 fn temporary_copy_path(destination: &Path) -> PathBuf {
@@ -184,12 +232,13 @@ fn resume_embedding_queue(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use syllepsis_core::onnx::manifest::FileRole;
     use syllepsis_core::onnx::ModelFile;
 
     #[test]
-    fn bundled_copy_installs_a_complete_small_manifest() {
-        let source_directory = tempfile::tempdir().unwrap();
+    fn bundled_archive_installs_a_complete_small_manifest() {
+        let archive_directory = tempfile::tempdir().unwrap();
         let destination_directory = tempfile::tempdir().unwrap();
         let mut manifest = embedding_manifest().unwrap();
         manifest.files = vec![ModelFile {
@@ -198,12 +247,27 @@ mod tests {
             sha256: None,
             size_bytes: Some(4),
         }];
-        let source = ModelCache::new(source_directory.path());
         let destination = ModelCache::new(destination_directory.path());
-        std::fs::create_dir_all(source.model_dir(&manifest)).unwrap();
-        std::fs::write(source.file_path(&manifest, &manifest.files[0]), b"data").unwrap();
+        let archive_path = archive_directory.path().join("models.tar.xz");
+        let archive_file = File::create(&archive_path).unwrap();
+        let encoder = xz2::write::XzEncoder::new(archive_file, 6);
+        let mut archive = tar::Builder::new(encoder);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(4);
+        header.set_mode(0o600);
+        header.set_cksum();
+        archive
+            .append_data(
+                &mut header,
+                format!("./{}/model.bin", manifest.id),
+                &b"data"[..],
+            )
+            .unwrap();
+        let mut encoder = archive.into_inner().unwrap();
+        encoder.flush().unwrap();
+        encoder.finish().unwrap();
 
-        copy_bundled_model(&source, &destination, &manifest).unwrap();
+        extract_bundled_model_archive(&archive_path, &destination, &manifest).unwrap();
 
         assert!(destination.is_cached(&manifest));
     }

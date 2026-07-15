@@ -30,12 +30,14 @@ notify = "8"
 opendal = { version = "0.57", features = ["blocking", "services-gdrive", "services-dropbox", "services-onedrive"] }
 sha2 = { workspace = true }
 base64 = "0.22"
+tar = "0.4"
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
 tokio = { version = "1", features = ["net"] }
+xz2 = "0.1"
 
 # syllepsis-core features split by target. Desktop gets the full stack; Android drops
 # `extism` (wasmtime — no Android backend) and `onnx` (ort linking is the open Android

@@ -5,7 +5,7 @@
   },
   "bundle": {
     "resources": {
-      "bundled-models": null
+      "bundled-model-archives": null
     }
   }
 }

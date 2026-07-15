@@ -38,7 +38,15 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install NDK
-        run: sdkmanager "ndk;27.0.12077973"
+        run: |
+          set -euo pipefail
+          sdkmanager "ndk;27.0.12077973"
+          ndk_home="$ANDROID_HOME/ndk/27.0.12077973"
+          test -d "$ndk_home"
+          # setup-android exports ANDROID_HOME but does not set an NDK path. Persist this
+          # for later steps instead of referencing the unset ANDROID_NDK_ROOT expression.
+          echo "NDK_HOME=$ndk_home" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ndk_home" >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -97,7 +105,6 @@ jobs:
 
       - name: Build Android APK + AAB
         env:
-          NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
           SYLLEPSIS_GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
         working-directory: crates/syllepsis-tauri
         # The android overlay config drops model prep + the bundled-models resource so the
