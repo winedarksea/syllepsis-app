@@ -19,6 +19,25 @@ use commands::{
 use state::AppState;
 use tauri::Manager;
 
+/// Supply Rustls with the Android application context before any HTTPS request runs.
+///
+/// reqwest uses `rustls-platform-verifier` on Android, which needs this context to consult the
+/// device trust store. Without it, HTTPS requests made by the native backend fail after OAuth
+/// returns to the loopback callback.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_com_syllepsis_app_MainActivity_nativeInitializeTlsVerifier(
+    mut environment: jni::JNIEnv,
+    _activity: jni::objects::JObject,
+    application_context: jni::objects::JObject,
+) {
+    if let Err(error) =
+        rustls_platform_verifier::android::init_with_env(&mut environment, application_context)
+    {
+        tracing::error!("initialize Android TLS certificate verifier: {error}");
+    }
+}
+
 /// Initialize tracing so "fancier" operations (LLM calls, search) log to the console in
 /// `tauri dev`. Defaults to `info` in debug builds and `warn` in release; override with `RUST_LOG`.
 fn init_tracing() {

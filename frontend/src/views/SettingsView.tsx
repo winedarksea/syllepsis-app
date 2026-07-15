@@ -324,8 +324,10 @@ export function SettingsView({ launchMode = false }: Props) {
 // ── Layout primitives ──────────────────────────────────────────────────────────
 
 function SettingsError({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  const [copied, setCopied] = useState(false);
   const copyError = useCallback(async () => {
-    await navigator.clipboard?.writeText(message).catch(() => undefined);
+    const copiedToClipboard = await copyTextToClipboard(message);
+    setCopied(copiedToClipboard);
   }, [message]);
 
   return (
@@ -336,13 +338,36 @@ function SettingsError({ message, onDismiss }: { message: string; onDismiss: () 
           <span>Error</span>
         </div>
         <div className="sv-error-panel-actions">
-          <button className="sv-btn sv-btn-compact" type="button" onClick={copyError}>Copy</button>
+          <button className="sv-btn sv-btn-compact" type="button" onClick={copyError}>
+            {copied ? 'Copied' : 'Copy'}
+          </button>
           <button className="sv-btn sv-btn-compact" type="button" onClick={onDismiss}>Dismiss</button>
         </div>
       </div>
       <pre className="sv-error-panel-message">{message}</pre>
     </div>
   );
+}
+
+/** Android WebViews do not always expose the asynchronous Clipboard API. */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Continue to the WebView-compatible fallback below.
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  textarea.remove();
+  return copied;
 }
 
 // "Check for updates" control in the About section. Desktop-only under the hood: on mobile or

@@ -50,6 +50,10 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 
 [target.'cfg(target_os = "android")'.dependencies]
 syllepsis-core = { path = "../syllepsis-core", features = ["loro"] }
+# reqwest's Rustls backend delegates certificate verification to Android. These direct
+# dependencies let the app initialize that verifier as soon as Android creates the activity.
+jni = "0.22"
+rustls-platform-verifier = "0.7"
 
 # Desktop-only: the auto-updater and process (relaunch) plugins have no mobile backend.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

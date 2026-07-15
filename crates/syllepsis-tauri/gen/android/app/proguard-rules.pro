@@ -19,3 +19,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# The TLS verifier is called from Rust through JNI, so R8 cannot discover the reference.
+-keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }
