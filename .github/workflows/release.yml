@@ -69,7 +69,9 @@ jobs:
             args: "--target aarch64-apple-darwin"
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            args: ""
+            # The bundled ONNX payload is larger than WiX/MSI's embedded-cabinet limit. NSIS
+            # supports the full payload and is the Windows updater's preferred artifact.
+            args: "--bundles nsis"
           # ubuntu-24.04 (glibc 2.39), not 22.04 (glibc 2.35): the pyke prebuilt ONNX
           # Runtime that `ort` links references __isoc23_strtol/strtoull/strtoll, which only
           # exist in glibc >= 2.38. Those become @GLIBC_2.38 imports in the final binary, so
