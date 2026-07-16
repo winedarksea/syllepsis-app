@@ -39,13 +39,7 @@
   width: 36px;
   height: 36px;
   border-radius: var(--radius-md);
-  display: grid;
-  place-items: center;
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
-  font-family: var(--font-serif);
-  font-size: var(--font-size-lg);
-  font-weight: 700;
+  display: block;
 }
 
 .picker-title {

@@ -27,6 +27,7 @@ import { LlmJobTray } from './components/LlmJobTray';
 import { UnlockPinModal } from './components/UnlockPinModal';
 import { usePinLockStore, startPinLockListener } from './lib/pinLock';
 import { resolveThemeVars, resolveThemeStyle } from './theme/themes';
+import honeybeeLogo from './assets/honeybee-logo.svg';
 import type {
   BookInfo, TrackedBookInfo, ClassificationKind, ObjectType,
   CloudBookSummary, CloudSyncProviderDescriptor, CloudSyncProviderStatus,
@@ -126,7 +127,7 @@ function BookPicker() {
         >
           <Icon name="settings" size={20} />
         </button>
-        <div className="picker-logo">S</div>
+        <img className="picker-logo" src={honeybeeLogo} alt="" />
         <h1 className="picker-title">Syllepsis</h1>
         <p className="picker-subtitle">Choose a local knowledge book.</p>
         {error && <div className="picker-error" onClick={() => setError(null)}>{error}</div>}
