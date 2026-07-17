@@ -27,14 +27,23 @@ use tauri::Manager;
 #[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "system" fn Java_com_syllepsis_app_MainActivity_nativeInitializeTlsVerifier(
-    mut environment: jni::JNIEnv,
-    _activity: jni::objects::JObject,
-    application_context: jni::objects::JObject,
+    mut unowned_environment: jni::EnvUnowned<'_>,
+    _activity: jni::objects::JObject<'_>,
+    application_context: jni::objects::JObject<'_>,
 ) {
-    if let Err(error) =
-        rustls_platform_verifier::android::init_with_env(&mut environment, application_context)
+    match unowned_environment
+        .with_env(|environment| {
+            rustls_platform_verifier::android::init_with_env(environment, application_context)
+        })
+        .into_outcome()
     {
-        tracing::error!("initialize Android TLS certificate verifier: {error}");
+        jni::Outcome::Ok(()) => {}
+        jni::Outcome::Err(error) => {
+            tracing::error!("initialize Android TLS certificate verifier: {error}");
+        }
+        jni::Outcome::Panic(_) => {
+            tracing::error!("initialize Android TLS certificate verifier panicked");
+        }
     }
 }
 
