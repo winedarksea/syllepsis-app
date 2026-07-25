@@ -1,5 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { $createParagraphNode, $createTextNode, $getRoot, type LexicalEditor } from 'lexical';
 import { Editor } from './Editor';
 import { useStore } from '../lib/store';
 import type { NoteDto } from '../types';
@@ -7,6 +8,9 @@ import type { NoteDto } from '../types';
 const mocks = vi.hoisted(() => ({
   getNote: vi.fn<() => Promise<NoteDto>>(),
   createCommentary: vi.fn(async () => ({ id: 'commentary-1' })),
+  updateNote: vi.fn(async (note: NoteDto) => note),
+  // Filled in by the mocked HistoryPlugin below so tests can drive the real Lexical editor.
+  lexicalEditorHolder: { editor: null as LexicalEditor | null },
 }));
 
 vi.mock('../lib/api', () => ({
@@ -23,9 +27,24 @@ vi.mock('../lib/api', () => ({
     enqueueLlmJob: vi.fn(async () => ({})),
     renderNoteMarkdown: vi.fn(async ({ markdown }: { markdown: string }) => `<p>${markdown}</p>`),
     allCategories: vi.fn(async () => []),
-    updateNote: vi.fn(async (note: NoteDto) => note),
+    // Needed once the Lexical composer mounts (edit mode): AutocompletePlugin looks up locations.
+    locationLookup: vi.fn(async () => []),
+    updateNote: mocks.updateNote,
   },
 }));
+
+// HistoryPlugin is behavior-free for these tests, so it doubles as the seam that hands the live
+// LexicalEditor to the test (there is no other public handle on the composer's editor).
+vi.mock('@lexical/react/LexicalHistoryPlugin', async () => {
+  const { useLexicalComposerContext } = await import('@lexical/react/LexicalComposerContext');
+  return {
+    HistoryPlugin: () => {
+      const [editor] = useLexicalComposerContext();
+      mocks.lexicalEditorHolder.editor = editor;
+      return null;
+    },
+  };
+});
 
 vi.mock('../components/Icon', () => ({
   Icon: ({ name }: { name: string }) => <span aria-hidden="true">{name}</span>,
@@ -173,6 +192,68 @@ describe('Editor locked-note drafts', () => {
     cleanup();
     render(<Editor noteId={lockedNote().id} initialMode="source" />);
     expect(await screen.findByDisplayValue('baseline body')).toBeTruthy();
+  });
+});
+
+describe('Editor save flushes the pending body', () => {
+  beforeEach(() => {
+    cleanup();
+    installLocalStorageStub();
+    localStorage.clear();
+    vi.clearAllMocks();
+    mocks.lexicalEditorHolder.editor = null;
+    useStore.setState({
+      editorFocusMode: false,
+      desktopSidebarCollapsed: false,
+      sidebarOpen: false,
+      pluginsLoaded: true,
+    });
+    mocks.getNote.mockResolvedValue(unlockedNote());
+  });
+
+  // Regression guard for the stale-body save race: the markdown conversion is debounced, so a save
+  // that lands before the debounce fires must still persist the newest keystrokes.
+  it('persists the just-typed markdown, not the pre-flush state', async () => {
+    render(<Editor noteId={unlockedNote().id} initialMode="edit" />);
+    await waitFor(() => expect(mocks.lexicalEditorHolder.editor).toBeTruthy());
+    const lexicalEditor = mocks.lexicalEditorHolder.editor!;
+
+    // Type into the real editor. Only microtasks are flushed (Lexical commits its update in one),
+    // so the 250ms coalescing timer is still pending and `currentBody` state is one render behind.
+    await act(async () => {
+      lexicalEditor.update(() => {
+        const root = $getRoot();
+        root.clear();
+        const paragraph = $createParagraphNode();
+        paragraph.append($createTextNode('freshly typed line'));
+        root.append(paragraph);
+      });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(mocks.updateNote).toHaveBeenCalled());
+    const savedNote = mocks.updateNote.mock.calls[0][0];
+    expect(savedNote.body).toBe('freshly typed line');
+    expect(savedNote.baseline_body).toBe('baseline body');
+  });
+
+  it('carries the pending body into a mode switch out of edit mode', async () => {
+    render(<Editor noteId={unlockedNote().id} initialMode="edit" />);
+    await waitFor(() => expect(mocks.lexicalEditorHolder.editor).toBeTruthy());
+    const lexicalEditor = mocks.lexicalEditorHolder.editor!;
+
+    await act(async () => {
+      lexicalEditor.update(() => {
+        const root = $getRoot();
+        root.clear();
+        const paragraph = $createParagraphNode();
+        paragraph.append($createTextNode('markdown for source mode'));
+        root.append(paragraph);
+      });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'source' }));
+
+    expect(await screen.findByDisplayValue('markdown for source mode')).toBeTruthy();
   });
 });
 
