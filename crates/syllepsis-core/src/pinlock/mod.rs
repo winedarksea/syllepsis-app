@@ -2,7 +2,8 @@
 //!
 //! One PIN protects an entire book. [`keycheck`] derives and verifies the book key against a
 //! synced-but-content-free `_pinlock.json` payload; [`notecrypt`] applies that key to individual
-//! notes' `summary`/`body` fields. Sync never needs the key: ciphertext is the on-disk source of
+//! notes' `summary`/`body` fields; [`rotation`] combines both to change a book's PIN without ever
+//! leaving it half-converted. Sync never needs the key: ciphertext is the on-disk source of
 //! truth, and [`notecrypt::encrypt_for_save`] is what keeps unchanged plaintext byte-stable across
 //! saves so the CRDT layer sees a no-op (no sync loops).
 //!
@@ -13,6 +14,7 @@
 
 pub mod keycheck;
 pub mod notecrypt;
+pub mod rotation;
 
 pub use keycheck::{
     create_pinlock, load_pinlock, remove_pinlock, verify_pin, KdfParams, KeyCheck, KeyCheckPayload,
@@ -20,6 +22,7 @@ pub use keycheck::{
 pub use notecrypt::{
     decrypt_note, decrypt_note_with_recovered_body, encrypt_for_save, encrypt_note,
 };
+pub use rotation::rotate_book_pin;
 
 use zeroize::Zeroizing;
 

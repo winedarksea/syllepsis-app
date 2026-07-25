@@ -56,40 +56,17 @@ pub fn set_pin_hint(book: &Book, hint: Option<String>) -> CoreResult<()> {
 /// re-encrypt every currently-locked note under the new key so nothing is left under the old one.
 /// The caller (tauri boundary) is responsible for dropping any remembered/vaulted key for this
 /// book afterward — the old key is no longer valid.
+///
+/// All-or-nothing: a failure anywhere (unreadable note, disk error mid-rotation) leaves the book
+/// fully openable under `old_pin`. The crash-safety and rollback mechanics live in
+/// [`pinlock::rotation`]; this function only supplies the recovery-aware decryptor.
 pub fn change_book_pin(
     book: &Book,
     old_pin: &str,
     new_pin: &str,
     hint: Option<String>,
 ) -> CoreResult<BookKey> {
-    let old_key = pinlock::verify_pin(&book.root, old_pin)?;
-    pinlock::remove_pinlock(&book.root)?;
-    let new_key = match pinlock::create_pinlock(&book.root, new_pin, hint) {
-        Ok(key) => key,
-        Err(error) => {
-            // Best-effort: don't strand the book with no PIN at all if minting the new keycheck
-            // failed partway through (e.g. disk full after the remove).
-            return Err(error);
-        }
-    };
-
-    for mut note in book.store.read_all_notes()? {
-        if !note.is_pin_locked() {
-            continue;
-        }
-        let plain = decrypt_note_with_recovery(book, &note, &old_key).map_err(|error| {
-            CoreError::PinLock(format!(
-                "note {} (\"{}\") could not be decrypted while changing the PIN: {error}",
-                note.id, note.title
-            ))
-        })?;
-        note.summary = plain.summary;
-        note.body = plain.body;
-        note.encryption = None;
-        pinlock::encrypt_note(&mut note, &new_key)?;
-        book.save_note(&note)?;
-    }
-    Ok(new_key)
+    pinlock::rotation::rotate_book_pin(book, old_pin, new_pin, hint, decrypt_note_with_recovery)
 }
 
 /// Remove the book's PIN entirely: every currently-locked note is decrypted back to plaintext
