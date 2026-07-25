@@ -123,8 +123,9 @@ pub fn derive_key(keycheck: &KeyCheck, pin: &str) -> CoreResult<BookKey> {
 }
 
 /// Create a fresh keycheck for `pin`, persist it at `root`/`_pinlock.json`, and return the
-/// derived book key. Overwrites any existing keycheck (callers are responsible for the
-/// re-encrypt-every-locked-note dance on a PIN change — see `app::pinlock::change_book_pin`).
+/// derived book key. Overwrites any existing keycheck atomically — a PIN rotation relies on that
+/// (never a moment with no keycheck on disk) and owns the re-encrypt-every-locked-note dance
+/// itself; see [`super::rotation`].
 pub fn create_pinlock(root: &Path, pin: &str, hint: Option<String>) -> CoreResult<BookKey> {
     let mut salt = [0u8; SALT_LEN];
     rand::rng().fill_bytes(&mut salt);
