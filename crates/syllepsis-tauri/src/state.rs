@@ -3,6 +3,7 @@
 use crate::commands::text_import_llm::ImportLlmJobResult;
 use crate::local_ai::LocalAiWorker;
 use crate::pin_session::PinSession;
+use crate::secrets::CachedSecretsVault;
 use crate::server::ServerHandle;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -68,10 +69,12 @@ pub struct AppState {
     pub cloud_llm_models: Arc<Mutex<HashMap<String, CachedCloudLlmModels>>>,
     pub cloud_llm_credentials: Arc<Mutex<HashMap<String, CachedCloudLlmCredentials>>>,
     pub cloud_sync_credentials: Arc<Mutex<HashMap<String, CachedCloudSyncCredentials>>>,
-    /// Serializes the single keychain "secrets vault" read-modify-write across both the sync and
-    /// cloud-LLM subsystems, which now share one item. Held only around vault access, never across
+    /// The process-cached secrets vault (see [`CachedSecretsVault`]). This one mutex both serializes
+    /// the read-modify-write of the single keychain item across the sync, cloud-LLM and PIN-lock
+    /// subsystems that share it, and guards the in-memory copy that keeps the OS keychain from being
+    /// re-read (and re-prompted) on every command. Held only around vault access, never across
     /// network calls.
-    pub secrets_lock: Arc<Mutex<()>>,
+    pub secrets_vault_cache: Arc<Mutex<CachedSecretsVault>>,
     /// In-flight OAuth handshakes keyed by provider; replaces the transient keychain items that the
     /// connect flow used to write for the CSRF state and PKCE verifier.
     pub pending_oauth: Arc<Mutex<HashMap<String, PendingOAuth>>>,
@@ -102,7 +105,7 @@ impl AppState {
             cloud_llm_models: Arc::new(Mutex::new(HashMap::new())),
             cloud_llm_credentials: Arc::new(Mutex::new(HashMap::new())),
             cloud_sync_credentials: Arc::new(Mutex::new(HashMap::new())),
-            secrets_lock: Arc::new(Mutex::new(())),
+            secrets_vault_cache: Arc::new(Mutex::new(CachedSecretsVault::default())),
             pending_oauth: Arc::new(Mutex::new(HashMap::new())),
             sync_lock: Arc::new(Mutex::new(())),
             sync_debounce_gen: Arc::new(AtomicU64::new(0)),

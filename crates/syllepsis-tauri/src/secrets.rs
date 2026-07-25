@@ -200,7 +200,7 @@ fn trimmed(secret: Option<String>) -> Option<String> {
 /// legacy items: if any secret is found we build the vault, persist it, and delete the legacy items
 /// so the migration runs only once. Sweeping missing legacy items is free — a non-existent keychain
 /// item never prompts.
-pub fn load_vault(store: &mut impl VaultStore) -> Result<SecretsVault, String> {
+fn load_vault(store: &mut impl VaultStore) -> Result<SecretsVault, String> {
     if let Some(raw) = store.get_vault()? {
         return parse_vault(&raw);
     }
@@ -217,7 +217,7 @@ fn parse_vault(raw: &str) -> Result<SecretsVault, String> {
 }
 
 /// Persist the vault as the single keychain item.
-pub fn save_vault(store: &mut impl VaultStore, vault: &SecretsVault) -> Result<(), String> {
+fn save_vault(store: &mut impl VaultStore, vault: &SecretsVault) -> Result<(), String> {
     let raw = serde_json::to_string(vault).map_err(|e| format!("serialize secrets vault: {e}"))?;
     store.set_vault(&raw)
 }
@@ -284,98 +284,157 @@ fn delete_all_legacy(store: &mut impl VaultStore) -> Result<(), String> {
     Ok(())
 }
 
-/// Read one provider's sync tokens. `None` means no tokens are stored for that provider.
-pub fn read_sync_tokens(
-    store: &mut impl VaultStore,
-    provider: &str,
-) -> Result<Option<SyncTokens>, String> {
-    Ok(load_vault(store)?.sync.get(provider).cloned())
+/// Process-lifetime in-memory mirror of the single vault item, plus every accessor the command
+/// layer uses to reach a secret.
+///
+/// Why cache: macOS attaches its "Always Allow" decision per keychain item but still charges one
+/// *read* per access, so constructing a fresh [`KeyringVaultStore`] in every command that needs a
+/// secret produced a burst of keychain prompts at launch (PIN-lock status, then each sync provider,
+/// then each LLM provider). The first access of the process loads the document once; every later
+/// read is served from memory, and writes keep the cache in step so a write is immediately visible
+/// without another read.
+///
+/// Why keeping plaintext secrets in process memory for the whole session is not a downgrade: the
+/// vault's contents already flow through command memory unencrypted (OAuth tokens go to the sync
+/// HTTP client, API keys to the LLM client, and the remembered book key to the in-memory PIN
+/// session), so holding the parsed document costs no additional exposure.
+#[derive(Default)]
+pub struct CachedSecretsVault {
+    /// `None` until the first access loads (and possibly migrates) the vault item.
+    cached_vault: Option<SecretsVault>,
 }
 
-/// Replace one provider's sync tokens.
-pub fn write_sync_tokens(
-    store: &mut impl VaultStore,
-    provider: &str,
-    tokens: SyncTokens,
-) -> Result<(), String> {
-    let mut vault = load_vault(store)?;
-    vault.sync.insert(provider.to_string(), tokens);
-    save_vault(store, &vault)
-}
-
-/// Remove one provider's sync tokens (and sweep any lingering legacy sync items for it).
-pub fn delete_sync_tokens(store: &mut impl VaultStore, provider: &str) -> Result<(), String> {
-    let mut vault = load_vault(store)?;
-    let removed = vault.sync.remove(provider).is_some();
-    if removed {
-        save_vault(store, &vault)?;
+impl CachedSecretsVault {
+    /// The vault, loaded through `store` on first access and served from memory afterwards.
+    fn vault(&mut self, store: &mut impl VaultStore) -> Result<&SecretsVault, String> {
+        if self.cached_vault.is_none() {
+            self.cached_vault = Some(load_vault(store)?);
+        }
+        Ok(self
+            .cached_vault
+            .as_ref()
+            .expect("cached vault was just populated"))
     }
-    let sync_service = legacy_sync_keychain_service();
-    for field in [
-        ACCESS_TOKEN_FIELD,
-        REFRESH_TOKEN_FIELD,
-        OAUTH_STATE_FIELD,
-        CODE_VERIFIER_FIELD,
-    ] {
-        store.delete_legacy(sync_service, &account(provider, field))?;
+
+    /// Apply `mutate` to a copy of the vault and persist it when it reports a change.
+    ///
+    /// The store write happens first and the cache is replaced only once it succeeded: a failed
+    /// keychain write must not leave the cache serving a value that was never persisted.
+    fn update(
+        &mut self,
+        store: &mut impl VaultStore,
+        mutate: impl FnOnce(&mut SecretsVault) -> bool,
+    ) -> Result<(), String> {
+        let mut vault = self.vault(store)?.clone();
+        if mutate(&mut vault) {
+            save_vault(store, &vault)?;
+            self.cached_vault = Some(vault);
+        }
+        Ok(())
     }
-    Ok(())
-}
 
-/// Read one provider's LLM secret. `None` means nothing is stored for that provider.
-pub fn read_llm_secret(
-    store: &mut impl VaultStore,
-    provider: &str,
-) -> Result<Option<LlmSecret>, String> {
-    Ok(load_vault(store)?.llm.get(provider).cloned())
-}
-
-/// Replace one provider's LLM secret.
-pub fn write_llm_secret(
-    store: &mut impl VaultStore,
-    provider: &str,
-    secret: LlmSecret,
-) -> Result<(), String> {
-    let mut vault = load_vault(store)?;
-    vault.llm.insert(provider.to_string(), secret);
-    save_vault(store, &vault)
-}
-
-/// Remove one provider's LLM secret.
-pub fn delete_llm_secret(store: &mut impl VaultStore, provider: &str) -> Result<(), String> {
-    let mut vault = load_vault(store)?;
-    if vault.llm.remove(provider).is_some() {
-        save_vault(store, &vault)?;
+    /// Read one provider's sync tokens. `None` means no tokens are stored for that provider.
+    pub fn read_sync_tokens(
+        &mut self,
+        store: &mut impl VaultStore,
+        provider: &str,
+    ) -> Result<Option<SyncTokens>, String> {
+        Ok(self.vault(store)?.sync.get(provider).cloned())
     }
-    Ok(())
-}
 
-/// Read a remembered PIN-lock key for `book_id`. `None` means nothing is remembered for that book.
-pub fn read_pinlock_key(
-    store: &mut impl VaultStore,
-    book_id: &str,
-) -> Result<Option<StoredBookKey>, String> {
-    Ok(load_vault(store)?.pinlock.get(book_id).cloned())
-}
-
-/// Remember a PIN-lock key for `book_id` (the "remember on this device" option).
-pub fn write_pinlock_key(
-    store: &mut impl VaultStore,
-    book_id: &str,
-    key: StoredBookKey,
-) -> Result<(), String> {
-    let mut vault = load_vault(store)?;
-    vault.pinlock.insert(book_id.to_string(), key);
-    save_vault(store, &vault)
-}
-
-/// Forget a remembered PIN-lock key for `book_id` (PIN changed/removed, or the user opted out).
-pub fn delete_pinlock_key(store: &mut impl VaultStore, book_id: &str) -> Result<(), String> {
-    let mut vault = load_vault(store)?;
-    if vault.pinlock.remove(book_id).is_some() {
-        save_vault(store, &vault)?;
+    /// Replace one provider's sync tokens.
+    pub fn write_sync_tokens(
+        &mut self,
+        store: &mut impl VaultStore,
+        provider: &str,
+        tokens: SyncTokens,
+    ) -> Result<(), String> {
+        self.update(store, |vault| {
+            vault.sync.insert(provider.to_string(), tokens);
+            true
+        })
     }
-    Ok(())
+
+    /// Remove one provider's sync tokens (and sweep any lingering legacy sync items for it).
+    pub fn delete_sync_tokens(
+        &mut self,
+        store: &mut impl VaultStore,
+        provider: &str,
+    ) -> Result<(), String> {
+        self.update(store, |vault| vault.sync.remove(provider).is_some())?;
+        let sync_service = legacy_sync_keychain_service();
+        for field in [
+            ACCESS_TOKEN_FIELD,
+            REFRESH_TOKEN_FIELD,
+            OAUTH_STATE_FIELD,
+            CODE_VERIFIER_FIELD,
+        ] {
+            store.delete_legacy(sync_service, &account(provider, field))?;
+        }
+        Ok(())
+    }
+
+    /// Read one provider's LLM secret. `None` means nothing is stored for that provider.
+    pub fn read_llm_secret(
+        &mut self,
+        store: &mut impl VaultStore,
+        provider: &str,
+    ) -> Result<Option<LlmSecret>, String> {
+        Ok(self.vault(store)?.llm.get(provider).cloned())
+    }
+
+    /// Replace one provider's LLM secret.
+    pub fn write_llm_secret(
+        &mut self,
+        store: &mut impl VaultStore,
+        provider: &str,
+        secret: LlmSecret,
+    ) -> Result<(), String> {
+        self.update(store, |vault| {
+            vault.llm.insert(provider.to_string(), secret);
+            true
+        })
+    }
+
+    /// Remove one provider's LLM secret.
+    pub fn delete_llm_secret(
+        &mut self,
+        store: &mut impl VaultStore,
+        provider: &str,
+    ) -> Result<(), String> {
+        self.update(store, |vault| vault.llm.remove(provider).is_some())
+    }
+
+    /// Read a remembered PIN-lock key for `book_id`. `None` means nothing is remembered here.
+    pub fn read_pinlock_key(
+        &mut self,
+        store: &mut impl VaultStore,
+        book_id: &str,
+    ) -> Result<Option<StoredBookKey>, String> {
+        Ok(self.vault(store)?.pinlock.get(book_id).cloned())
+    }
+
+    /// Remember a PIN-lock key for `book_id` (the "remember on this device" option).
+    pub fn write_pinlock_key(
+        &mut self,
+        store: &mut impl VaultStore,
+        book_id: &str,
+        key: StoredBookKey,
+    ) -> Result<(), String> {
+        self.update(store, |vault| {
+            vault.pinlock.insert(book_id.to_string(), key);
+            true
+        })
+    }
+
+    /// Forget a remembered PIN-lock key for `book_id` (PIN changed/removed, or the user opted out).
+    pub fn delete_pinlock_key(
+        &mut self,
+        store: &mut impl VaultStore,
+        book_id: &str,
+    ) -> Result<(), String> {
+        self.update(store, |vault| vault.pinlock.remove(book_id).is_some())
+    }
 }
 
 #[cfg(test)]
@@ -391,11 +450,17 @@ pub(crate) mod test_support {
         vault: Option<String>,
         legacy: BTreeMap<(String, String), String>,
         vault_get_count: Cell<usize>,
+        vault_set_failure: Option<String>,
     }
 
     impl MemoryVaultStore {
         pub fn vault_get_count(&self) -> usize {
             self.vault_get_count.get()
+        }
+
+        /// Make every later `set_vault` fail, standing in for a denied/unavailable keychain.
+        pub fn fail_vault_writes(&mut self, message: &str) {
+            self.vault_set_failure = Some(message.to_string());
         }
 
         /// Seed a legacy per-field item as an older build would have written it.
@@ -418,6 +483,9 @@ pub(crate) mod test_support {
         }
 
         fn set_vault(&mut self, value: &str) -> Result<(), String> {
+            if let Some(message) = &self.vault_set_failure {
+                return Err(message.clone());
+            }
             self.vault = Some(value.to_string());
             Ok(())
         }
@@ -442,34 +510,44 @@ mod tests {
     use super::test_support::MemoryVaultStore;
     use super::*;
 
+    fn dropbox_tokens() -> SyncTokens {
+        SyncTokens {
+            access_token: Some("access".to_string()),
+            refresh_token: Some("refresh".to_string()),
+        }
+    }
+
     #[test]
     fn vault_round_trips_sync_and_llm_secrets() {
         let mut store = MemoryVaultStore::default();
-        write_sync_tokens(
-            &mut store,
-            "dropbox",
-            SyncTokens {
-                access_token: Some("access".to_string()),
-                refresh_token: Some("refresh".to_string()),
-            },
-        )
-        .unwrap();
-        write_llm_secret(
-            &mut store,
-            "anthropic",
-            LlmSecret {
-                api_key: Some("sk-ant".to_string()),
-                base_url: None,
-            },
-        )
-        .unwrap();
+        let mut vault = CachedSecretsVault::default();
+        vault
+            .write_sync_tokens(&mut store, "dropbox", dropbox_tokens())
+            .unwrap();
+        vault
+            .write_llm_secret(
+                &mut store,
+                "anthropic",
+                LlmSecret {
+                    api_key: Some("sk-ant".to_string()),
+                    base_url: None,
+                },
+            )
+            .unwrap();
 
-        let tokens = read_sync_tokens(&mut store, "dropbox").unwrap().unwrap();
+        let tokens = vault
+            .read_sync_tokens(&mut store, "dropbox")
+            .unwrap()
+            .unwrap();
         assert_eq!(tokens.access_token.as_deref(), Some("access"));
         assert_eq!(tokens.refresh_token.as_deref(), Some("refresh"));
-        let secret = read_llm_secret(&mut store, "anthropic").unwrap().unwrap();
+        let secret = vault
+            .read_llm_secret(&mut store, "anthropic")
+            .unwrap()
+            .unwrap();
         assert_eq!(secret.api_key.as_deref(), Some("sk-ant"));
-        assert!(read_llm_secret(&mut store, "openai_compatible")
+        assert!(vault
+            .read_llm_secret(&mut store, "openai_compatible")
             .unwrap()
             .is_none());
     }
@@ -477,20 +555,86 @@ mod tests {
     #[test]
     fn cold_read_touches_vault_item_exactly_once() {
         let mut store = MemoryVaultStore::default();
-        write_sync_tokens(
-            &mut store,
-            "dropbox",
-            SyncTokens {
-                access_token: Some("access".to_string()),
-                refresh_token: None,
-            },
-        )
-        .unwrap();
+        let mut vault = CachedSecretsVault::default();
         let before = store.vault_get_count();
 
-        read_sync_tokens(&mut store, "dropbox").unwrap();
+        vault.read_sync_tokens(&mut store, "dropbox").unwrap();
 
         assert_eq!(store.vault_get_count() - before, 1);
+    }
+
+    #[test]
+    fn cached_vault_serves_repeated_reads_without_touching_the_store_again() {
+        let mut store = MemoryVaultStore::default();
+        let mut seed = CachedSecretsVault::default();
+        seed.write_sync_tokens(&mut store, "dropbox", dropbox_tokens())
+            .unwrap();
+        let mut vault = CachedSecretsVault::default();
+
+        let before = store.vault_get_count();
+        for _ in 0..5 {
+            vault.read_sync_tokens(&mut store, "dropbox").unwrap();
+            vault.read_llm_secret(&mut store, "anthropic").unwrap();
+            vault.read_pinlock_key(&mut store, "book-1").unwrap();
+        }
+
+        // Reads across all three secret families share the one cached document.
+        assert_eq!(store.vault_get_count() - before, 1);
+    }
+
+    #[test]
+    fn write_is_visible_to_a_later_read_without_an_extra_store_get() {
+        let mut store = MemoryVaultStore::default();
+        let mut vault = CachedSecretsVault::default();
+        vault.read_sync_tokens(&mut store, "dropbox").unwrap();
+
+        vault
+            .write_sync_tokens(&mut store, "dropbox", dropbox_tokens())
+            .unwrap();
+        let after_write = store.vault_get_count();
+        let tokens = vault
+            .read_sync_tokens(&mut store, "dropbox")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(tokens.access_token.as_deref(), Some("access"));
+        assert_eq!(store.vault_get_count(), after_write);
+    }
+
+    #[test]
+    fn failed_store_write_does_not_poison_the_cache() {
+        let mut store = MemoryVaultStore::default();
+        let mut vault = CachedSecretsVault::default();
+        vault
+            .write_llm_secret(
+                &mut store,
+                "anthropic",
+                LlmSecret {
+                    api_key: Some("sk-original".to_string()),
+                    base_url: None,
+                },
+            )
+            .unwrap();
+        store.fail_vault_writes("keychain access denied");
+
+        let error = vault
+            .write_llm_secret(
+                &mut store,
+                "anthropic",
+                LlmSecret {
+                    api_key: Some("sk-rejected".to_string()),
+                    base_url: None,
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(error, "keychain access denied");
+        // The rejected value never reached the keychain, so it must not be served from memory either.
+        let secret = vault
+            .read_llm_secret(&mut store, "anthropic")
+            .unwrap()
+            .unwrap();
+        assert_eq!(secret.api_key.as_deref(), Some("sk-original"));
     }
 
     #[test]
@@ -551,39 +695,49 @@ mod tests {
     #[test]
     fn pinlock_key_round_trips_and_deletes() {
         let mut store = MemoryVaultStore::default();
-        assert!(read_pinlock_key(&mut store, "book-1").unwrap().is_none());
+        let mut vault = CachedSecretsVault::default();
+        assert!(vault
+            .read_pinlock_key(&mut store, "book-1")
+            .unwrap()
+            .is_none());
 
-        write_pinlock_key(
-            &mut store,
-            "book-1",
-            StoredBookKey {
-                key_b64: "base64key".to_string(),
-                key_id: "abcd1234".to_string(),
-            },
-        )
-        .unwrap();
-        let stored = read_pinlock_key(&mut store, "book-1").unwrap().unwrap();
+        vault
+            .write_pinlock_key(
+                &mut store,
+                "book-1",
+                StoredBookKey {
+                    key_b64: "base64key".to_string(),
+                    key_id: "abcd1234".to_string(),
+                },
+            )
+            .unwrap();
+        let stored = vault
+            .read_pinlock_key(&mut store, "book-1")
+            .unwrap()
+            .unwrap();
         assert_eq!(stored.key_id, "abcd1234");
 
-        delete_pinlock_key(&mut store, "book-1").unwrap();
-        assert!(read_pinlock_key(&mut store, "book-1").unwrap().is_none());
+        vault.delete_pinlock_key(&mut store, "book-1").unwrap();
+        assert!(vault
+            .read_pinlock_key(&mut store, "book-1")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
     fn delete_sync_tokens_removes_provider_entry() {
         let mut store = MemoryVaultStore::default();
-        write_sync_tokens(
-            &mut store,
-            "dropbox",
-            SyncTokens {
-                access_token: Some("access".to_string()),
-                refresh_token: None,
-            },
-        )
-        .unwrap();
+        let mut vault = CachedSecretsVault::default();
+        vault
+            .write_sync_tokens(&mut store, "dropbox", dropbox_tokens())
+            .unwrap();
 
-        delete_sync_tokens(&mut store, "dropbox").unwrap();
+        vault.delete_sync_tokens(&mut store, "dropbox").unwrap();
 
-        assert!(read_sync_tokens(&mut store, "dropbox").unwrap().is_none());
+        // A fresh cache proves the removal reached the store, not just the cached copy.
+        assert!(CachedSecretsVault::default()
+            .read_sync_tokens(&mut store, "dropbox")
+            .unwrap()
+            .is_none());
     }
 }

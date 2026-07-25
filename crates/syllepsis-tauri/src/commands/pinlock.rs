@@ -17,7 +17,7 @@ use syllepsis_core::pinlock::BookKey;
 use syllepsis_core::storage::{Book, NoteStore};
 
 use crate::pin_session::PinSession;
-use crate::secrets::{self, KeyringVaultStore, StoredBookKey};
+use crate::secrets::{KeyringVaultStore, StoredBookKey, VaultStore};
 use crate::state::AppState;
 
 macro_rules! with_book {
@@ -78,12 +78,23 @@ pub struct PinLockStatus {
     pub remembered_key_available: bool,
 }
 
-fn status(state: &State<AppState>) -> Result<PinLockStatus, String> {
+fn status(state: &AppState) -> Result<PinLockStatus, String> {
+    let mut store = KeyringVaultStore::new();
+    status_with_vault_store(state, &mut store)
+}
+
+/// `status` with the vault store injected so tests can count keychain reads. The process cache in
+/// `state` means only the first call of the session actually reads the OS keychain.
+fn status_with_vault_store(
+    state: &AppState,
+    store: &mut impl VaultStore,
+) -> Result<PinLockStatus, String> {
     with_book!(state, book, {
         let remembered_key_available = {
-            let _guard = state.secrets_lock.lock().unwrap();
-            let mut store = KeyringVaultStore::new();
-            secrets::read_pinlock_key(&mut store, &book.metadata.book_id)?.is_some()
+            let mut vault = state.secrets_vault_cache.lock().unwrap();
+            vault
+                .read_pinlock_key(store, &book.metadata.book_id)?
+                .is_some()
         };
         Ok(PinLockStatus {
             configured: app::is_pin_configured(book),
@@ -175,9 +186,9 @@ pub fn unlock_book_with_device_credential(
         Ok::<_, String>(book.metadata.book_id.clone())
     })?;
     let stored = {
-        let _guard = state.secrets_lock.lock().unwrap();
         let mut store = KeyringVaultStore::new();
-        secrets::read_pinlock_key(&mut store, &book_id)?
+        let mut vault = state.secrets_vault_cache.lock().unwrap();
+        vault.read_pinlock_key(&mut store, &book_id)?
     }
     .ok_or_else(|| "no remembered key for this book on this device".to_string())?;
 
@@ -206,10 +217,10 @@ pub fn unlock_book_with_device_credential(
     status(&state)
 }
 
-fn remember_key(state: &State<AppState>, book_id: &str, key: &BookKey) -> Result<(), String> {
-    let _guard = state.secrets_lock.lock().unwrap();
+fn remember_key(state: &AppState, book_id: &str, key: &BookKey) -> Result<(), String> {
     let mut store = KeyringVaultStore::new();
-    secrets::write_pinlock_key(
+    let mut vault = state.secrets_vault_cache.lock().unwrap();
+    vault.write_pinlock_key(
         &mut store,
         book_id,
         StoredBookKey {
@@ -219,10 +230,10 @@ fn remember_key(state: &State<AppState>, book_id: &str, key: &BookKey) -> Result
     )
 }
 
-fn forget_remembered_key(state: &State<AppState>, book_id: &str) -> Result<(), String> {
-    let _guard = state.secrets_lock.lock().unwrap();
+fn forget_remembered_key(state: &AppState, book_id: &str) -> Result<(), String> {
     let mut store = KeyringVaultStore::new();
-    secrets::delete_pinlock_key(&mut store, book_id)
+    let mut vault = state.secrets_vault_cache.lock().unwrap();
+    vault.delete_pinlock_key(&mut store, book_id)
 }
 
 /// Manually relock the session (the explicit "Lock now" button).
@@ -357,6 +368,7 @@ pub fn set_note_pin_locked(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secrets::test_support::MemoryVaultStore;
     use syllepsis_core::app::commands::{create_note, update_note};
     use syllepsis_core::model::ObjectType;
 
@@ -423,6 +435,55 @@ mod tests {
         let presented = present(&book, dto, &mut session);
         assert!(!presented.unlocked);
         assert!(presented.body.is_empty());
+    }
+
+    #[test]
+    fn repeated_status_reads_touch_the_vault_store_at_most_once() {
+        let (_dir, book) = book();
+        let state = AppState::new();
+        *state.book.lock().unwrap() = Some(book);
+        let mut store = MemoryVaultStore::default();
+
+        let first = status_with_vault_store(&state, &mut store).unwrap();
+        let reads_after_first_status = store.vault_get_count();
+        for _ in 0..3 {
+            status_with_vault_store(&state, &mut store).unwrap();
+        }
+
+        assert!(!first.remembered_key_available);
+        // The status card is polled on every settings render; only the cold call may read the vault.
+        assert!(reads_after_first_status <= 1);
+        assert_eq!(store.vault_get_count(), reads_after_first_status);
+    }
+
+    #[test]
+    fn remembered_key_written_through_the_cache_is_visible_to_the_next_status_read() {
+        let (_dir, book) = book();
+        let key = app::set_book_pin(&book, "1234", None).unwrap();
+        let book_id = book.metadata.book_id.clone();
+        let state = AppState::new();
+        *state.book.lock().unwrap() = Some(book);
+        let mut store = MemoryVaultStore::default();
+        status_with_vault_store(&state, &mut store).unwrap();
+
+        {
+            let mut vault = state.secrets_vault_cache.lock().unwrap();
+            vault
+                .write_pinlock_key(
+                    &mut store,
+                    &book_id,
+                    StoredBookKey {
+                        key_b64: B64.encode(key.expose_for_vault_storage()),
+                        key_id: key.key_id().to_string(),
+                    },
+                )
+                .unwrap();
+        }
+        let reads_after_write = store.vault_get_count();
+        let status = status_with_vault_store(&state, &mut store).unwrap();
+
+        assert!(status.remembered_key_available);
+        assert_eq!(store.vault_get_count(), reads_after_write);
     }
 
     #[test]

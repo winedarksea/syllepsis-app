@@ -15,7 +15,7 @@ use syllepsis_core::config::ModelRef;
 use syllepsis_core::llm::prompts::LlmTaskOptions;
 use syllepsis_core::llm::{LlmTask, Proposal};
 
-use crate::secrets::{self, KeyringVaultStore, LlmSecret, VaultStore};
+use crate::secrets::{CachedSecretsVault, KeyringVaultStore, LlmSecret, VaultStore};
 use crate::state::{AppState, CachedCloudLlmCredentials, CachedCloudLlmModels};
 
 const ANTHROPIC_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -96,9 +96,9 @@ pub fn save_cloud_llm_provider_settings(
     settings: CloudLlmProviderSettings,
 ) -> Result<(), String> {
     {
-        let _guard = state.secrets_lock.lock().unwrap();
         let mut store = KeyringVaultStore::new();
-        save_settings(&mut store, settings.clone())?;
+        let mut vault = state.secrets_vault_cache.lock().unwrap();
+        save_settings(&mut vault, &mut store, settings.clone())?;
     }
     merge_cached_credentials(&state, settings);
     Ok(())
@@ -111,9 +111,9 @@ pub fn clear_cloud_llm_provider_settings(
     provider: String,
 ) -> Result<(), String> {
     {
-        let _guard = state.secrets_lock.lock().unwrap();
         let mut store = KeyringVaultStore::new();
-        clear_settings(&mut store, &provider)?;
+        let mut vault = state.secrets_vault_cache.lock().unwrap();
+        clear_settings(&mut vault, &mut store, &provider)?;
     }
     state
         .cloud_llm_credentials
@@ -241,19 +241,26 @@ fn provider_descriptors() -> Vec<CloudLlmProviderDescriptor> {
 }
 
 fn save_settings(
+    vault: &mut CachedSecretsVault,
     store: &mut impl VaultStore,
     settings: CloudLlmProviderSettings,
 ) -> Result<(), String> {
     descriptor_for(&settings.provider)?;
-    let mut secret = secrets::read_llm_secret(store, &settings.provider)?.unwrap_or_default();
+    let mut secret = vault
+        .read_llm_secret(store, &settings.provider)?
+        .unwrap_or_default();
     apply_optional_field(&mut secret.api_key, settings.api_key);
     apply_optional_field(&mut secret.base_url, settings.base_url);
-    secrets::write_llm_secret(store, &settings.provider, secret)
+    vault.write_llm_secret(store, &settings.provider, secret)
 }
 
-fn clear_settings(store: &mut impl VaultStore, provider: &str) -> Result<(), String> {
+fn clear_settings(
+    vault: &mut CachedSecretsVault,
+    store: &mut impl VaultStore,
+    provider: &str,
+) -> Result<(), String> {
     descriptor_for(provider)?;
-    secrets::delete_llm_secret(store, provider)
+    vault.delete_llm_secret(store, provider)
 }
 
 /// Apply an optional settings field to a stored secret: `None` leaves it untouched, an empty string
@@ -368,8 +375,10 @@ fn credentials_with_draft_overrides(
                 .map(|credentials| credentials.base_url.is_none())
                 .unwrap_or(true));
     let stored = if need_stored {
-        let _guard = state.secrets_lock.lock().unwrap();
-        secrets::read_llm_secret(store, &settings.provider)?.unwrap_or_default()
+        let mut vault = state.secrets_vault_cache.lock().unwrap();
+        vault
+            .read_llm_secret(store, &settings.provider)?
+            .unwrap_or_default()
     } else {
         LlmSecret::default()
     };
@@ -616,10 +625,11 @@ fn credentials_for(
     if let Some(credentials) = cached_credentials(state, provider) {
         return Ok(credentials);
     }
-    // Cold cache: read the single vault item under the shared lock, then cache it in memory.
+    // Cold credential cache: read through the process-cached vault under the shared lock. Only the
+    // first vault access of the session reaches the OS keychain.
     let secret = {
-        let _guard = state.secrets_lock.lock().unwrap();
-        secrets::read_llm_secret(store, provider)?.unwrap_or_default()
+        let mut vault = state.secrets_vault_cache.lock().unwrap();
+        vault.read_llm_secret(store, provider)?.unwrap_or_default()
     };
     let credentials = CloudLlmCredentials {
         api_key: trimmed_secret(secret.api_key),
@@ -643,8 +653,8 @@ fn provider_is_configured(
         });
     }
     let secret = {
-        let _guard = state.secrets_lock.lock().unwrap();
-        secrets::read_llm_secret(store, provider)?.unwrap_or_default()
+        let mut vault = state.secrets_vault_cache.lock().unwrap();
+        vault.read_llm_secret(store, provider)?.unwrap_or_default()
     };
     match provider {
         "anthropic" => {
@@ -855,10 +865,20 @@ mod tests {
     use super::*;
     use crate::secrets::test_support::MemoryVaultStore;
 
+    /// Seed a provider secret the way an earlier session would have, through a throwaway cache so a
+    /// state-owned cache under test still starts cold.
+    fn seed_llm_secret(store: &mut MemoryVaultStore, provider: &str, secret: LlmSecret) {
+        CachedSecretsVault::default()
+            .write_llm_secret(store, provider, secret)
+            .unwrap();
+    }
+
     #[test]
     fn save_settings_trims_and_preserves_unspecified_fields() {
         let mut store = MemoryVaultStore::default();
+        let mut vault = CachedSecretsVault::default();
         save_settings(
+            &mut vault,
             &mut store,
             CloudLlmProviderSettings {
                 provider: "openai_compatible".to_string(),
@@ -869,6 +889,7 @@ mod tests {
         .unwrap();
 
         save_settings(
+            &mut vault,
             &mut store,
             CloudLlmProviderSettings {
                 provider: "openai_compatible".to_string(),
@@ -878,7 +899,8 @@ mod tests {
         )
         .unwrap();
 
-        let secret = secrets::read_llm_secret(&mut store, "openai_compatible")
+        let secret = vault
+            .read_llm_secret(&mut store, "openai_compatible")
             .unwrap()
             .unwrap();
         // The api_key is preserved (untouched by the second save), the base_url is cleared.
@@ -889,19 +911,21 @@ mod tests {
     #[test]
     fn clear_settings_removes_all_provider_fields() {
         let mut store = MemoryVaultStore::default();
-        secrets::write_llm_secret(
+        let mut vault = CachedSecretsVault::default();
+        seed_llm_secret(
             &mut store,
             "anthropic",
             LlmSecret {
                 api_key: Some("sk-secret".to_string()),
                 base_url: None,
             },
-        )
-        .unwrap();
+        );
 
-        clear_settings(&mut store, "anthropic").unwrap();
+        clear_settings(&mut vault, &mut store, "anthropic").unwrap();
 
-        assert!(secrets::read_llm_secret(&mut store, "anthropic")
+        // A fresh cache proves the clear reached the store, not just the cached copy.
+        assert!(CachedSecretsVault::default()
+            .read_llm_secret(&mut store, "anthropic")
             .unwrap()
             .is_none());
     }
@@ -910,6 +934,7 @@ mod tests {
     fn unknown_provider_is_rejected() {
         let mut store = MemoryVaultStore::default();
         let err = save_settings(
+            &mut CachedSecretsVault::default(),
             &mut store,
             CloudLlmProviderSettings {
                 provider: "not-real".to_string(),
@@ -929,27 +954,92 @@ mod tests {
         assert!(!provider_is_configured(&state, &mut store, "anthropic").unwrap());
         assert!(!provider_is_configured(&state, &mut store, "openai_compatible").unwrap());
 
-        secrets::write_llm_secret(
+        seed_llm_secret(
             &mut store,
             "anthropic",
             LlmSecret {
                 api_key: Some("sk-secret".to_string()),
                 base_url: None,
             },
-        )
-        .unwrap();
-        secrets::write_llm_secret(
+        );
+        seed_llm_secret(
             &mut store,
             "openai_compatible",
             LlmSecret {
                 api_key: None,
                 base_url: Some("http://localhost:8080/v1".to_string()),
             },
-        )
-        .unwrap();
+        );
+        // The state cache already loaded the (then empty) vault, so it has to be re-synced the way a
+        // real save would: through the cache itself.
+        *state.secrets_vault_cache.lock().unwrap() = CachedSecretsVault::default();
 
         assert!(provider_is_configured(&state, &mut store, "anthropic").unwrap());
         assert!(provider_is_configured(&state, &mut store, "openai_compatible").unwrap());
+    }
+
+    #[test]
+    fn repeated_credential_reads_touch_the_vault_store_at_most_once() {
+        let state = AppState::new();
+        let mut store = MemoryVaultStore::default();
+        seed_llm_secret(
+            &mut store,
+            "anthropic",
+            LlmSecret {
+                api_key: Some("sk-secret".to_string()),
+                base_url: None,
+            },
+        );
+        seed_llm_secret(
+            &mut store,
+            "openai_compatible",
+            LlmSecret {
+                api_key: None,
+                base_url: Some("http://localhost:8080/v1".to_string()),
+            },
+        );
+        let reads_before = store.vault_get_count();
+
+        for _ in 0..3 {
+            // Evict the per-provider credential cache each round: it is the *vault* cache that has to
+            // keep the OS keychain (and its prompt) out of the loop.
+            state.cloud_llm_credentials.lock().unwrap().clear();
+            assert_eq!(
+                credentials_for(&state, &mut store, "anthropic")
+                    .unwrap()
+                    .api_key
+                    .as_deref(),
+                Some("sk-secret")
+            );
+            assert!(provider_is_configured(&state, &mut store, "openai_compatible").unwrap());
+        }
+
+        assert_eq!(store.vault_get_count() - reads_before, 1);
+    }
+
+    #[test]
+    fn saved_settings_are_visible_to_the_next_credential_read_without_another_store_get() {
+        let state = AppState::new();
+        let mut store = MemoryVaultStore::default();
+        {
+            let mut vault = state.secrets_vault_cache.lock().unwrap();
+            save_settings(
+                &mut vault,
+                &mut store,
+                CloudLlmProviderSettings {
+                    provider: "anthropic".to_string(),
+                    api_key: Some("sk-fresh".to_string()),
+                    base_url: None,
+                },
+            )
+            .unwrap();
+        }
+        let reads_after_save = store.vault_get_count();
+
+        let credentials = credentials_for(&state, &mut store, "anthropic").unwrap();
+
+        assert_eq!(credentials.api_key.as_deref(), Some("sk-fresh"));
+        assert_eq!(store.vault_get_count(), reads_after_save);
     }
 
     #[test]
@@ -1074,15 +1164,14 @@ mod tests {
     fn connection_test_uses_draft_values_without_mutating_stored_credentials() {
         let state = AppState::new();
         let mut store = MemoryVaultStore::default();
-        secrets::write_llm_secret(
+        seed_llm_secret(
             &mut store,
             "openai_compatible",
             LlmSecret {
                 api_key: None,
                 base_url: Some("https://stored.example/v1".to_string()),
             },
-        )
-        .unwrap();
+        );
 
         let credentials = credentials_with_draft_overrides(
             &state,
@@ -1100,7 +1189,8 @@ mod tests {
             credentials.base_url.as_deref(),
             Some("https://draft.example/v1")
         );
-        let stored = secrets::read_llm_secret(&mut store, "openai_compatible")
+        let stored = CachedSecretsVault::default()
+            .read_llm_secret(&mut store, "openai_compatible")
             .unwrap()
             .unwrap();
         assert_eq!(

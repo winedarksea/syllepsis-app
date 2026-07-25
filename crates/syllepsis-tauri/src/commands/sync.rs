@@ -29,7 +29,7 @@ use syllepsis_core::sync::{
     SyncActivitySummary, SyncEngine, SyncProvider, SyncProviderDescriptor, SyncReport,
 };
 
-use crate::secrets::{self, KeyringVaultStore, SyncTokens, VaultStore};
+use crate::secrets::{KeyringVaultStore, SyncTokens, VaultStore};
 use crate::state::{AppState, CachedCloudSyncCredentials, PendingOAuth};
 
 const OAUTH_CALLBACK_PATH: &str = "/oauth-callback";
@@ -588,9 +588,9 @@ pub fn disconnect_cloud_sync_provider(
 ) -> Result<CloudSyncProviderStatus, String> {
     let descriptor = descriptor_for(&provider)?;
     {
-        let _guard = state.secrets_lock.lock().unwrap();
         let mut store = KeyringVaultStore::new();
-        secrets::delete_sync_tokens(&mut store, &provider)?;
+        let mut vault = state.secrets_vault_cache.lock().unwrap();
+        vault.delete_sync_tokens(&mut store, &provider)?;
     }
     state.pending_oauth.lock().unwrap().remove(&provider);
     remove_cached_sync_credentials(&state, &provider);
@@ -1168,14 +1168,15 @@ fn operator_root_from_remote_root(remote_root: &str) -> String {
 }
 
 /// Persist freshly minted sync tokens into the shared secrets vault under the serializing lock.
+/// The write also refreshes the process cache, so the connect flow's follow-up reads never prompt.
 fn write_sync_tokens_locked(
     state: &AppState,
     provider: &str,
     tokens: SyncTokens,
 ) -> Result<(), String> {
-    let _guard = state.secrets_lock.lock().unwrap();
     let mut store = KeyringVaultStore::new();
-    secrets::write_sync_tokens(&mut store, provider, tokens)
+    let mut vault = state.secrets_vault_cache.lock().unwrap();
+    vault.write_sync_tokens(&mut store, provider, tokens)
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -1719,11 +1720,12 @@ fn credentials_for_with_store_and_refresh(
         cache_sync_credentials(state, provider, &credentials);
         return Ok(credentials);
     }
-    // Cold cache: read the one vault item under the shared lock, then release before any refresh
-    // network call. The in-memory cache absorbs subsequent reads within this process.
+    // Cold credential cache: read through the process-cached vault under the shared lock, then
+    // release it before any refresh network call. Only the first vault access of the session
+    // reaches the OS keychain.
     let tokens = {
-        let _guard = state.secrets_lock.lock().unwrap();
-        secrets::read_sync_tokens(store, provider)?.unwrap_or_default()
+        let mut vault = state.secrets_vault_cache.lock().unwrap();
+        vault.read_sync_tokens(store, provider)?.unwrap_or_default()
     };
     let access_token = trimmed_token(tokens.access_token);
     let refresh_token = trimmed_token(tokens.refresh_token);
@@ -2418,23 +2420,31 @@ fn safe_book_folder_name(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::secrets::test_support::MemoryVaultStore;
+    use crate::secrets::CachedSecretsVault;
     use std::cell::Cell;
     use std::fs::{create_dir_all, write};
     use tempfile::tempdir;
+
+    /// Seed the store the way a completed connect flow would, through a throwaway cache so the
+    /// state-owned cache under test still starts cold.
+    fn seed_dropbox_tokens(store: &mut MemoryVaultStore) {
+        CachedSecretsVault::default()
+            .write_sync_tokens(
+                store,
+                "dropbox",
+                SyncTokens {
+                    access_token: Some("access-token".to_string()),
+                    refresh_token: Some("refresh-token".to_string()),
+                },
+            )
+            .unwrap();
+    }
 
     #[test]
     fn sync_credentials_cache_prevents_repeated_store_reads() {
         let state = AppState::new();
         let mut store = MemoryVaultStore::default();
-        secrets::write_sync_tokens(
-            &mut store,
-            "dropbox",
-            SyncTokens {
-                access_token: Some("access-token".to_string()),
-                refresh_token: Some("refresh-token".to_string()),
-            },
-        )
-        .unwrap();
+        seed_dropbox_tokens(&mut store);
         let reads_before = store.vault_get_count();
         let mut refresh_access_token = |_: &str, _: Option<&str>, _: &str| {
             panic!("dropbox should not refresh Google access tokens")
@@ -2462,6 +2472,67 @@ mod tests {
         assert_eq!(second.access_token.as_deref(), Some("access-token"));
         // The in-memory cache serves the second read without re-touching the vault.
         assert_eq!(store.vault_get_count() - reads_before, 1);
+    }
+
+    #[test]
+    fn vault_cache_survives_credential_cache_eviction_without_extra_store_reads() {
+        let state = AppState::new();
+        let mut store = MemoryVaultStore::default();
+        seed_dropbox_tokens(&mut store);
+        let reads_before = store.vault_get_count();
+        let mut refresh_access_token = |_: &str, _: Option<&str>, _: &str| {
+            panic!("dropbox should not refresh Google access tokens")
+        };
+
+        for _ in 0..3 {
+            // Drop the per-provider credential cache each round: it is the *vault* cache that has to
+            // keep the OS keychain (and its prompt) out of the loop.
+            remove_cached_sync_credentials(&state, "dropbox");
+            let credentials = credentials_for_with_store_and_refresh(
+                &state,
+                &mut store,
+                "dropbox",
+                &mut refresh_access_token,
+            )
+            .unwrap();
+            assert_eq!(credentials.access_token.as_deref(), Some("access-token"));
+        }
+
+        assert_eq!(store.vault_get_count() - reads_before, 1);
+    }
+
+    #[test]
+    fn disconnect_updates_the_cached_vault_without_re_reading_the_store() {
+        let state = AppState::new();
+        let mut store = MemoryVaultStore::default();
+        seed_dropbox_tokens(&mut store);
+        let mut refresh_access_token = |_: &str, _: Option<&str>, _: &str| {
+            panic!("dropbox should not refresh Google access tokens")
+        };
+        credentials_for_with_store_and_refresh(
+            &state,
+            &mut store,
+            "dropbox",
+            &mut refresh_access_token,
+        )
+        .unwrap();
+
+        {
+            let mut vault = state.secrets_vault_cache.lock().unwrap();
+            vault.delete_sync_tokens(&mut store, "dropbox").unwrap();
+        }
+        remove_cached_sync_credentials(&state, "dropbox");
+        let reads_after_disconnect = store.vault_get_count();
+        let error = credentials_for_with_store_and_refresh(
+            &state,
+            &mut store,
+            "dropbox",
+            &mut refresh_access_token,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("not connected"), "unexpected error: {error}");
+        assert_eq!(store.vault_get_count(), reads_after_disconnect);
     }
 
     #[test]
