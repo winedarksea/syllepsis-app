@@ -12,10 +12,22 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use crate::error::CoreResult;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Total `fs::rename` attempts before considering the destructive fallback. Both platforms
+/// replace an existing target in one atomic call (Unix natively, Windows via
+/// `MOVEFILE_REPLACE_EXISTING`), so a failure here means something transient is holding the file
+/// open — typically an antivirus scanner or search indexer on Windows.
+const RENAME_ATTEMPT_LIMIT: u32 = 4;
+
+/// Pause between rename attempts. Sharing violations clear in milliseconds, so the whole retry
+/// budget stays well under a frame while still riding out a scanner's grab on the file.
+const RENAME_RETRY_BACKOFF: Duration = Duration::from_millis(20);
 
 /// Atomically replace `path` with `bytes`: write to a temp file in the same directory, fsync it,
 /// then rename over the target. Creates the parent directory if it doesn't exist.
@@ -56,18 +68,41 @@ fn temp_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{file_name}.tmp-{}-{seq}", std::process::id()))
 }
 
-/// Rename `temp` over `target`, retrying once after removing an existing target. `fs::rename` is
-/// atomic-replace on Unix, but on Windows it fails if the target exists.
+/// Rename `temp` over `target`, preferring the atomic single-call replace and only degrading to
+/// remove-then-rename as a last resort.
+///
+/// A plain `fs::rename` already replaces an existing target on both platforms — Unix natively,
+/// Windows because std passes `MOVEFILE_REPLACE_EXISTING` — so the destructive fallback is
+/// exceptional, not the normal path for an existing file. The realistic cause of failure is a
+/// transient Windows sharing violation (antivirus or the search indexer holding the target open
+/// for a moment), which a short retry rides out while keeping the replace atomic. Only after the
+/// retries are exhausted do we unlink the target, because that opens a window where the note
+/// exists nowhere on disk.
 fn rename_over(temp: &Path, target: &Path) -> CoreResult<()> {
-    if let Err(error) = fs::rename(temp, target) {
-        if target.exists() {
-            fs::remove_file(target)?;
-            fs::rename(temp, target)?;
-        } else {
-            return Err(error.into());
+    let mut attempts_remaining = RENAME_ATTEMPT_LIMIT;
+    let last_error = loop {
+        match fs::rename(temp, target) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                attempts_remaining -= 1;
+                // Retrying only helps while the replacement still exists; if the temp file is gone
+                // the write has already failed and nothing can be salvaged.
+                if attempts_remaining == 0 || !temp.exists() {
+                    break error;
+                }
+                thread::sleep(RENAME_RETRY_BACKOFF);
+            }
         }
+    };
+
+    // Never unlink the target unless the replacement is still on disk to take its place —
+    // otherwise a failing write would destroy the user's existing file outright.
+    if temp.exists() && target.exists() {
+        fs::remove_file(target)?;
+        fs::rename(temp, target)?;
+        return Ok(());
     }
-    Ok(())
+    Err(last_error.into())
 }
 
 #[cfg(test)]
@@ -123,6 +158,18 @@ mod tests {
         store.refresh().unwrap();
 
         assert_eq!(store.read_all_notes().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rename_over_leaves_target_intact_when_the_replacement_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("note.md");
+        fs::write(&target, b"precious").unwrap();
+
+        let vanished_temp = dir.path().join("note.md.tmp-0-0");
+        assert!(rename_over(&vanished_temp, &target).is_err());
+        // The remove-then-rename fallback must never leave the note deleted with no replacement.
+        assert_eq!(fs::read(&target).unwrap(), b"precious");
     }
 
     #[test]

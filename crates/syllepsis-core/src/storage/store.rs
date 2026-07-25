@@ -211,9 +211,10 @@ impl NoteStore for FsNoteStore {
         let target = dir.join(layout::note_filename(&note.id));
 
         write_atomic(&target, frontmatter::serialize_note(note)?.as_bytes())?;
-        // If the slug changed, the old filename is stale — remove it so there is one file.
+        // If the slug changed, the old filename is stale — remove it so there is one file. A
+        // path-string difference alone is not enough: see `refers_to_same_file`.
         if let Some(old) = existing {
-            if old != target {
+            if old != target && !refers_to_same_file(&old, &target) {
                 let _ = fs::remove_file(old);
             }
         }
@@ -374,6 +375,31 @@ impl NoteStore for FsNoteStore {
         )?;
         Ok(())
     }
+}
+
+/// True when two paths name the same underlying file, so a stale-filename cleanup can be skipped.
+///
+/// This exists because case-insensitive filesystems (APFS by default, NTFS) resolve
+/// `Note-01hq….md` and `note-01hq….md` to one file. When an external tool or sync round-trip
+/// re-cases a note's filename, `write_note` targets the canonical spelling and would then "clean
+/// up" the old spelling — deleting the note it just wrote. Comparing canonicalized paths catches
+/// that, since the OS resolves both spellings to the real on-disk entry.
+///
+/// The comparison deliberately errs toward "same file": a false positive only leaves a stale
+/// duplicate behind, while a false negative loses the note.
+fn refers_to_same_file(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        // Canonicalization needs the path to exist. If it doesn't, a case-insensitive name
+        // comparison is the best remaining signal — and when the old path is genuinely gone the
+        // skipped removal would have been a no-op anyway.
+        _ => paths_equal_ignoring_case(left, right),
+    }
+}
+
+fn paths_equal_ignoring_case(left: &Path, right: &Path) -> bool {
+    left.as_os_str().to_string_lossy().to_lowercase()
+        == right.as_os_str().to_string_lossy().to_lowercase()
 }
 
 /// Read only the frontmatter id of a file (resilient to other fields drifting). `Ok(None)` means
@@ -537,6 +563,46 @@ mod tests {
             store.read_note(&note.id).unwrap().title,
             "a much newer title"
         );
+    }
+
+    #[test]
+    fn case_only_rename_round_trip_keeps_the_note() {
+        let (dir, store) = temp_store();
+        let mut note = Note::new(ObjectType::Note, "case only rename", "syllepsis_001");
+        note.body = "precious body".into();
+        store.write_note(&note).unwrap();
+
+        // An external tool (or a sync round-trip through a case-insensitive remote) can leave the
+        // file under a differently-cased name. The index then points at that spelling while
+        // `write_note` still targets the canonical lowercase one — on APFS/NTFS both are the
+        // *same* file, so the stale-name cleanup must not delete what was just written.
+        let canonical_path = dir.path().join(layout::note_filename(&note.id));
+        let recased_path = dir
+            .path()
+            .join(format!("{}.md", note.id.as_str().to_uppercase()));
+        fs::rename(&canonical_path, &recased_path).unwrap();
+        store.refresh().unwrap();
+
+        note.body = "updated body".into();
+        store.write_note(&note).unwrap();
+
+        assert_eq!(store.read_note(&note.id).unwrap().body, "updated body");
+        // And it survives a fresh scan from disk, under whichever spelling the OS kept.
+        store.refresh().unwrap();
+        let notes = store.read_all_notes().unwrap();
+        assert_eq!(notes.len(), 1, "the note must still exist exactly once");
+        assert_eq!(notes[0].body, "updated body");
+    }
+
+    #[test]
+    fn same_file_check_falls_back_to_case_insensitive_names() {
+        let dir = tempfile::tempdir().unwrap();
+        // Neither path exists, so canonicalization fails and the name comparison decides.
+        let lower = dir.path().join("note-a-01hq.md");
+        let upper = dir.path().join("NOTE-A-01HQ.md");
+        let other = dir.path().join("note-b-01hq.md");
+        assert!(refers_to_same_file(&lower, &upper));
+        assert!(!refers_to_same_file(&lower, &other));
     }
 
     #[test]
