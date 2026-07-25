@@ -144,6 +144,10 @@ interface AppStore {
   // Bumped to force a reload of the currently-open note (e.g. after Apply from job tray)
   noteReloadSignal: number;
   bumpNoteReload: () => void;
+  // Bumped whenever an LLM job is enqueued. The job tray only polls while work is outstanding, so
+  // it needs this cross-component nudge to start polling again after an idle period.
+  llmJobSubmittedSignal: number;
+  notifyLlmJobSubmitted: () => void;
 
   // Cached category list (refreshed when categories change)
   categories: Category[];
@@ -323,6 +327,8 @@ export const useStore = create<AppStore>((set) => ({
   clearCommentaryFocus: () => set({ commentaryFocusId: null }),
   noteReloadSignal: 0,
   bumpNoteReload: () => set((s) => ({ noteReloadSignal: s.noteReloadSignal + 1 })),
+  llmJobSubmittedSignal: 0,
+  notifyLlmJobSubmitted: () => set((s) => ({ llmJobSubmittedSignal: s.llmJobSubmittedSignal + 1 })),
 
   categories: [],
   setCategories: (categories) => set({ categories }),

@@ -8,6 +8,15 @@ function taskLabel(task: string): string {
   return task.replaceAll('_', ' ');
 }
 
+const TRAY_POLL_INTERVAL_MS = 2500;
+const HISTORY_POLL_INTERVAL_MS = 3000;
+
+// Only a queued/running job can still change on its own; anything else is settled until the user
+// acts. Polling is gated on this so an idle app stops waking the backend (and the device radio).
+function hasJobStillInFlight(jobs: QueuedLlmJobResult[]): boolean {
+  return jobs.some((job) => job.status === 'queued' || job.status === 'running');
+}
+
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 function relativeTime(jobId: string): string {
@@ -73,25 +82,32 @@ function JobCard({
 
 function LlmJobHistory({ onClose }: { onClose: () => void }) {
   const { openEditor, openCommentary } = useStore();
+  const llmJobSubmittedSignal = useStore((state) => state.llmJobSubmittedSignal);
   const [jobs, setJobs] = useState<QueuedLlmJobResult[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refreshHistory = useCallback(() => {
     api.listAllLlmJobs().then(setJobs).catch((e) => setError(String(e)));
-    const timer = window.setInterval(() => {
-      api.listAllLlmJobs().then(setJobs).catch(() => {});
-    }, 3000);
-    return () => window.clearInterval(timer);
   }, []);
+
+  // This panel is mounted only while open, so the unconditional fetch below is the "fetch on open"
+  // pass; the interval is then added only while a job can still change.
+  const historyHasJobInFlight = hasJobStillInFlight(jobs);
+  useEffect(() => {
+    refreshHistory();
+    if (!historyHasJobInFlight) return;
+    const timer = window.setInterval(refreshHistory, HISTORY_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [historyHasJobInFlight, llmJobSubmittedSignal, refreshHistory]);
 
   const dismiss = useCallback(async (jobId: string) => {
     try {
       await api.dismissLlmJobResult(jobId);
-      api.listAllLlmJobs().then(setJobs).catch(() => {});
+      refreshHistory();
     } catch (e) {
       setError(String(e));
     }
-  }, []);
+  }, [refreshHistory]);
 
   const openJob = useCallback((job: QueuedLlmJobResult) => {
     if (job.commentary_id) openCommentary(job.target_note_id, job.commentary_id);
@@ -120,6 +136,7 @@ function LlmJobHistory({ onClose }: { onClose: () => void }) {
 
 export function LlmJobTray() {
   const { openEditor, openCommentary } = useStore();
+  const llmJobSubmittedSignal = useStore((state) => state.llmJobSubmittedSignal);
   const [jobs, setJobs] = useState<QueuedLlmJobResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -128,11 +145,16 @@ export function LlmJobTray() {
     api.listLlmJobs().then(setJobs).catch((e) => setError(String(e)));
   }, []);
 
+  // Fetch once, then keep polling only while something is in flight. The effect re-runs when that
+  // condition flips (so the tray picks up the terminal state once) and when a new job is submitted
+  // or the history panel is opened, which is what restarts polling after the tray has gone quiet.
+  const trayHasJobInFlight = hasJobStillInFlight(jobs);
   useEffect(() => {
     refresh();
-    const timer = window.setInterval(refresh, 2500);
+    if (!trayHasJobInFlight) return;
+    const timer = window.setInterval(refresh, TRAY_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [historyOpen, llmJobSubmittedSignal, refresh, trayHasJobInFlight]);
 
   const dismiss = useCallback(async (jobId: string) => {
     try {

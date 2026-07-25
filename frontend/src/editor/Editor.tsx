@@ -355,6 +355,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     closeEditor, openEditor, setCategories, setActiveCategory, setView, categories,
     pluginRenderLanguages, pluginsLoaded, noteReloadSignal, commentaryFocusId, clearCommentaryFocus,
     editorFocusMode, setEditorFocusMode, setSidebarOpen, setDesktopSidebarCollapsed,
+    notifyLlmJobSubmitted,
   } = useStore();
 
   // Map plugin-claimed code languages to a rendered PluginBlockNode; all other code fences keep
@@ -376,7 +377,18 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<NoteScreenMode>(initialMode);
   const [rawText, setRawText] = useState('');
-  const [currentBody, setCurrentBody] = useState('');
+  const [currentBody, setCurrentBodyState] = useState('');
+  // `currentBodyRef` mirrors `currentBody` synchronously. It exists because the callbacks that
+  // persist the note (save, switchMode, submitProposal) first force the debounced markdown
+  // conversion via `flushPendingBody`, and that conversion only schedules a React state update:
+  // their closure copy of `currentBody` is still the pre-flush text, so persisting it would drop
+  // the user's most recent keystrokes. Always write through `applyCurrentBody` so the ref and the
+  // state can never diverge, and read the ref (never the closure state) after a flush.
+  const currentBodyRef = useRef('');
+  const applyCurrentBody = useCallback((nextBody: string) => {
+    currentBodyRef.current = nextBody;
+    setCurrentBodyState(nextBody);
+  }, []);
   const rawTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const summaryRef = useRef<HTMLTextAreaElement | null>(null);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
@@ -423,7 +435,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         setTitle(n.title);
         setSummary(n.summary);
         setBody(displayedBody);
-        setCurrentBody(displayedBody);
+        applyCurrentBody(displayedBody);
         setEditModeSearchText(displayedBody);
         if (initialMode === 'source') setRawText(displayedBody);
         if (restoredDraft !== null && restoredDraft !== n.body) setProposalDraftDirty(true);
@@ -433,7 +445,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         }
       })
       .catch((e) => setError(String(e)));
-  }, [initialMode, noteId, noteReloadSignal]);
+  }, [applyCurrentBody, initialMode, noteId, noteReloadSignal]);
 
   // PIN-locked notes (privacy-security.md "PIN-Locked Notes"): re-fetch once the session unlocks
   // while this note's placeholder is showing, so the real content appears without a manual reload.
@@ -445,10 +457,10 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       setTitle(n.title);
       setSummary(n.summary);
       setBody(n.body);
-      setCurrentBody(n.body);
+      applyCurrentBody(n.body);
       setEditModeSearchText(n.body);
     }).catch(() => {});
-  }, [pinLockUnlocked, note, noteId]);
+  }, [applyCurrentBody, pinLockUnlocked, note, noteId]);
 
   useEffect(() => {
     api.listNotes().then(setAllNotes).catch(() => {});
@@ -502,8 +514,8 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   }, [markDirty]);
 
   useEffect(() => {
-    setCurrentBody(body);
-  }, [body]);
+    applyCurrentBody(body);
+  }, [applyCurrentBody, body]);
 
   // Live refs so save/autosave callbacks don't need frequent rebinding.
   const savingRef = useRef(false);
@@ -522,25 +534,38 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const pendingEditorStateRef = useRef<EditorState | null>(null);
   const bodyComputeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const flushPendingBody = useCallback(() => {
+  // Returns the markdown it flushed, or null when nothing was pending. Callers that need the
+  // latest body should prefer `readLatestBodyMarkdown` below.
+  const flushPendingBody = useCallback((): string | null => {
     if (bodyComputeTimerRef.current) {
       clearTimeout(bodyComputeTimerRef.current);
       bodyComputeTimerRef.current = null;
     }
     const state = pendingEditorStateRef.current;
-    if (!state) return;
+    if (!state) return null;
     pendingEditorStateRef.current = null;
+    let flushedMarkdown: string | null = null;
     state.read(() => {
       const markdown = $convertToMarkdownString(transformersRef.current);
       const editorPlainText = $getRoot().getAllTextNodes().map((node) => node.getTextContent()).join('');
-      setCurrentBody(markdown);
+      flushedMarkdown = markdown;
+      applyCurrentBody(markdown);
       setEditModeSearchText(editorPlainText);
       const currentNote = noteRef.current;
       if (currentNote?.metadata.lifecycle?.lock && currentNote.metadata.lifecycle.lock !== 'none') {
         writeLockedDraft(currentNote, markdown);
       }
     });
-  }, []);
+    return flushedMarkdown;
+  }, [applyCurrentBody]);
+
+  // The single safe way to obtain the body markdown including keystrokes the coalescing timer
+  // hasn't converted yet: flush, then fall back to the ref (not the closure state, which is one
+  // render behind any flush that just happened).
+  const readLatestBodyMarkdown = useCallback(
+    () => flushPendingBody() ?? currentBodyRef.current,
+    [flushPendingBody],
+  );
 
   const handleEditorChange = useCallback((state: EditorState, _editor: LexicalEditor, tags: Set<string>) => {
     pendingEditorStateRef.current = state;
@@ -569,8 +594,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
   const save = useCallback(async () => {
     if (!note || savingRef.current) return false;
     // Guarantee the body reflects every keystroke so far, even if the coalescing timer in
-    // handleEditorChange hasn't fired yet (e.g. Cmd+S right after typing).
-    flushPendingBody();
+    // handleEditorChange hasn't fired yet (e.g. Cmd+S right after typing). The flushed value has
+    // to be captured here — reading `currentBody` below would see the pre-flush render.
+    const latestBodyMarkdown = readLatestBodyMarkdown();
     savingRef.current = true;
     setSaving(true);
     setError(null);
@@ -598,13 +624,13 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         });
         setNote(metaUpdated);
         setBody(metaUpdated.body);
-        setCurrentBody(metaUpdated.body);
+        applyCurrentBody(metaUpdated.body);
       } else {
         // Locked notes: send back the stored body so the draft stays local.
         const isNoteLocked = !!(note.metadata.lifecycle?.lock && note.metadata.lifecycle.lock !== 'none');
         const nextBody = isNoteLocked
           ? note.body
-          : (modeRef.current === 'source' ? rawTextRef.current : currentBody);
+          : (modeRef.current === 'source' ? rawTextRef.current : latestBodyMarkdown);
         const updated = await api.updateNote({
           ...note,
           title,
@@ -618,7 +644,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
         if (!isNoteLocked && updated.body !== nextBody) {
           setBody(updated.body);
           setRawText(updated.body);
-          setCurrentBody(updated.body);
+          applyCurrentBody(updated.body);
           setReloadKey((key) => key + 1);
           setMode('read');
           setCommentaryOpen(true);
@@ -636,7 +662,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [note, title, summary, noteId, setCategories, flushPendingBody, currentBody]);
+  }, [note, title, summary, noteId, setCategories, applyCurrentBody, readLatestBodyMarkdown]);
 
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -694,27 +720,28 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
 
   const switchMode = useCallback((nextMode: NoteScreenMode) => {
     if (nextMode === mode) return;
-    flushPendingBody();
+    // Same stale-closure hazard as save(): the flushed markdown must come from the ref, otherwise
+    // switching out of edit mode discards the keystrokes typed since the last coalesce.
+    const latestBodyMarkdown = readLatestBodyMarkdown();
     if (mode === 'source') {
       if (noteTypeRef.current === 'table') {
         setRows(csvToRows(rawTextRef.current));
       } else {
         const text = rawTextRef.current;
         setBody(text);
-        setCurrentBody(text);
+        applyCurrentBody(text);
         setReloadKey((k) => k + 1);
       }
     } else if (nextMode === 'source') {
       const text = noteTypeRef.current === 'table'
         ? rowsToCsv(rowsRef.current)
-        : currentBody;
+        : latestBodyMarkdown;
       setRawText(text);
     } else if (mode === 'edit') {
-      const text = currentBody;
-      setBody(text);
+      setBody(latestBodyMarkdown);
     }
     setMode(nextMode);
-  }, [flushPendingBody, mode, currentBody]);
+  }, [applyCurrentBody, mode, readLatestBodyMarkdown]);
 
   // Table grid callbacks (only used when note.type === 'table')
   const updateCell = useCallback((r: number, c: number, value: string) => {
@@ -776,9 +803,9 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     if (!detected) return;
     setBody(detected.innerMarkdown);
     setRawText(detected.innerMarkdown);
-    setCurrentBody(detected.innerMarkdown);
+    applyCurrentBody(detected.innerMarkdown);
     markDirty();
-  }, [body, markDirty]);
+  }, [applyCurrentBody, body, markDirty]);
 
   const bodyForRead = useMemo(
     () => mode === 'source' ? rawText : mode === 'read' ? body : currentBody,
@@ -871,7 +898,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       setTitle(updated.title);
       setSummary(updated.summary);
       setBody(updated.body);
-      setCurrentBody(updated.body);
+      applyCurrentBody(updated.body);
       setReloadKey((key) => key + 1);
       setDirty(false);
       setMode('read');
@@ -879,7 +906,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     } catch (error) {
       setError(String(error));
     }
-  }, [note, setCategories]);
+  }, [applyCurrentBody, note, setCategories]);
 
   const handleSplit = useCallback(async (splitAt: number, secondTitle?: string) => {
     if (!note || note.type === 'table' || note.type === 'picture' || note.type === 'drawing') return;
@@ -895,7 +922,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
       setTitle(result.first.title);
       setSummary(result.first.summary);
       setBody(result.first.body);
-      setCurrentBody(result.first.body);
+      applyCurrentBody(result.first.body);
       setReloadKey((key) => key + 1);
       setDirty(false);
       setMode('read');
@@ -903,7 +930,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     } catch (error) {
       setError(String(error));
     }
-  }, [flushPendingBody, note]);
+  }, [applyCurrentBody, flushPendingBody, note]);
 
   const handleFork = useCallback(async () => {
     if (!note || forking) return;
@@ -928,28 +955,29 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     setTitle(updated.title);
     setSummary(updated.summary);
     setBody(updated.body);
-    setCurrentBody(updated.body);
+    applyCurrentBody(updated.body);
     setReloadKey((key) => key + 1);
     setDirty(false);
     setProposalDraftDirty(false);
     setMode('read');
     api.listCommentary(updated.id).then((items) => setCommentaryCount(items.length)).catch(() => {});
-  }, []);
+  }, [applyCurrentBody]);
 
   const discardDraft = useCallback(() => {
     if (!note) return;
     removeLockedDraft(note);
     setBody(note.body);
     setRawText(note.body);
-    setCurrentBody(note.body);
+    applyCurrentBody(note.body);
     setReloadKey((k) => k + 1);
     setProposalDraftDirty(false);
-  }, [note]);
+  }, [applyCurrentBody, note]);
 
   const submitProposal = useCallback(async () => {
     if (!note) return;
-    flushPendingBody();
-    const draftBody = currentBody;
+    // A proposal on a locked note is the only record of the user's draft, so it must carry the
+    // post-flush markdown rather than the closure's pre-flush copy.
+    const draftBody = readLatestBodyMarkdown();
     setSubmittingProposal(true);
     setError(null);
     try {
@@ -961,6 +989,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
           store_result_as_commentary: true,
           for_proposal_id: commentary.id,
         });
+        notifyLlmJobSubmitted();
       }
       discardDraft();
       setCommentaryOpen(true);
@@ -970,7 +999,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
     } finally {
       setSubmittingProposal(false);
     }
-  }, [note, noteId, discardDraft, flushPendingBody, currentBody]);
+  }, [note, noteId, discardDraft, notifyLlmJobSubmitted, readLatestBodyMarkdown]);
 
   const toggleEditorFocusMode = useCallback(() => {
     const enteringFocusMode = !editorFocusMode;
@@ -1216,7 +1245,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             onSaved={(updated) => {
               setNote(updated);
               setBody(updated.body);
-              setCurrentBody(updated.body);
+              applyCurrentBody(updated.body);
             }}
           />
         ) : (
@@ -1239,7 +1268,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
               onChange={(event) => {
                 const value = event.target.value;
                 setBody(value);
-                setCurrentBody(value);
+                applyCurrentBody(value);
                 markDirty();
               }}
               placeholder="Caption, provenance, or description…"
@@ -1297,7 +1326,7 @@ export function Editor({ noteId, initialMode = 'edit' }: Props) {
             onChange={(e) => {
               const value = e.target.value;
               setRawText(value);
-              setCurrentBody(value);
+              applyCurrentBody(value);
               if (isLocked && note) {
                 writeLockedDraft(note, value);
                 setProposalDraftDirty(true);

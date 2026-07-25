@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
+import { useStore } from '../lib/store';
 import { Icon } from '../components/Icon';
 import { CloudLlmModelPicker } from '../components/CloudLlmModelPicker';
 import type {
@@ -42,6 +43,8 @@ interface Props {
 }
 
 export function LlmToolsMenu({ noteId, onQueued }: Props) {
+  // Wakes the job tray's gated poller, which stays idle while no job is in flight.
+  const notifyLlmJobSubmitted = useStore((state) => state.notifyLlmJobSubmitted);
   const [open, setOpen] = useState(false);
   const [routes, setRoutes] = useState<LlmRouteStatus[]>([]);
   const [descriptors, setDescriptors] = useState<CloudLlmProviderDescriptor[]>([]);
@@ -135,6 +138,7 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
         store_result_as_commentary: storeResultAsCommentary,
       });
       onQueued?.(job);
+      notifyLlmJobSubmitted();
       setOpen(false);
     } catch (e) {
       setError(String(e));
@@ -144,6 +148,7 @@ export function LlmToolsMenu({ noteId, onQueued }: Props) {
   }, [
     modelOverride,
     noteId,
+    notifyLlmJobSubmitted,
     onQueued,
     overrideNotes,
     overridePerspective,
