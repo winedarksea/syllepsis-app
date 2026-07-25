@@ -13,6 +13,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde::Serialize;
 
@@ -64,6 +65,16 @@ impl SyncReport {
     }
 }
 
+/// The timestamp-free identity of one published cloud-index entry: the parts that actually say
+/// *what* is published. [`IndexEntry::updated_at`] is deliberately excluded — it is restamped on
+/// every pass by construction, so comparing whole entries could never distinguish "the entry set
+/// changed" from "only the clock moved" (see [`SyncEngine::publish_index`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PublishedEntryIdentity {
+    remote_revision: String,
+    deleted: bool,
+}
+
 /// Drives a single book's sync against one provider. Constructed per pass; owns its provider and
 /// CRDT backend so the call site need only hand it the book root and config.
 pub struct SyncEngine {
@@ -79,6 +90,9 @@ pub struct SyncEngine {
     book_id: String,
     /// Who owns this device's fragment; falls back to the actor id when no author is configured.
     author: String,
+    /// Pass-scoped cache for [`Self::embedding_preference_book`] — see that method for why the
+    /// handle is shared across the pass instead of reopened per conflicting sidecar.
+    embedding_preference_book_cache: OnceLock<crate::storage::Book>,
 }
 
 impl SyncEngine {
@@ -101,6 +115,7 @@ impl SyncEngine {
             sync_embedding_sidecars: true,
             book_id: String::new(),
             author,
+            embedding_preference_book_cache: OnceLock::new(),
         }
     }
 
@@ -131,6 +146,10 @@ impl SyncEngine {
     pub fn sync(&self) -> CoreResult<SyncReport> {
         let mut state = SyncState::load(&self.book_root, self.provider.name())?;
         let mut report = SyncReport::default();
+        // What this device would have published *before* doing anything, so `publish_index` can tell
+        // an entry set that really changed from a quiet pass that would only restamp `updated_at`.
+        let published_entries_before_pass =
+            self.index_entry_identities(&state, &SyncReport::default());
 
         // 1. Markdown → sidecar, so local/external edits are in the CRDT before we diff.
         self.reconcile_sidecars(&mut report)?;
@@ -173,7 +192,7 @@ impl SyncEngine {
         }
         state.save(&self.book_root)?;
 
-        self.publish_index(&state, &report)?;
+        self.publish_index(&state, &report, &published_entries_before_pass)?;
         Ok(report)
     }
 
@@ -181,34 +200,74 @@ impl SyncEngine {
     /// per live syncable primary file (its remote revision) plus a tombstone for each path deleted
     /// remotely this pass. Written once per pass (not per put) so the fragment is uploaded at most
     /// once. A no-op for providers without a cheap index (the default `publish_index`).
-    fn publish_index(&self, state: &SyncState, report: &SyncReport) -> CoreResult<()> {
+    ///
+    /// Uploads nothing when the pass changed nothing *and* would publish the same entry set it
+    /// started with: otherwise every idle auto-sync tick would write a fresh fragment whose only
+    /// difference is `updated_at`, i.e. remote traffic (and, on a real cloud, a new revision of the
+    /// fragment) for a book nobody touched. Skipping is safe because the fragment already on the
+    /// remote carries exactly these entries — it was published by whichever earlier pass last
+    /// changed them — and because the index is only an accelerator: if it were somehow missing or
+    /// stale, readers fall back to download-and-hash, which is always correct (see
+    /// [`cloud_index`](super::cloud_index)).
+    fn publish_index(
+        &self,
+        state: &SyncState,
+        report: &SyncReport,
+        published_entries_before_pass: &BTreeMap<String, PublishedEntryIdentity>,
+    ) -> CoreResult<()> {
+        let identities = self.index_entry_identities(state, report);
+        if report.is_noop() && identities == *published_entries_before_pass {
+            return Ok(());
+        }
         let now = Utc::now();
-        let mut entries: BTreeMap<String, IndexEntry> = BTreeMap::new();
+        let entries: BTreeMap<String, IndexEntry> = identities
+            .into_iter()
+            .map(|(path, identity)| {
+                (
+                    path,
+                    IndexEntry {
+                        revision: identity.remote_revision,
+                        updated_at: now,
+                        deleted: identity.deleted,
+                    },
+                )
+            })
+            .collect();
+        self.provider
+            .publish_index(self.actor.as_str(), &self.author, &self.book_id, &entries)
+    }
+
+    /// The timestamp-free entry set this device would publish for `state` and `report`: one entry per
+    /// live syncable primary file, overridden by a tombstone for each path deleted remotely this pass
+    /// (a tombstone always wins over a leftover live entry for the same path).
+    fn index_entry_identities(
+        &self,
+        state: &SyncState,
+        report: &SyncReport,
+    ) -> BTreeMap<String, PublishedEntryIdentity> {
+        let mut identities: BTreeMap<String, PublishedEntryIdentity> = BTreeMap::new();
         for (path, synced) in &state.files {
             if !self.is_syncable_primary_path(path) {
                 continue;
             }
-            entries.insert(
+            identities.insert(
                 path.clone(),
-                IndexEntry {
-                    revision: synced.remote_revision.clone(),
-                    updated_at: now,
+                PublishedEntryIdentity {
+                    remote_revision: synced.remote_revision.clone(),
                     deleted: false,
                 },
             );
         }
         for path in &report.deleted_remote {
-            entries.insert(
+            identities.insert(
                 path.clone(),
-                IndexEntry {
-                    revision: String::new(),
-                    updated_at: now,
+                PublishedEntryIdentity {
+                    remote_revision: String::new(),
                     deleted: true,
                 },
             );
         }
-        self.provider
-            .publish_index(self.actor.as_str(), &self.author, &self.book_id, &entries)
+        identities
     }
 
     fn apply(
@@ -406,19 +465,16 @@ impl SyncEngine {
             backend.new_document(&self.actor, &note.body)
         };
 
-        let merged = if remote_all.contains_key(&sidecar_rel) {
-            match doc.merge(&self.provider.get(&sidecar_rel)?) {
-                Ok(()) => true,
-                // Corrupt remote sidecar: fall back to the note-body path below, as if the remote
-                // simply had no sidecar.
-                Err(_) => self.fold_remote_note_body(&mut doc, path)?,
+        // The remote note is already fetched and parsed above, so every path below folds
+        // `remote_note.body` in rather than re-downloading the same file.
+        if remote_all.contains_key(&sidecar_rel) {
+            if doc.merge(&self.provider.get(&sidecar_rel)?).is_err() {
+                // Corrupt remote sidecar: fall back to the note-body path, as if the remote simply
+                // had no sidecar.
+                fold_remote_note_body(doc.as_mut(), &remote_note.body);
             }
         } else {
-            self.fold_remote_note_body(&mut doc, path)?
-        };
-        if !merged {
-            self.resolve_conflict(path, state)?;
-            return Ok(false);
+            fold_remote_note_body(doc.as_mut(), &remote_note.body);
         }
 
         note.body = doc.text();
@@ -429,23 +485,6 @@ impl SyncEngine {
         let note_rev = self.provider.put(path, serialized.as_bytes())?;
         state.mark_synced(path, content_revision(serialized.as_bytes()), note_rev);
         self.push_sidecar_of(path, state)?;
-        Ok(true)
-    }
-
-    /// Remote changed the note but has no usable sidecar (edited by a non-CRDT tool, or the
-    /// remote sidecar was corrupt): fold the remote body into `doc` as a local edit so it still
-    /// participates in convergence. Requires the remote bytes to be valid UTF-8 and parseable —
-    /// on either failure, returns `false` so the caller falls back to a byte-level conflict rather
-    /// than writing lossy (`U+FFFD`) replacement text back to both sides.
-    fn fold_remote_note_body(&self, doc: &mut Box<dyn NoteCrdt>, path: &str) -> CoreResult<bool> {
-        let remote_bytes = self.provider.get(path)?;
-        let Ok(remote_text) = String::from_utf8(remote_bytes) else {
-            return Ok(false);
-        };
-        let Ok(remote_note) = frontmatter::parse_note(&remote_text) else {
-            return Ok(false);
-        };
-        doc.set_text(&remote_note.body);
         Ok(true)
     }
 
@@ -478,9 +517,9 @@ impl SyncEngine {
     fn resolve_embedding_conflict(&self, path: &str, state: &mut SyncState) -> CoreResult<()> {
         let local_bytes = std::fs::read(self.full(path))?;
         let remote_bytes = self.provider.get(path)?;
-        let book = crate::storage::Book::open(&self.book_root)?;
-        let local_rank = crate::embeddings::sidecar_preference_rank(&book, &local_bytes);
-        let remote_rank = crate::embeddings::sidecar_preference_rank(&book, &remote_bytes);
+        let book = self.embedding_preference_book()?;
+        let local_rank = crate::embeddings::sidecar_preference_rank(book, &local_bytes);
+        let remote_rank = crate::embeddings::sidecar_preference_rank(book, &remote_bytes);
         let winner = if local_rank >= remote_rank {
             local_bytes
         } else {
@@ -490,6 +529,34 @@ impl SyncEngine {
         let revision = self.provider.put(path, &winner)?;
         state.mark_synced(path, content_revision(&winner), revision);
         Ok(())
+    }
+
+    /// The book handle [`Self::resolve_embedding_conflict`] ranks sidecars against, opened at most
+    /// once per pass. `Book::open` re-reads the book metadata and config and rebuilds the note-id
+    /// index over every note file, so opening it per conflicting sidecar made a pass with N
+    /// conflicting embeddings pay N full book opens for one pass-invariant answer.
+    ///
+    /// A lazy `OnceLock` on the engine (rather than an eager open in `new`, or an extra parameter
+    /// threaded through `apply`) fits this structure best: an engine is constructed per pass, so its
+    /// lifetime *is* the pass scope; every existing `&self` signature stays as it is; and the
+    /// overwhelmingly common pass with no embedding conflict still never opens the book at all.
+    /// Opening lazily also keeps the snapshot taken at the same point in the pass as before, since
+    /// plan actions are applied in ascending path order and `_embeddings/` sorts after every note
+    /// (`{ulid}.md`) and after `_categories/`/`_commentary/`: whatever those actions wrote is already
+    /// on disk. Note bodies are re-read from disk per ranking call, so only the id index and config
+    /// are snapshotted, and later actions touch neither.
+    fn embedding_preference_book(&self) -> CoreResult<&crate::storage::Book> {
+        if let Some(book) = self.embedding_preference_book_cache.get() {
+            return Ok(book);
+        }
+        let book = crate::storage::Book::open(&self.book_root)?;
+        // `set` only fails if another caller installed an equivalent handle first; either handle is
+        // an equally valid snapshot, so the loser simply uses the winner's.
+        let _ = self.embedding_preference_book_cache.set(book);
+        Ok(self
+            .embedding_preference_book_cache
+            .get()
+            .expect("just initialized"))
     }
 
     // --- file/sidecar primitives ---------------------------------------------------------------
@@ -606,6 +673,19 @@ impl SyncEngine {
         }
         path
     }
+}
+
+/// Remote changed the note but has no usable sidecar (edited by a non-CRDT tool, or the remote
+/// sidecar was corrupt): fold the remote *body* into `doc` as a local edit so it still participates
+/// in convergence.
+///
+/// Takes the body the caller already parsed out of the remote bytes rather than a path to fetch:
+/// [`SyncEngine::merge_note`] has downloaded and parsed that note before it gets here (it must, to
+/// rule out a locked or unparseable remote), and re-fetching the same path doubled the bandwidth of
+/// every note merge. The unparseable/invalid-UTF-8 remote is therefore already handled by the
+/// caller's byte-level conflict fallback, which is why this can no longer fail.
+fn fold_remote_note_body(doc: &mut dyn NoteCrdt, remote_body: &str) {
+    doc.set_text(remote_body);
 }
 
 /// Build the conflict-copy path for `path`: `{stem}.{marker}-{hash8}.{ext}` next to the original.
@@ -965,6 +1045,172 @@ mod tests {
             0,
             "second pass is cheap once a fragment exists"
         );
+    }
+
+    #[test]
+    fn indexed_merge_fetches_the_remote_note_body_once() {
+        // Both devices edited the same note, so the pass must merge — which needs the remote note's
+        // body. That body used to be downloaded twice (once by `merge_note` to rule out an
+        // unparseable/locked remote, then again inside `fold_remote_note_body`); the parsed copy is
+        // now reused, so the merge costs exactly one fetch.
+        let (_tmp, a, b) = two_devices();
+        let id = add_note(&a, "shared", "base");
+        a.indexed_engine().0.sync().unwrap();
+        b.indexed_engine().0.sync().unwrap();
+        b.book.store.refresh().unwrap();
+
+        let mut edit_a = a.book.store.read_note(&id).unwrap();
+        edit_a.body = "edit from A".into();
+        a.book.save_note(&edit_a).unwrap();
+        let mut edit_b = b.book.store.read_note(&id).unwrap();
+        edit_b.body = "edit from B".into();
+        b.book.save_note(&edit_b).unwrap();
+        a.indexed_engine().0.sync().unwrap();
+
+        let (b_engine, b_count) = b.indexed_engine();
+        let report = b_engine.sync().unwrap();
+
+        assert!(
+            report.merged.iter().any(|path| path.ends_with(".md")),
+            "both sides changed the note, so it must merge: {report:?}"
+        );
+        // Everything else on the remote is unchanged and priced from the index, so this count is the
+        // merge's fetches alone: 1 now, 2 before the optimization.
+        assert_eq!(
+            b_count.load(Relaxed),
+            1,
+            "a note merge fetches the remote note body exactly once"
+        );
+    }
+
+    /// This device's one published index fragment, parsed. Every publish restamps `updated_at`, so
+    /// comparing that stamp across two passes is exactly "was a fragment uploaded?".
+    fn only_published_fragment(remote: &Path) -> crate::sync::CloudIndexFragment {
+        let mut fragments: Vec<PathBuf> =
+            std::fs::read_dir(remote.join(crate::sync::CLOUD_INDEX_DIR))
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .collect();
+        assert_eq!(fragments.len(), 1, "one device, one fragment");
+        serde_json::from_slice(&std::fs::read(fragments.pop().unwrap()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn indexed_quiet_pass_does_not_republish_an_unchanged_index() {
+        // Auto-sync runs on a timer, so a book nobody touched must cost the remote nothing at all —
+        // not even a fragment whose only difference is a fresh `updated_at`.
+        let (_tmp, a, _b) = two_devices();
+        add_note(&a, "n", "content");
+        a.indexed_engine().0.sync().unwrap();
+        let published_after_push = only_published_fragment(&a.remote);
+
+        let quiet = a.indexed_engine().0.sync().unwrap();
+        assert!(quiet.is_noop(), "nothing changed on either side");
+        assert_eq!(
+            only_published_fragment(&a.remote).updated_at,
+            published_after_push.updated_at,
+            "a quiet pass must not upload an index fragment"
+        );
+
+        // A genuinely changed entry set still publishes, and the new fragment covers the new note.
+        let second = add_note(&a, "second", "more content");
+        let changed = a.indexed_engine().0.sync().unwrap();
+        assert!(changed
+            .pushed
+            .iter()
+            .any(|path| path.contains(second.as_str())));
+        let published_after_change = only_published_fragment(&a.remote);
+        assert!(
+            published_after_change.updated_at > published_after_push.updated_at,
+            "a changed entry set must publish"
+        );
+        assert!(
+            published_after_change
+                .entries
+                .keys()
+                .any(|path| path.contains(second.as_str())),
+            "the republished fragment carries the new note: {:?}",
+            published_after_change.entries.keys().collect::<Vec<_>>()
+        );
+        // ...and settling back down leaves that fragment alone again.
+        assert!(a.indexed_engine().0.sync().unwrap().is_noop());
+        assert_eq!(
+            only_published_fragment(&a.remote).updated_at,
+            published_after_change.updated_at
+        );
+    }
+
+    #[test]
+    fn several_embedding_conflicts_in_one_pass_still_converge() {
+        // Two conflicting embedding sidecars in a single pass now share one lazily-opened `Book`
+        // handle instead of one open each. Ranking must be unaffected: both conflicts resolve, the
+        // devices converge on the same bytes, and the pass settles.
+        let (_tmp, a, b) = two_devices();
+        let mut first = a.book.new_note(ObjectType::Note, "first").unwrap();
+        first.body = "compost pile".into();
+        a.book.save_note(&first).unwrap();
+        let mut second = a.book.new_note(ObjectType::Note, "second").unwrap();
+        second.body = "seed trays".into();
+        a.book.save_note(&second).unwrap();
+        crate::embeddings::repository::write_test_sidecars(
+            &a.book,
+            &[first.clone(), second.clone()],
+        );
+        a.sync();
+        b.sync();
+        b.book.store.refresh().unwrap();
+
+        // Each device edits both notes differently and regenerates both sidecars, so all four
+        // sidecars differ and both embedding paths conflict in the same pass.
+        let regenerate_sidecars = |device: &Device, suffix: &str| {
+            let notes: Vec<crate::model::Note> = [&first.id, &second.id]
+                .into_iter()
+                .map(|id| {
+                    let mut note = device.book.store.read_note(id).unwrap();
+                    note.body = format!("{} {suffix}", note.body);
+                    device.book.save_note(&note).unwrap();
+                    note
+                })
+                .collect();
+            crate::embeddings::repository::write_test_sidecars(&device.book, &notes);
+        };
+        regenerate_sidecars(&a, "from A");
+        regenerate_sidecars(&b, "from B");
+        a.sync();
+
+        let report = b.sync();
+        let conflicted_embeddings: Vec<&String> = report
+            .conflicted
+            .iter()
+            .filter(|path| is_embedding_sidecar(path.as_str()))
+            .collect();
+        assert_eq!(
+            conflicted_embeddings.len(),
+            2,
+            "both embedding sidecars conflict in one pass: {report:?}"
+        );
+
+        // Both replicas end up with identical sidecar bytes for both notes, and sync settles.
+        for _ in 0..3 {
+            a.sync();
+            b.sync();
+        }
+        for id in [&first.id, &second.id] {
+            let on_a = std::fs::read(crate::storage::layout::embedding_sidecar_path(
+                &a.book.root,
+                id,
+            ))
+            .unwrap();
+            let on_b = std::fs::read(crate::storage::layout::embedding_sidecar_path(
+                &b.book.root,
+                id,
+            ))
+            .unwrap();
+            assert_eq!(on_a, on_b, "embedding sidecars must converge");
+            assert!(crate::embeddings::sidecar::decode(&on_a).is_ok());
+        }
+        assert!(a.sync().is_noop() && b.sync().is_noop(), "must settle");
     }
 
     #[test]
