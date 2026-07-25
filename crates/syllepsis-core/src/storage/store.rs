@@ -302,7 +302,9 @@ impl NoteStore for FsNoteStore {
     }
 
     fn read_category(&self, name: &str) -> CoreResult<Category> {
-        let path = layout::categories_dir(&self.root).join(layout::category_filename(name));
+        // Validated on the read path too, not just the write path: a hostile name reaching a read
+        // would otherwise let a caller slurp arbitrary files from outside the book.
+        let path = layout::categories_dir(&self.root).join(layout::category_filename(name)?);
         let content = fs::read_to_string(&path).map_err(|error| {
             if error.kind() == ErrorKind::NotFound {
                 CoreError::NotFound(name.to_string())
@@ -314,15 +316,17 @@ impl NoteStore for FsNoteStore {
     }
 
     fn write_category(&self, category: &Category) -> CoreResult<()> {
+        // Validate before `create_dir_all` so a hostile name cannot even create directories.
+        let filename = layout::category_filename(&category.name)?;
         let dir = layout::categories_dir(&self.root);
         fs::create_dir_all(&dir)?;
-        let path = dir.join(layout::category_filename(&category.name));
+        let path = dir.join(filename);
         write_atomic(&path, serialize_category(category)?.as_bytes())?;
         Ok(())
     }
 
     fn delete_category(&self, name: &str) -> CoreResult<()> {
-        let path = layout::categories_dir(&self.root).join(layout::category_filename(name));
+        let path = layout::categories_dir(&self.root).join(layout::category_filename(name)?);
         fs::remove_file(&path)?;
         Ok(())
     }
@@ -345,15 +349,16 @@ impl NoteStore for FsNoteStore {
     }
 
     fn write_world(&self, world: &World) -> CoreResult<()> {
+        let filename = layout::world_filename(&world.id)?;
         let dir = layout::worlds_dir(&self.root);
         fs::create_dir_all(&dir)?;
-        let path = dir.join(layout::world_filename(&world.id));
+        let path = dir.join(filename);
         write_atomic(&path, serialize_world(world)?.as_bytes())?;
         Ok(())
     }
 
     fn delete_world(&self, id: &str) -> CoreResult<()> {
-        let path = layout::worlds_dir(&self.root).join(layout::world_filename(id));
+        let path = layout::worlds_dir(&self.root).join(layout::world_filename(id)?);
         fs::remove_file(&path)?;
         Ok(())
     }
@@ -679,6 +684,79 @@ mod tests {
         );
         // The lookup CSV is not picked up by the world scan.
         assert_eq!(store.worlds().unwrap().len(), 1);
+    }
+
+    /// Category/world names come from imported packs and remote sync payloads, so a traversing
+    /// name must be refused on *both* boundaries: the write path (no file outside the book) and
+    /// the read path (no reading a file outside the book).
+    #[test]
+    fn hostile_category_names_are_rejected_on_write_and_read() {
+        let enclosing = tempfile::tempdir().unwrap();
+        let book_root = enclosing.path().join("book");
+        fs::create_dir_all(&book_root).unwrap();
+        // A file beside the book root that a traversing name would target.
+        let outside = enclosing.path().join("secret.md");
+        fs::write(&outside, "---\nname: secret\n---\n").unwrap();
+        let store = FsNoteStore::open(&book_root).unwrap();
+
+        // `_categories/../../secret` is exactly the decoy file beside the book root.
+        for hostile in [
+            "../../secret",
+            "../secret",
+            "../../etc/passwd",
+            "sub/evil",
+            "..",
+            ".",
+            "",
+        ] {
+            let mut category = Category::new("placeholder");
+            category.name = hostile.to_string();
+            assert!(
+                matches!(
+                    store.write_category(&category).unwrap_err(),
+                    CoreError::InvalidId(_)
+                ),
+                "write_category must reject {hostile:?}"
+            );
+            assert!(
+                matches!(
+                    store.read_category(hostile).unwrap_err(),
+                    CoreError::InvalidId(_)
+                ),
+                "read_category must reject {hostile:?}"
+            );
+            assert!(
+                store.delete_category(hostile).is_err(),
+                "delete_category must reject {hostile:?}"
+            );
+        }
+
+        // Nothing new appeared beside the book, and the neighbouring file is untouched.
+        let mut siblings: Vec<String> = fs::read_dir(enclosing.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        siblings.sort();
+        assert_eq!(siblings, vec!["book".to_string(), "secret.md".to_string()]);
+        assert_eq!(
+            fs::read_to_string(&outside).unwrap(),
+            "---\nname: secret\n---\n"
+        );
+    }
+
+    #[test]
+    fn hostile_world_ids_are_rejected_on_write_and_delete() {
+        let (_dir, store) = temp_store();
+        let mut world = World::image("firstfloor", "First Floor", "drawing-1", (10, 10));
+        world.id = "../../evil".into();
+        assert!(matches!(
+            store.write_world(&world).unwrap_err(),
+            CoreError::InvalidId(_)
+        ));
+        assert!(matches!(
+            store.delete_world("../../evil").unwrap_err(),
+            CoreError::InvalidId(_)
+        ));
     }
 
     #[test]

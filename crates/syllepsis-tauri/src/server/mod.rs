@@ -40,8 +40,15 @@ impl ServerHandle {
     }
 }
 
-/// Build and spawn the server. Returns a `ServerHandle` or an error if the port is in use.
+/// Build and spawn the server. Returns a `ServerHandle`, or an error if the bearer token is
+/// missing/empty or the port is in use.
 pub fn start(app_handle: AppHandle, config: Arc<SearchApiConfig>) -> Result<ServerHandle, String> {
+    // Resolve the token *before* binding: an absent or empty token used to collapse (via
+    // `unwrap_or_default`) into an empty expected token, which `auth_middleware` would then match
+    // against `Bearer ` — i.e. an unauthenticated HTTP surface over the user's whole book. Refuse
+    // to start instead, so the failure is loud rather than silently open.
+    let token = require_bearer_token(&config)?;
+
     let addr = format!("127.0.0.1:{}", config.port);
     let listener = TcpListener::bind(&addr)
         .map_err(|e| format!("search API: could not bind to {addr}: {e}"))?;
@@ -51,7 +58,7 @@ pub fn start(app_handle: AppHandle, config: Arc<SearchApiConfig>) -> Result<Serv
 
     let state = ApiState {
         handle: Arc::new(app_handle),
-        token: Arc::new(config.token.clone().unwrap_or_default()),
+        token: Arc::new(token),
     };
 
     let router = build_router(state);
@@ -69,6 +76,22 @@ pub fn start(app_handle: AppHandle, config: Arc<SearchApiConfig>) -> Result<Serv
     });
 
     Ok(ServerHandle { shutdown_tx })
+}
+
+/// The configured bearer token, or an error when the API has no usable token.
+///
+/// A whitespace-only token is treated as absent as well: it cannot be transmitted reliably in an
+/// `Authorization` header, so accepting it would produce a server nobody can authenticate against
+/// while looking configured.
+fn require_bearer_token(config: &SearchApiConfig) -> Result<String, String> {
+    match config.token.as_deref() {
+        Some(token) if !token.trim().is_empty() => Ok(token.to_string()),
+        _ => Err(
+            "search API: refusing to start without a bearer token — regenerate the token before \
+             enabling the API"
+                .to_string(),
+        ),
+    }
 }
 
 /// Axum middleware that enforces the bearer token on `/api/*` and `/mcp`.
@@ -127,4 +150,48 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
         .zip(bb.iter())
         .fold(0u8, |acc, (x, y)| acc | (x ^ y))
         == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_token(token: Option<&str>) -> SearchApiConfig {
+        SearchApiConfig {
+            enabled: true,
+            port: 57384,
+            token: token.map(str::to_string),
+        }
+    }
+
+    /// `start()` needs a live `AppHandle`, so the token gate is exercised directly — it is the
+    /// first thing `start()` does, before the listener is bound.
+    #[test]
+    fn server_refuses_to_start_without_a_token() {
+        assert!(require_bearer_token(&config_with_token(None)).is_err());
+    }
+
+    #[test]
+    fn server_refuses_to_start_with_an_empty_token() {
+        assert!(require_bearer_token(&config_with_token(Some(""))).is_err());
+        assert!(require_bearer_token(&config_with_token(Some("   "))).is_err());
+    }
+
+    #[test]
+    fn server_starts_with_a_generated_token() {
+        let mut config = config_with_token(None);
+        config.generate_token();
+        assert_eq!(
+            require_bearer_token(&config).unwrap(),
+            config.token.clone().unwrap()
+        );
+    }
+
+    #[test]
+    fn empty_bearer_header_never_matches_a_real_token() {
+        // Guards the original bug's blast radius: even if an empty expected token were ever
+        // reintroduced, it must not be equal to a real one.
+        assert!(!constant_time_eq("", "real-token"));
+        assert!(constant_time_eq("real-token", "real-token"));
+    }
 }

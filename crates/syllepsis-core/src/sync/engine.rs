@@ -666,9 +666,24 @@ impl SyncEngine {
         Ok(out)
     }
 
+    /// Resolve a book-relative POSIX path against the book root, **containing** it there.
+    ///
+    /// `rel` is often remote-supplied (the remote index names the paths to pull), so a hostile
+    /// index could otherwise write anywhere on disk via `../`. Traversal segments are dropped
+    /// rather than erroring: sync must keep making progress on the rest of a pull, and a dropped
+    /// segment can only ever land the file *inside* the book root.
     fn full(&self, rel: &str) -> PathBuf {
+        /// True when a segment can only descend one level. Uses `Path::components` so it is
+        /// platform-correct: on Windows a `\`-bearing segment or a `C:` drive prefix is rejected,
+        /// while on Unix a backslash is a legal filename character and stays allowed.
+        fn is_containable_segment(segment: &str) -> bool {
+            let mut components = Path::new(segment).components();
+            matches!(components.next(), Some(std::path::Component::Normal(_)))
+                && components.next().is_none()
+        }
+
         let mut path = self.book_root.clone();
-        for segment in rel.split('/').filter(|s| !s.is_empty()) {
+        for segment in rel.split('/').filter(|s| is_containable_segment(s)) {
             path.push(segment);
         }
         path
@@ -1782,5 +1797,80 @@ mod tests {
             note.body,
             "rebuilt sidecar holds the ciphertext body"
         );
+    }
+
+    /// Paths a hostile remote index could advertise to try to write outside the book root.
+    const TRAVERSING_REMOTE_PATHS: &[&str] = &[
+        "../stolen.md",
+        "../../stolen.md",
+        "/etc/syllepsis-pwned.md",
+        "../evil/nested.md",
+        "note-x/../../out.md",
+    ];
+
+    /// A remote that advertises path-traversing entries and serves bytes for any of them — the
+    /// hostile-remote case (a compromised cloud folder or a tampered cloud index).
+    struct TraversingRemote;
+
+    impl SyncProvider for TraversingRemote {
+        fn name(&self) -> &str {
+            crate::sync::provider::LOCAL_FOLDER_ID
+        }
+        fn list(&self) -> CoreResult<Vec<crate::sync::provider::RemoteEntry>> {
+            Ok(TRAVERSING_REMOTE_PATHS
+                .iter()
+                .map(|path| crate::sync::provider::RemoteEntry {
+                    path: (*path).to_string(),
+                    revision: "hostile-rev-1".to_string(),
+                    size: 8,
+                })
+                .collect())
+        }
+        fn get(&self, _path: &str) -> CoreResult<Vec<u8>> {
+            Ok(b"pwned!!!".to_vec())
+        }
+        fn put(&self, _path: &str, _bytes: &[u8]) -> CoreResult<String> {
+            Ok("hostile-rev-1".to_string())
+        }
+        fn delete(&self, _path: &str) -> CoreResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn hostile_remote_paths_are_contained_within_the_book_root() {
+        let enclosing = tempfile::tempdir().unwrap();
+        let book = Book::create(enclosing.path().join("book"), "Victim").unwrap();
+        let cfg = SyncConfig {
+            crdt_backend: crate::crdt::LWW_BACKEND.to_string(),
+            ..SyncConfig::default()
+        };
+        let actor = actor_id_for(book.root.as_path()).unwrap();
+        let engine = SyncEngine::new(book.root.clone(), Box::new(TraversingRemote), actor, &cfg);
+
+        engine.sync().unwrap();
+
+        // The only thing beside the book root is the book itself: every `..`/absolute segment was
+        // dropped, so the pulled bytes landed inside the book (or nowhere) — never above it.
+        let mut siblings: Vec<String> = std::fs::read_dir(enclosing.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        siblings.sort();
+        assert_eq!(siblings, vec!["book".to_string()]);
+        assert!(!enclosing.path().join("stolen.md").exists());
+
+        // Path resolution itself is contained, including degenerate rels that reduce to nothing
+        // (those land *on* the book root, where the write fails harmlessly rather than escaping).
+        for path in TRAVERSING_REMOTE_PATHS
+            .iter()
+            .chain([".", "..", "../..", "/", ""].iter())
+        {
+            let resolved = engine.full(path);
+            assert!(
+                resolved.starts_with(&book.root),
+                "{path:?} resolved to {resolved:?}, outside the book root"
+            );
+        }
     }
 }
