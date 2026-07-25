@@ -816,7 +816,7 @@ pub fn refresh_private_gitignore(book: &Book) -> CoreResult<GitignoreReport> {
         excluded.push(format!(
             "{}/{}",
             layout::CATEGORIES_DIR,
-            layout::category_filename(name)
+            layout::category_filename(name)?
         ));
     }
     // The PIN-lock keycheck (salt + hint) must never reach a public git publish, unconditionally.

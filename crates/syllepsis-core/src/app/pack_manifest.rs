@@ -55,7 +55,10 @@ impl BookPackManifest {
     /// import; `note_import_status`'s no-baseline fallback already treats a missing/empty
     /// manifest safely, so this degrades to that same safe path).
     pub fn load(book_root: &Path, pack_id: &str) -> CoreResult<Self> {
-        let path = layout::pack_manifest_path(book_root, pack_id);
+        // A pack id is attacker-controlled (it is read straight out of the pack file), so an
+        // unsafe id is a hard error on both load and save rather than a degraded-but-continue
+        // case: importing under a traversing id must not proceed at all.
+        let path = layout::pack_manifest_path(book_root, pack_id)?;
         if !path.exists() {
             return Ok(BookPackManifest {
                 pack_id: pack_id.to_string(),
@@ -75,7 +78,7 @@ impl BookPackManifest {
     /// Persist the manifest to `book_root/_packs/{pack_id}.json`, creating the `_packs/`
     /// directory if it doesn't exist yet.
     pub fn save(&self, book_root: &Path) -> CoreResult<()> {
-        let path = layout::pack_manifest_path(book_root, &self.pack_id);
+        let path = layout::pack_manifest_path(book_root, &self.pack_id)?;
         write_atomic(&path, serde_json::to_string_pretty(self)?.as_bytes())?;
         Ok(())
     }

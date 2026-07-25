@@ -18,8 +18,9 @@
 //!   note-*.md         notes (and other object types)
 //! ```
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
+use crate::error::{CoreError, CoreResult};
 use crate::id::NoteId;
 
 pub const CATEGORIES_DIR: &str = "_categories";
@@ -114,8 +115,12 @@ pub fn packs_dir(root: &Path) -> PathBuf {
 }
 
 /// The manifest file for a specific pack: `_packs/{pack_id}.json`.
-pub fn pack_manifest_path(root: &Path, pack_id: &str) -> PathBuf {
-    packs_dir(root).join(format!("{pack_id}.json"))
+///
+/// `pack_id` comes verbatim out of an imported pack's manifest (attacker-controlled), so it is
+/// validated here rather than trusted — a `../` id would otherwise write outside the book.
+pub fn pack_manifest_path(root: &Path, pack_id: &str) -> CoreResult<PathBuf> {
+    validate_single_path_component_name(pack_id, "pack id")?;
+    Ok(packs_dir(root).join(format!("{pack_id}.json")))
 }
 
 /// The CRDT sidecar path for a note: `_crdt/{ulid}.crdt`. Keyed on the ulid (not the slug-bearing
@@ -151,14 +156,53 @@ pub fn table_companion_csv_path(root: &Path, id: &NoteId) -> PathBuf {
 }
 
 /// Filename for a category file inside `_categories/`.
-pub fn category_filename(name: &str) -> String {
-    format!("{name}.md")
+///
+/// Category names arrive from imported packs and remote sync payloads, so the name is validated
+/// as a single path component instead of being trusted (see
+/// [`validate_single_path_component_name`]).
+pub fn category_filename(name: &str) -> CoreResult<String> {
+    validate_single_path_component_name(name, "category name")?;
+    Ok(format!("{name}.md"))
 }
 
-/// Filename for a world registry file inside `_worlds/` (`{id}.md`). World ids are slugs without
-/// path-hostile characters, so they are filename-safe like note ids.
-pub fn world_filename(id: &str) -> String {
-    format!("{id}.md")
+/// Filename for a world registry file inside `_worlds/` (`{id}.md`). World ids must be slugs
+/// without path-hostile characters; that is *enforced* here rather than assumed, because world
+/// records also arrive from imported packs and remote sync payloads.
+pub fn world_filename(id: &str) -> CoreResult<String> {
+    validate_single_path_component_name(id, "world id")?;
+    Ok(format!("{id}.md"))
+}
+
+/// Reject a name that cannot safely become one path component under a book directory.
+///
+/// Shared by every `{name}.{ext}` filename builder in this module. Rejection (rather than silent
+/// sanitization) is deliberate: rewriting `a/b` and `a-b` into the same filename would map two
+/// distinct records onto one file and silently destroy one of the user's notes.
+///
+/// The check runs the name through [`Path::components`], so it is platform-correct — on Windows a
+/// backslash or a `C:` drive prefix is a separator/prefix component and is rejected, while on Unix
+/// a backslash is an ordinary character in a filename and stays legal.
+fn validate_single_path_component_name(name: &str, kind: &str) -> CoreResult<()> {
+    let invalid = |reason: &str| {
+        Err(CoreError::InvalidId(format!(
+            "unsafe {kind} ({reason}): {name}"
+        )))
+    };
+    if name.is_empty() {
+        return invalid("empty");
+    }
+    // `/` is a separator on every platform we target, including Windows, so reject it explicitly
+    // even though `Path::components` would only catch it on Unix.
+    if name.contains('/') {
+        return invalid("path separator");
+    }
+    let mut components = Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => Ok(()),
+        // `..`/`.` are ParentDir/CurDir; absolute names carry RootDir; a Windows drive spec
+        // carries Prefix; anything multi-component embeds a separator.
+        _ => invalid("path traversal or separator"),
+    }
 }
 
 /// True if a directory name is reserved (should be skipped by the note scan).
@@ -189,5 +233,45 @@ mod tests {
         assert!(is_reserved_dir(CATEGORIES_DIR));
         assert!(is_reserved_dir(DERIVED_DIR));
         assert!(is_reserved_dir(COMMENTARY_DIR));
+    }
+
+    #[test]
+    fn filename_builders_accept_ordinary_names() {
+        assert_eq!(category_filename("electrical").unwrap(), "electrical.md");
+        // Legitimate names keep working: spaces, unicode, hyphens, and dots inside a word.
+        assert_eq!(
+            category_filename("Chapitre 3 — café v1.2").unwrap(),
+            "Chapitre 3 — café v1.2.md"
+        );
+        assert_eq!(world_filename("firstfloor").unwrap(), "firstfloor.md");
+        assert!(pack_manifest_path(Path::new("/books/b"), "garden-pack")
+            .unwrap()
+            .ends_with("_packs/garden-pack.json"));
+    }
+
+    #[test]
+    fn filename_builders_reject_path_hostile_names() {
+        for hostile in [
+            "",
+            ".",
+            "..",
+            "../evil",
+            "../../etc/passwd",
+            "sub/evil",
+            "/absolute",
+        ] {
+            assert!(
+                category_filename(hostile).is_err(),
+                "category name {hostile:?} must be rejected"
+            );
+            assert!(
+                world_filename(hostile).is_err(),
+                "world id {hostile:?} must be rejected"
+            );
+            assert!(
+                pack_manifest_path(Path::new("/books/b"), hostile).is_err(),
+                "pack id {hostile:?} must be rejected"
+            );
+        }
     }
 }

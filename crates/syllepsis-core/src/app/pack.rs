@@ -1212,10 +1212,9 @@ mod tests {
         edit_local_body(&target, &note_id, "user's own careful notes");
 
         // Simulate a second device: the manifest never made it here.
-        std::fs::remove_file(crate::storage::layout::pack_manifest_path(
-            &target.root,
-            "garden-pack",
-        ))
+        std::fs::remove_file(
+            crate::storage::layout::pack_manifest_path(&target.root, "garden-pack").unwrap(),
+        )
         .unwrap();
 
         let status = note_import_status(&target, "garden-pack", &note_id).unwrap();
@@ -1243,7 +1242,8 @@ mod tests {
         let options = selected_options(&note_id);
         import_pack(&target, &pack_v1, &options).unwrap();
 
-        let manifest_path = crate::storage::layout::pack_manifest_path(&target.root, "garden-pack");
+        let manifest_path =
+            crate::storage::layout::pack_manifest_path(&target.root, "garden-pack").unwrap();
         std::fs::write(&manifest_path, b"{ not valid json").unwrap();
 
         // Loading degrades to a fresh/default manifest instead of erroring...
@@ -1617,5 +1617,85 @@ mod tests {
         let (_td, target) = book();
         assert!(preview_import(&target, &pack).is_err());
         assert!(import_pack(&target, &pack, &selected_options(&id)).is_err());
+    }
+
+    /// A target book nested one level inside a tempdir, plus the names currently sitting *beside*
+    /// the book root. Any name appearing there after an import is a containment breach.
+    fn nested_target_book() -> (tempfile::TempDir, Book) {
+        let enclosing = tempfile::tempdir().unwrap();
+        let book = Book::create(enclosing.path().join("book"), "Target").unwrap();
+        (enclosing, book)
+    }
+
+    fn sibling_names_of_book_root(enclosing: &tempfile::TempDir) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(enclosing.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn import_rejects_a_pack_note_id_that_escapes_the_book_root() {
+        let (_d, source) = book();
+        let id = add(&source, "Compost", "greens", &["garden"]);
+        let mut pack = build_pack(&source, &spec()).unwrap();
+
+        // Same ulid (so the id still looks structurally plausible), traversing slug.
+        let ulid = NoteId::parse(&id).unwrap().ulid().to_string();
+        let hostile_id = format!("note-../../escaped-{ulid}");
+        pack.notes[0].id = hostile_id.clone();
+
+        let (enclosing, target) = nested_target_book();
+        let error = import_pack(&target, &pack, &selected_options(&hostile_id)).unwrap_err();
+        assert!(
+            matches!(error, CoreError::InvalidId(_)),
+            "expected an invalid-id rejection, got {error:?}"
+        );
+        assert_eq!(
+            sibling_names_of_book_root(&enclosing),
+            vec!["book".to_string()],
+            "the import must not create anything outside the book root"
+        );
+        assert!(target.store.read_all_notes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn import_rejects_a_pack_manifest_id_that_escapes_the_book_root() {
+        let (_d, source) = book();
+        let id = add(&source, "Compost", "greens", &["garden"]);
+        let mut pack = build_pack(&source, &spec()).unwrap();
+        pack.manifest.id = "../../evil".into();
+
+        let (enclosing, target) = nested_target_book();
+        let error = import_pack(&target, &pack, &selected_options(&id)).unwrap_err();
+        assert!(
+            matches!(error, CoreError::InvalidId(_)),
+            "expected an invalid-id rejection, got {error:?}"
+        );
+        assert_eq!(
+            sibling_names_of_book_root(&enclosing),
+            vec!["book".to_string()],
+            "the pack manifest must not be written outside the book root"
+        );
+    }
+
+    #[test]
+    fn import_rejects_a_pack_category_name_that_escapes_the_book_root() {
+        let (_d, source) = book();
+        let id = add(&source, "Compost", "greens", &["garden"]);
+        let mut pack = build_pack(&source, &spec()).unwrap();
+        // The category name travels with the note and is recreated in the target book.
+        pack.notes[0].categories = vec!["../../evil".into()];
+        pack.categories = vec![Category::new("../../evil")];
+
+        let (enclosing, target) = nested_target_book();
+        assert!(import_pack(&target, &pack, &selected_options(&id)).is_err());
+        assert_eq!(
+            sibling_names_of_book_root(&enclosing),
+            vec!["book".to_string()],
+            "a hostile category name must not create a file outside the book root"
+        );
     }
 }

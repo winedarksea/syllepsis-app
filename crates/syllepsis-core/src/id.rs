@@ -12,6 +12,7 @@
 //! The canonical id string lives in a note's frontmatter, never in its path — so a note can
 //! move between sorting subfolders or be renamed externally without losing identity.
 
+use std::path::{Component, Path};
 use std::sync::{LazyLock, Mutex};
 
 use crate::error::{CoreError, CoreResult};
@@ -79,10 +80,15 @@ impl NoteId {
     /// Parse and validate an existing id string. Validation hinges on the trailing ulid: the
     /// type is everything before the first `-`, the ulid is the final 26-char Crockford
     /// segment, and the slug is whatever sits between (it may itself contain hyphens).
+    ///
+    /// Ids from imported packs, remote sync payloads, and plugin/HTTP callers are untrusted and
+    /// become filenames verbatim ([`crate::storage::layout::note_filename`]), so parse-time is the
+    /// single chokepoint where a path-hostile id is rejected.
     pub fn parse(s: &str) -> CoreResult<NoteId> {
         if s.contains(':') {
             return Err(CoreError::InvalidId(format!("contains colon: {s}")));
         }
+        reject_path_hostile_id(s)?;
         let (type_prefix, rest) = s
             .split_once('-')
             .ok_or_else(|| CoreError::InvalidId(format!("missing type prefix: {s}")))?;
@@ -156,6 +162,46 @@ impl From<NoteId> for String {
     fn from(value: NoteId) -> String {
         value.0
     }
+}
+
+/// Reject an id that would escape its book directory once it becomes a `{id}.md` filename.
+///
+/// The whole id string is checked, not just the slug: the type prefix (everything before the first
+/// `-`) is equally attacker-supplied, so `../-note-{ulid}` must fail too. Deliberately narrow so
+/// legitimate hand-written ids keep parsing — unicode, spaces, hyphens, and dots inside a word are
+/// all still fine.
+fn reject_path_hostile_id(s: &str) -> CoreResult<()> {
+    let invalid = |reason: &str| Err(CoreError::InvalidId(format!("{reason}: {s}")));
+    // `/` and `\` are the path separators on the platforms this ships to; either one turns an id
+    // into a multi-component relative path.
+    if s.contains('/') || s.contains('\\') {
+        return invalid("contains a path separator");
+    }
+    // Redundant with the separator ban on Unix, but `Path::components` also catches the
+    // platform-specific spellings (a Windows `C:` drive prefix, a root component).
+    if Path::new(s)
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return invalid("contains a path-traversal component");
+    }
+    // A type prefix or slug of exactly `.`/`..` is filename-safe today (each sits beside a hyphen),
+    // but both are rejected anyway so no downstream code can rebuild a traversal token by splitting
+    // the id on `-` and re-joining the pieces as path segments.
+    let (type_prefix, rest) = s.split_once('-').unwrap_or((s, ""));
+    let slug = rest
+        .rsplit_once('-')
+        .map(|(slug, _ulid)| slug)
+        .unwrap_or("");
+    if is_relative_path_token(type_prefix) || is_relative_path_token(slug) {
+        return invalid("type prefix or slug is a relative-path token");
+    }
+    Ok(())
+}
+
+/// True for the two names that mean "this directory" / "the parent directory".
+fn is_relative_path_token(segment: &str) -> bool {
+    segment == "." || segment == ".."
 }
 
 /// True if `s` is a syntactically valid lowercase Crockford-base32 ULID.
@@ -295,6 +341,43 @@ mod tests {
         assert!(NoteId::parse("note-title-bad").is_err());
         assert!(NoteId::parse("note:title-01jh5k3q2x9y8w7v6t5s4r3q2p").is_err());
         assert!(NoteId::parse("01jh5k3q2x9y8w7v6t5s4r3q2p").is_err()); // no type prefix
+    }
+
+    #[test]
+    fn rejects_path_traversal_in_slug_and_type_prefix() {
+        const ULID: &str = "01jh5k3q2x9y8w7v6t5s4r3q2p";
+        for hostile in [
+            format!("note-../../evil-{ULID}"),
+            format!("note-../-{ULID}"),
+            format!("note-sub/evil-{ULID}"),
+            format!("note-a\\b-{ULID}"),
+            format!("..-note-{ULID}"),
+            format!("note-..-{ULID}"),
+            format!("note-.-{ULID}"),
+            format!("/note-abs-{ULID}"),
+        ] {
+            assert!(
+                NoteId::parse(&hostile).is_err(),
+                "path-hostile id {hostile:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_legitimate_slugs_that_look_unusual() {
+        const ULID: &str = "01jh5k3q2x9y8w7v6t5s4r3q2p";
+        // Unicode, spaces, dots inside a word, and leading dots are all cosmetic-slug-legal.
+        for benign in [
+            format!("note-café-montréal-{ULID}"),
+            format!("note-my note v1.2-{ULID}"),
+            format!("note-..hidden-ish-{ULID}"),
+            format!("note-{ULID}"),
+        ] {
+            assert!(
+                NoteId::parse(&benign).is_ok(),
+                "legitimate id {benign:?} must still parse"
+            );
+        }
     }
 
     #[test]
