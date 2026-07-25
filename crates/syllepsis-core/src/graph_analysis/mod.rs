@@ -233,16 +233,16 @@ impl SemanticGraphCorpus {
             .iter()
             .enumerate()
             .map(|(index, note)| {
-                graph_analysis_node(
+                graph_analysis_node(GraphAnalysisNodeInputs {
                     note,
-                    full_positions[index].0,
-                    full_positions[index].1,
-                    full_labels[index],
-                    full_outliers[index],
-                    self.centroids[index].magnitude() <= f32::EPSILON,
-                    None,
-                    None,
-                )
+                    x: full_positions[index].0,
+                    y: full_positions[index].1,
+                    cluster_id: full_labels[index],
+                    outlier: full_outliers[index],
+                    no_semantic_signal: self.centroids[index].magnitude() <= f32::EPSILON,
+                    timeline_date: None,
+                    timeline_range: None,
+                })
             })
             .collect();
         let outlier_count = full_outliers.iter().filter(|outlier| **outlier).count();
@@ -278,16 +278,16 @@ impl SemanticGraphCorpus {
             .iter()
             .enumerate()
             .map(|(index, note)| {
-                graph_analysis_node(
+                graph_analysis_node(GraphAnalysisNodeInputs {
                     note,
-                    positions[index].0,
-                    positions[index].1,
-                    labels[index],
-                    outliers[index],
-                    self.centroids[index].magnitude() <= f32::EPSILON,
-                    None,
-                    None,
-                )
+                    x: positions[index].0,
+                    y: positions[index].1,
+                    cluster_id: labels[index],
+                    outlier: outliers[index],
+                    no_semantic_signal: self.centroids[index].magnitude() <= f32::EPSILON,
+                    timeline_date: None,
+                    timeline_range: None,
+                })
             })
             .collect();
         let semantic_edges =
@@ -320,16 +320,16 @@ impl SemanticGraphCorpus {
             .iter()
             .enumerate()
             .map(|(index, note)| {
-                graph_analysis_node(
+                graph_analysis_node(GraphAnalysisNodeInputs {
                     note,
-                    0.0,
-                    index as f32,
-                    None,
-                    false,
-                    self.centroids[index].magnitude() <= f32::EPSILON,
-                    None,
-                    None,
-                )
+                    x: 0.0,
+                    y: index as f32,
+                    cluster_id: None,
+                    outlier: false,
+                    no_semantic_signal: self.centroids[index].magnitude() <= f32::EPSILON,
+                    timeline_date: None,
+                    timeline_range: None,
+                })
             })
             .collect();
 
@@ -562,17 +562,17 @@ impl SemanticGraphCorpus {
                     }),
                     _ => None,
                 };
-                graph_analysis_node(
+                graph_analysis_node(GraphAnalysisNodeInputs {
                     note,
-                    xs[index],
-                    ys[index],
-                    labels[index],
-                    false,
+                    x: xs[index],
+                    y: ys[index],
+                    cluster_id: labels[index],
+                    outlier: false,
                     // Reuse the "no signal" flag/styling to mark notes parked in the undated lane.
-                    resolved_ms[index].is_none(),
-                    resolved_dates[index].clone(),
+                    no_semantic_signal: resolved_ms[index].is_none(),
+                    timeline_date: resolved_dates[index].clone(),
                     timeline_range,
-                )
+                })
             })
             .collect();
 
@@ -654,16 +654,33 @@ impl SemanticGraphCorpus {
     }
 }
 
-fn graph_analysis_node(
-    note: &Note,
+/// The per-mode layout results for one note. Every graph mode (semantic, kanban, timeline)
+/// produces the same node shape but derives placement differently, so the varying parts travel
+/// together as named fields instead of a positional argument wall.
+struct GraphAnalysisNodeInputs<'a> {
+    note: &'a Note,
     x: f32,
     y: f32,
     cluster_id: Option<usize>,
     outlier: bool,
+    /// True when the note has no usable embedding (or, on the timeline, no resolvable date) and is
+    /// therefore parked rather than positioned by signal.
     no_semantic_signal: bool,
     timeline_date: Option<GraphTimelineNodeDate>,
     timeline_range: Option<GraphTimelineNodeRange>,
-) -> GraphAnalysisNode {
+}
+
+fn graph_analysis_node(inputs: GraphAnalysisNodeInputs<'_>) -> GraphAnalysisNode {
+    let GraphAnalysisNodeInputs {
+        note,
+        x,
+        y,
+        cluster_id,
+        outlier,
+        no_semantic_signal,
+        timeline_date,
+        timeline_range,
+    } = inputs;
     GraphAnalysisNode {
         id: note.id.to_string(),
         object_type: note.object_type,
